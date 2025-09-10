@@ -11,12 +11,12 @@ struct Coin {
 
 impl Coin {
     fn new(x: i32, y: i32) -> Coin {
-        return Coin {
+        Coin {
             x: x,
             y: y,
             collected: false,
             anim_timer: rnd(30),
-        };
+        }
     }
 
     fn update(&mut self, player: &Player) -> bool {
@@ -34,7 +34,8 @@ impl Coin {
             sfx(1, -1, 0, 0);  // Play collect sound.
             return true;  // Return true when collected
         }
-        return false;
+
+        false
     }
 }
 
@@ -49,7 +50,8 @@ impl Drawable for Coin {
     }
 
     fn get_color(&self) -> i32 {
-        return 10;  // Yellow
+        // Yellow
+        10
     }
 }
 
@@ -64,13 +66,13 @@ struct Powerup {
 
 impl Powerup {
     fn new(x: i32, y: i32) -> Powerup {
-        return Powerup {
+        Powerup {
             x: x,
             y: y,
             collected: false,
             active: false,
             timer: 0,
-        };
+        }
     }
 
     fn check_collection(&mut self, player: &Player) {
@@ -114,6 +116,7 @@ impl Drawable for Powerup {
     }
 
     fn get_color(&self) -> i32 {
-        return 8;  // Red
+        // Red
+        8
     }
 }
