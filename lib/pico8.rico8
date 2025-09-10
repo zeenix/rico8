@@ -1,0 +1,188 @@
+// Pico-8 API wrappers for Rico8
+// Based on the latest Pico-8 API documentation
+
+// Drawing functions
+fn pset(x: i32, y: i32, col: i32) {}
+fn pget(x: i32, y: i32) -> i32 {}
+fn spr(n: i32, x: i32, y: i32, w: i32, h: i32, flip_x: bool, flip_y: bool) {}
+fn map(cel_x: i32, cel_y: i32, sx: i32, sy: i32, cel_w: i32, cel_h: i32, layer: i32) {}
+fn mset(x: i32, y: i32, v: i32) {}
+fn mget(x: i32, y: i32) -> i32 {}
+fn camera(x: i32, y: i32) {}
+fn clip(x: i32, y: i32, w: i32, h: i32) {}
+fn rectfill(x0: i32, y0: i32, x1: i32, y1: i32, col: i32) {}
+fn circfill(x: i32, y: i32, r: i32, col: i32) {}
+fn circ(x: i32, y: i32, r: i32, col: i32) {}
+fn line(x0: i32, y0: i32, x1: i32, y1: i32, col: i32) {}
+fn pal(c0: i32, c1: i32, p: i32) {}
+fn palt(c: i32, t: bool) {}
+fn fillp(p: i32) {}
+fn rect(x0: i32, y0: i32, x1: i32, y1: i32, col: i32) {}
+fn oval(x0: i32, y0: i32, x1: i32, y1: i32, col: i32) {}
+fn ovalfill(x0: i32, y0: i32, x1: i32, y1: i32, col: i32) {}
+
+// Text functions
+fn print(str: String, x: i32, y: i32, col: i32) {}
+fn cursor(x: i32, y: i32, col: i32) {}
+fn color(col: i32) {}
+fn cls(col: i32) {}
+
+// Input functions
+fn btn(i: i32, p: i32) -> bool {}
+fn btnp(i: i32, p: i32) -> bool {}
+
+// Audio functions
+fn sfx(n: i32, channel: i32, offset: i32, length: i32) {}
+fn music(n: i32, fade_len: i32, channel_mask: i32) {}
+
+// Cartridge data functions
+fn cartdata(id: String) {}
+fn dget(addr: i32) -> i32 {}
+fn dset(addr: i32, val: i32) {}
+
+// Memory functions
+fn peek(addr: i32) -> i32 {}
+fn poke(addr: i32, val: i32) {}
+fn peek2(addr: i32) -> i32 {}
+fn poke2(addr: i32, val: i32) {}
+fn peek4(addr: i32) -> i32 {}
+fn poke4(addr: i32, val: i32) {}
+
+// System functions
+fn load(filename: String, breadcrumb: String, param: String) {}
+fn save(filename: String) {}
+fn run() {}
+fn stop() {}
+fn resume() {}
+fn reload(dest_addr: i32, source_addr: i32, len: i32, filename: String) {}
+fn cstore(dest_addr: i32, source_addr: i32, len: i32, filename: String) {}
+fn rnd(x: i32) -> f32 {}
+fn srand(x: i32) {}
+fn sgn(x: f32) -> i32 {}
+fn mid(x: f32, y: f32, z: f32) -> f32 {}
+fn min(x: f32, y: f32) -> f32 {}
+fn max(x: f32, y: f32) -> f32 {}
+fn flr(x: f32) -> i32 {}
+fn cos(x: f32) -> f32 {}
+fn sin(x: f32) -> f32 {}
+fn atan2(dx: f32, dy: f32) -> f32 {}
+fn abs(x: f32) -> f32 {}
+fn sqrt(x: f32) -> f32 {}
+fn sub(str: String, from: i32, to: i32) -> String {}
+fn ord(str: String, index: i32) -> i32 {}
+fn chr(n: i32) -> String {}
+fn tostr(val: i32, hex: bool) -> String {}
+fn tonum(str: String) -> f32 {}
+
+// Tables/arrays
+fn add(arr: Array, val: i32, index: i32) {}
+fn del(arr: Array, val: i32) {}
+fn delitem(arr: Array, index: i32) {}
+fn count(arr: Array) -> i32 {}
+fn all(arr: Array) -> Iterator {}
+fn foreach(arr: Array, func: Function) {}
+
+// Metatables
+fn setmetatable(t: Table, mt: Table) {}
+fn getmetatable(t: Table) -> Table {}
+fn rawget(t: Table, k: String) -> i32 {}
+fn rawset(t: Table, k: String, v: i32) {}
+fn rawlen(t: Table) -> i32 {}
+fn rawequal(a: i32, b: i32) -> bool {}
+fn next(t: Table, k: String) -> (String, i32) {}
+fn pairs(t: Table) -> Iterator {}
+fn ipairs(t: Table) -> Iterator {}
+
+// Coroutines
+fn cocreate(func: Function) -> Coroutine {}
+fn coresume(co: Coroutine) -> bool {}
+fn costatus(co: Coroutine) -> String {}
+fn yield() {}
+
+// Menu functions
+fn menuitem(index: i32, label: String, callback: Function) {}
+fn cartmenu(index: i32) {}
+
+// Strings
+fn split(str: String, separator: String, convert_numbers: bool) -> Array {}
+
+// Extended palette functions
+fn pal(palette: Array, p: i32) {}
+fn palt() {}
+fn clip() {}
+fn camera() {}
+fn print(str: String, x: i32, y: i32) {}
+
+// Time functions
+fn time() -> f32 {}
+fn stat(n: i32) -> i32 {}
+
+// Memory addresses
+const DRAW_PALETTE_START: i32 = 0x5F00;
+const SCREEN_PALETTE_START: i32 = 0x5F10;
+const CLIP_LEFT: i32 = 0x5F20;
+const CLIP_TOP: i32 = 0x5F21;
+const CLIP_RIGHT: i32 = 0x5F22;
+const CLIP_BOTTOM: i32 = 0x5F23;
+const DRAW_COLOR: i32 = 0x5F25;
+const CURSOR_X: i32 = 0x5F26;
+const CURSOR_Y: i32 = 0x5F27;
+const CAMERA_X: i32 = 0x5F28;
+const CAMERA_Y: i32 = 0x5F2A;
+const DRAW_MODE: i32 = 0x5F2C;
+const DEV_MODE: i32 = 0x5F2D;
+const PALETTE_REMAP: i32 = 0x5F2E;
+const POKE_PAUSE: i32 = 0x5F30;
+const SUPPRESS_MENU: i32 = 0x5F31;
+const LOCK_MOUSE: i32 = 0x5F32;
+const FILLP_PATTERN: i32 = 0x5F33;
+const FILLP_SECONDARY: i32 = 0x5F35;
+
+// Sprite flags
+const FLAG_0: i32 = 0x01;
+const FLAG_1: i32 = 0x02;
+const FLAG_2: i32 = 0x04;
+const FLAG_3: i32 = 0x08;
+const FLAG_4: i32 = 0x10;
+const FLAG_5: i32 = 0x20;
+const FLAG_6: i32 = 0x40;
+const FLAG_7: i32 = 0x80;
+
+// Colors
+const BLACK: i32 = 0;
+const DARK_BLUE: i32 = 1;
+const DARK_PURPLE: i32 = 2;
+const DARK_GREEN: i32 = 3;
+const BROWN: i32 = 4;
+const DARK_GRAY: i32 = 5;
+const LIGHT_GRAY: i32 = 6;
+const WHITE: i32 = 7;
+const RED: i32 = 8;
+const ORANGE: i32 = 9;
+const YELLOW: i32 = 10;
+const GREEN: i32 = 11;
+const BLUE: i32 = 12;
+const INDIGO: i32 = 13;
+const PINK: i32 = 14;
+const PEACH: i32 = 15;
+
+// Button constants
+const BTN_LEFT: i32 = 0;
+const BTN_RIGHT: i32 = 1;
+const BTN_UP: i32 = 2;
+const BTN_DOWN: i32 = 3;
+const BTN_O: i32 = 4;
+const BTN_X: i32 = 5;
+
+// Special functions that need to be defined by the game
+fn _init() {}
+fn _update() {}
+fn _update60() {}
+fn _draw() {}
+
+// Type aliases for clarity
+struct Array {}
+struct Table {}
+struct Function {}
+struct Coroutine {}
+struct Iterator {}

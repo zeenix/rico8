@@ -1,0 +1,285 @@
+// Simple platformer game in Rico8
+// Demonstrates Pico-8 API usage with Rico8's type safety
+// All Pico-8 API functions are automatically available
+
+struct Player {
+    x: f32,
+    y: f32,
+    dx: f32,
+    dy: f32,
+    flip: bool,
+}
+
+impl Player {
+    fn new() -> Player {
+        return Player {
+            x: 64.0,
+            y: 64.0,
+            dx: 0.0,
+            dy: 0.0,
+            flip: false,
+        };
+    }
+    
+    fn update(&mut self) {
+        // Handle input - simple 8-direction movement.
+        if btn(0, 0) {  // Left.
+            self.dx = -2.0;
+            self.flip = true;
+        } else if btn(1, 0) {  // Right.
+            self.dx = 2.0;
+            self.flip = false;
+        } else {
+            self.dx = self.dx * 0.8;  // Friction.
+        }
+        
+        if btn(2, 0) {  // Up.
+            self.dy = -2.0;
+        } else if btn(3, 0) {  // Down.
+            self.dy = 2.0;
+        } else {
+            self.dy = self.dy * 0.8;  // Friction.
+        }
+        
+        // Move.
+        self.x = self.x + self.dx;
+        self.y = self.y + self.dy;
+        
+        // Keep in bounds.
+        if self.x < 4.0 {
+            self.x = 4.0;
+        }
+        if self.x > 120.0 {
+            self.x = 120.0;
+        }
+        if self.y < 4.0 {
+            self.y = 4.0;
+        }
+        if self.y > 120.0 {
+            self.y = 120.0;
+        }
+    }
+    
+    fn draw(&self) {
+        // Draw a simple square for the player.
+        rectfill(flr(self.x) - 3, flr(self.y) - 3, flr(self.x) + 3, flr(self.y) + 3, 12);
+    }
+}
+
+struct Coin {
+    x: i32,
+    y: i32,
+    collected: bool,
+    anim_timer: i32,
+}
+
+impl Coin {
+    fn new(x: i32, y: i32) -> Coin {
+        return Coin {
+            x: x,
+            y: y,
+            collected: false,
+            anim_timer: rnd(30),
+        };
+    }
+    
+    fn update(&mut self, player: &Player) {
+        if self.collected {
+            return;
+        }
+        
+        self.anim_timer = self.anim_timer + 1;
+        
+        // Check collection.
+        let dx = self.x - flr(player.x);
+        let dy = self.y - flr(player.y);
+        if abs(dx) < 6 && abs(dy) < 6 {
+            self.collected = true;
+            sfx(1, -1, 0, 0);  // Play collect sound.
+            game.score = game.score + 10;
+        }
+    }
+    
+    fn draw(&self) {
+        if !self.collected {
+            // Draw a simple circle for coins.
+            circfill(self.x, self.y, 3, 10);
+            circ(self.x, self.y, 3, 9);
+        }
+    }
+}
+
+
+enum GameState {
+    Title,
+    Playing,
+    GameOver,
+    Victory,
+}
+
+struct Game {
+    state: GameState,
+    player: Player,
+    coins: Array<Coin>,
+    score: i32,
+    time: i32,
+}
+
+// Global game instance.
+let mut game: Game;
+
+fn _init() {
+    // Initialize the game.
+    game = Game {
+        state: GameState::Title,
+        player: Player::new(),
+        coins: [],
+        score: 0,
+        time: 0,
+    };
+    
+    // Setup level.
+    setup_level();
+    
+    // Initialize music.
+    music(0, 0, 0);
+}
+
+fn setup_level() {
+    // Clear coins.
+    game.coins = [];
+    
+    // Place random coins around the screen.
+    for i in 0..10 {
+        let x = 10 + (i * 10) % 100;
+        let y = 20 + (i * 7) % 80;
+        add(game.coins, Coin::new(x, y), None);
+    }
+}
+
+fn _update() {
+    match game.state {
+        GameState::Title => {
+            if btnp(4, 0) || btnp(5, 0) {
+                game.state = GameState::Playing;
+                game.score = 0;
+                game.time = 0;
+                game.player = Player::new();
+                setup_level();
+            }
+        },
+        GameState::Playing => {
+            game.time = game.time + 1;
+            
+            // Update player.
+            game.player.update();
+            
+            // Update coins.
+            for coin in game.coins {
+                coin.update(&game.player);
+            }
+            
+            
+            // Check victory.
+            let mut all_collected = true;
+            let mut has_coins = false;
+            for coin in game.coins {
+                has_coins = true;
+                if !coin.collected {
+                    all_collected = false;
+                }
+            }
+            
+            if all_collected && has_coins {
+                game.state = GameState::Victory;
+                music(-1, 0, 0);
+                sfx(4, -1, 0, 0);
+            }
+        },
+        GameState::GameOver => {
+            if btnp(4, 0) || btnp(5, 0) {
+                game.state = GameState::Title;
+                music(0, 0, 0);
+            }
+        },
+        GameState::Victory => {
+            if btnp(4, 0) || btnp(5, 0) {
+                game.state = GameState::Title;
+                music(0, 0, 0);
+            }
+        },
+    }
+}
+
+fn _draw() {
+    cls(1);  // Clear with dark blue.
+    
+    match game.state {
+        GameState::Title => {
+            // Title screen.
+            print("RICO8 PLATFORMER", 24, 40, 7);
+            print("COLLECT ALL COINS!", 20, 50, 10);
+            print("ARROW KEYS TO MOVE", 20, 64, 6);
+            print("O BUTTON TO JUMP", 24, 72, 6);
+            print("PRESS O TO START", 24, 88, 11);
+        },
+        GameState::Playing => {
+            // Clear screen with dark blue.
+            cls(1);
+            
+            // Draw coins.
+            for coin in game.coins {
+                coin.draw();
+            }
+            
+            
+            // Draw player.
+            game.player.draw();
+            
+            // Draw HUD.
+            rectfill(0, 0, 127, 7, 0);
+            print("SCORE: " + tostr(game.score, false), 2, 1, 7);
+            print("TIME: " + tostr(game.time / 30, false), 80, 1, 7);
+        },
+        GameState::GameOver => {
+            rectfill(20, 48, 107, 80, 0);
+            rect(20, 48, 107, 80, 8);
+            print("GAME OVER", 44, 56, 8);
+            print("SCORE: " + tostr(game.score, false), 36, 66, 7);
+            print("PRESS O TO RETRY", 24, 96, 11);
+        },
+        GameState::Victory => {
+            rectfill(20, 48, 107, 80, 0);
+            rect(20, 48, 107, 80, 11);
+            print("VICTORY!", 48, 56, 11);
+            print("SCORE: " + tostr(game.score, false), 36, 66, 7);
+            print("TIME: " + tostr(game.time / 30, false) + "s", 40, 74, 7);
+            print("PRESS O TO MENU", 28, 96, 10);
+        },
+    }
+}
+
+// Helper math functions that would be in the Pico-8 wrapper.
+fn abs(x: f32) -> f32 {
+    if x < 0.0 {
+        return -x;
+    }
+    return x;
+}
+
+fn abs(x: i32) -> i32 {
+    if x < 0 {
+        return -x;
+    }
+    return x;
+}
+
+fn flr(x: f32) -> i32 {
+    // Floor function - converts float to int.
+    return x as i32;
+}
+
+fn rnd(max: i32) -> i32 {
+    // Random number (simplified).
+    return 0;  // Would use Pico-8's rnd.
+}
