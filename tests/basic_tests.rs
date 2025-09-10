@@ -60,7 +60,7 @@ fn test_impl() {
         struct Player {
             x: i32,
         }
-        
+
         impl Player {
             fn new() -> Player {
                 Player { x: 0 }
@@ -170,7 +170,7 @@ fn test_for_loop() {
 fn test_match() {
     let source = r#"
         enum State { Ready, Running }
-        
+
         fn test(s: State) {
             match s {
                 State::Ready => print("ready"),
@@ -239,13 +239,13 @@ fn test_pico8_functions() {
         fn _init() {
             cls(0);
         }
-        
+
         fn _update() {
             if btn(0) {
                 x = x - 1;
             }
         }
-        
+
         fn _draw() {
             circfill(64, 64, 10, 7);
         }
