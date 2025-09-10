@@ -13,42 +13,42 @@ function Player:new()
 end
 function Player:update()
   if btn(0, 0)   then
-    self.dx = -2    
-    self.flip = true    
+    self.dx = -2
+    self.flip = true
   else
     if btn(1, 0)     then
-      self.dx = 2      
-      self.flip = false      
+      self.dx = 2
+      self.flip = false
     else
-      self.dx = (self.dx * 0.8)      
+      self.dx = (self.dx * 0.8)
     end
   end
   if btn(2, 0)   then
-    self.dy = -2    
+    self.dy = -2
   else
     if btn(3, 0)     then
-      self.dy = 2      
+      self.dy = 2
     else
-      self.dy = (self.dy * 0.8)      
+      self.dy = (self.dy * 0.8)
     end
   end
-  self.x = (self.x + self.dx)  
-  self.y = (self.y + self.dy)  
+  self.x = (self.x + self.dx)
+  self.y = (self.y + self.dy)
   if (self.x < 4)   then
-    self.x = 4    
+    self.x = 4
   end
   if (self.x > 120)   then
-    self.x = 120    
+    self.x = 120
   end
   if (self.y < 4)   then
-    self.y = 4    
+    self.y = 4
   end
   if (self.y > 120)   then
-    self.y = 120    
+    self.y = 120
   end
 end
 function Player:draw()
-  rectfill((flr(self.x) - 3), (flr(self.y) - 3), (flr(self.x) + 3), (flr(self.y) + 3), 12)  
+  rectfill((flr(self.x) - 3), (flr(self.y) - 3), (flr(self.x) + 3), (flr(self.y) + 3), 12)
 end
 
 -- struct Coin
@@ -63,21 +63,21 @@ function Coin:new(x, y)
 end
 function Coin:update(player)
   if self.collected   then
-    return    
+    return
   end
-  self.anim_timer = (self.anim_timer + 1)  
-  local dx = (self.x - flr(player.x))  
-  local dy = (self.y - flr(player.y))  
+  self.anim_timer = (self.anim_timer + 1)
+  local dx = (self.x - flr(player.x))
+  local dy = (self.y - flr(player.y))
   if ((abs(dx) < 6) and (abs(dy) < 6))   then
-    self.collected = true    
-    sfx(1, -1, 0, 0)    
-    game.score = (game.score + 10)    
+    self.collected = true
+    sfx(1, -1, 0, 0)
+    game.score = (game.score + 10)
   end
 end
 function Coin:draw()
   if not self.collected   then
-    circfill(self.x, self.y, 3, 10)    
-    circ(self.x, self.y, 3, 9)    
+    circfill(self.x, self.y, 3, 10)
+    circ(self.x, self.y, 3, 9)
   end
 end
 
@@ -101,131 +101,131 @@ Game = {}
 game = nil
 
 function _init()
-  game = {state = Title, player = Player:new(), coins = {}, score = 0, time = 0}  
-  setup_level()  
-  music(0, 0, 0)  
+  game = {state = Title, player = Player:new(), coins = {}, score = 0, time = 0}
+  setup_level()
+  music(0, 0, 0)
 end
 
 function setup_level()
-  game.coins = {}  
+  game.coins = {}
   for i=0,10   do
-    local x = (10 + ((i * 10) % 100))    
-    local y = (20 + ((i * 7) % 80))    
-    add(game.coins, Coin:new(x, y))    
+    local x = (10 + ((i * 10) % 100))
+    local y = (20 + ((i * 7) % 80))
+    add(game.coins, Coin:new(x, y))
   end
 end
 
 function _update()
-  local __match = game.state  
+  local __match = game.state
   if __match.tag == "Title"   then
         (function()
       if (btnp(4, 0) or btnp(5, 0))       then
-        game.state = Playing        
-        game.score = 0        
-        game.time = 0        
-        game.player = Player:new()        
-        setup_level()        
+        game.state = Playing
+        game.score = 0
+        game.time = 0
+        game.player = Player:new()
+        setup_level()
       end
-    end)()    
+    end)()
   elseif __match.tag == "Playing"   then
         (function()
-      game.time = (game.time + 1)      
-      game.player:update()      
+      game.time = (game.time + 1)
+      game.player:update()
       for _,coin in pairs(game.coins)       do
-        coin:update(game.player)        
+        coin:update(game.player)
       end
-      local all_collected = true      
-      local has_coins = false      
+      local all_collected = true
+      local has_coins = false
       for _,coin in pairs(game.coins)       do
-        has_coins = true        
+        has_coins = true
         if not coin.collected         then
-          all_collected = false          
+          all_collected = false
         end
       end
       if (all_collected and has_coins)       then
-        game.state = Victory        
-        music(-1, 0, 0)        
-        sfx(4, -1, 0, 0)        
+        game.state = Victory
+        music(-1, 0, 0)
+        sfx(4, -1, 0, 0)
       end
-    end)()    
+    end)()
   elseif __match.tag == "GameOver"   then
         (function()
       if (btnp(4, 0) or btnp(5, 0))       then
-        game.state = Title        
-        music(0, 0, 0)        
+        game.state = Title
+        music(0, 0, 0)
       end
-    end)()    
+    end)()
   elseif __match.tag == "Victory"   then
         (function()
       if (btnp(4, 0) or btnp(5, 0))       then
-        game.state = Title        
-        music(0, 0, 0)        
+        game.state = Title
+        music(0, 0, 0)
       end
-    end)()    
+    end)()
   end
 end
 
 function _draw()
-  cls(1)  
-  local __match = game.state  
+  cls(1)
+  local __match = game.state
   if __match.tag == "Title"   then
         (function()
-      print("RICO8 PLATFORMER", 24, 40, 7)      
-      print("COLLECT ALL COINS!", 20, 50, 10)      
-      print("ARROW KEYS TO MOVE", 20, 64, 6)      
-      print("O BUTTON TO JUMP", 24, 72, 6)      
-      print("PRESS O TO START", 24, 88, 11)      
-    end)()    
+      print("RICO8 PLATFORMER", 24, 40, 7)
+      print("COLLECT ALL COINS!", 20, 50, 10)
+      print("ARROW KEYS TO MOVE", 20, 64, 6)
+      print("O BUTTON TO JUMP", 24, 72, 6)
+      print("PRESS O TO START", 24, 88, 11)
+    end)()
   elseif __match.tag == "Playing"   then
         (function()
-      cls(1)      
+      cls(1)
       for _,coin in pairs(game.coins)       do
-        coin:draw()        
+        coin:draw()
       end
-      game.player:draw()      
-      rectfill(0, 0, 127, 7, 0)      
-      print(("SCORE: " .. tostr(game.score, false)), 2, 1, 7)      
-      print(("TIME: " .. tostr((game.time / 30), false)), 80, 1, 7)      
-    end)()    
+      game.player:draw()
+      rectfill(0, 0, 127, 7, 0)
+      print(("SCORE: " .. tostr(game.score, false)), 2, 1, 7)
+      print((("TIME: " .. tostr((game.time / 30), false)) .. "s"), 80, 1, 7)
+    end)()
   elseif __match.tag == "GameOver"   then
         (function()
-      rectfill(20, 48, 107, 80, 0)      
-      rect(20, 48, 107, 80, 8)      
-      print("GAME OVER", 44, 56, 8)      
-      print(("SCORE: " .. tostr(game.score, false)), 36, 66, 7)      
-      print("PRESS O TO RETRY", 24, 96, 11)      
-    end)()    
+      rectfill(20, 48, 107, 80, 0)
+      rect(20, 48, 107, 80, 8)
+      print("GAME OVER", 44, 56, 8)
+      print(("SCORE: " .. tostr(game.score, false)), 36, 66, 7)
+      print("PRESS O TO RETRY", 24, 96, 11)
+    end)()
   elseif __match.tag == "Victory"   then
         (function()
-      rectfill(20, 48, 107, 80, 0)      
-      rect(20, 48, 107, 80, 11)      
-      print("VICTORY!", 48, 56, 11)      
-      print(("SCORE: " .. tostr(game.score, false)), 36, 66, 7)      
-      print((("TIME: " .. tostr((game.time / 30), false)) .. "s"), 40, 74, 7)      
-      print("PRESS O TO MENU", 28, 96, 10)      
-    end)()    
+      rectfill(20, 48, 107, 80, 0)
+      rect(20, 48, 107, 80, 11)
+      print("VICTORY!", 48, 56, 11)
+      print(("SCORE: " .. tostr(game.score, false)), 36, 66, 7)
+      print((("TIME: " .. tostr((game.time / 30), false)) .. "s"), 40, 74, 7)
+      print("PRESS O TO MENU", 28, 96, 10)
+    end)()
   end
 end
 
 function abs(x)
   if (x < 0)   then
-    return -x    
+    return -x
   end
-  return x  
+  return x
 end
 
 function abs(x)
   if (x < 0)   then
-    return -x    
+    return -x
   end
-  return x  
+  return x
 end
 
 function flr(x)
-  return x  
+  return x
 end
 
 function rnd(max)
-  return 0  
+  return 0
 end
 

@@ -36,8 +36,10 @@ impl Generator {
     }
 
     fn write_line(&mut self, line: &str) {
-        self.write_indent();
-        self.output.push_str(line);
+        if !line.is_empty() {
+            self.write_indent();
+            self.output.push_str(line);
+        }
         self.output.push('\n');
     }
 
