@@ -2,6 +2,17 @@
 // Demonstrates Pico-8 API usage with Rico8's type safety
 // All Pico-8 API functions are automatically available
 
+// Define a trait for objects that can be drawn
+trait Drawable {
+    fn draw(&self);
+    fn get_color(&self) -> i32;
+}
+
+// Define a trait for objects that can be updated
+trait Updatable {
+    fn update(&mut self);
+}
+
 struct Player {
     x: f32,
     y: f32,
@@ -20,7 +31,9 @@ impl Player {
             flip: false,
         };
     }
-    
+}
+
+impl Updatable for Player {
     fn update(&mut self) {
         // Handle input - simple 8-direction movement.
         if btn(0, 0) {  // Left.
@@ -32,7 +45,7 @@ impl Player {
         } else {
             self.dx = self.dx * 0.8;  // Friction.
         }
-        
+
         if btn(2, 0) {  // Up.
             self.dy = -2.0;
         } else if btn(3, 0) {  // Down.
@@ -40,11 +53,11 @@ impl Player {
         } else {
             self.dy = self.dy * 0.8;  // Friction.
         }
-        
+
         // Move.
         self.x = self.x + self.dx;
         self.y = self.y + self.dy;
-        
+
         // Keep in bounds.
         if self.x < 4.0 {
             self.x = 4.0;
@@ -59,10 +72,17 @@ impl Player {
             self.y = 120.0;
         }
     }
-    
+}
+
+impl Drawable for Player {
     fn draw(&self) {
         // Draw a simple square for the player.
-        rectfill(flr(self.x) - 3, flr(self.y) - 3, flr(self.x) + 3, flr(self.y) + 3, 12);
+        let color = self.get_color();
+        rectfill(flr(self.x) - 3, flr(self.y) - 3, flr(self.x) + 3, flr(self.y) + 3, color);
+    }
+
+    fn get_color(&self) -> i32 {
+        return 12;  // Light blue
     }
 }
 
@@ -82,14 +102,14 @@ impl Coin {
             anim_timer: rnd(30),
         };
     }
-    
+
     fn update(&mut self, player: &Player) {
         if self.collected {
             return;
         }
-        
+
         self.anim_timer = self.anim_timer + 1;
-        
+
         // Check collection.
         let dx = self.x - flr(player.x);
         let dy = self.y - flr(player.y);
@@ -99,16 +119,89 @@ impl Coin {
             game.score = game.score + 10;
         }
     }
-    
+
+}
+
+impl Drawable for Coin {
     fn draw(&self) {
         if !self.collected {
             // Draw a simple circle for coins.
-            circfill(self.x, self.y, 3, 10);
+            let color = self.get_color();
+            circfill(self.x, self.y, 3, color);
             circ(self.x, self.y, 3, 9);
+        }
+    }
+
+    fn get_color(&self) -> i32 {
+        return 10;  // Yellow
+    }
+}
+
+
+// Powerup that doubles the score
+struct Powerup {
+    x: i32,
+    y: i32,
+    collected: bool,
+    active: bool,
+    timer: i32,
+}
+
+impl Powerup {
+    fn new(x: i32, y: i32) -> Powerup {
+        return Powerup {
+            x: x,
+            y: y,
+            collected: false,
+            active: false,
+            timer: 0,
+        };
+    }
+
+    fn check_collection(&mut self, player: &Player) {
+        if self.collected {
+            return;
+        }
+
+        let dx = self.x - flr(player.x);
+        let dy = self.y - flr(player.y);
+        if abs(dx) < 8 && abs(dy) < 8 {
+            self.collected = true;
+            self.active = true;
+            self.timer = 300;  // 10 seconds at 30 FPS
+            sfx(2, -1, 0, 0);
         }
     }
 }
 
+impl Updatable for Powerup {
+    fn update(&mut self) {
+        if self.active && self.timer > 0 {
+            self.timer = self.timer - 1;
+            if self.timer == 0 {
+                self.active = false;
+            }
+        }
+    }
+}
+
+impl Drawable for Powerup {
+    fn draw(&self) {
+        if !self.collected {
+            let color = self.get_color();
+            // Draw a star shape
+            circfill(self.x, self.y, 4, color);
+            pset(self.x - 6, self.y, color);
+            pset(self.x + 6, self.y, color);
+            pset(self.x, self.y - 6, color);
+            pset(self.x, self.y + 6, color);
+        }
+    }
+
+    fn get_color(&self) -> i32 {
+        return 8;  // Red
+    }
+}
 
 enum GameState {
     Title,
@@ -121,6 +214,7 @@ struct Game {
     state: GameState,
     player: Player,
     coins: Array<Coin>,
+    powerup: Powerup,
     score: i32,
     time: i32,
 }
@@ -134,13 +228,14 @@ fn _init() {
         state: GameState::Title,
         player: Player::new(),
         coins: [],
+        powerup: Powerup::new(60, 60),
         score: 0,
         time: 0,
     };
-    
+
     // Setup level.
     setup_level();
-    
+
     // Initialize music.
     music(0, 0, 0);
 }
@@ -148,13 +243,16 @@ fn _init() {
 fn setup_level() {
     // Clear coins.
     game.coins = [];
-    
+
     // Place random coins around the screen.
     for i in 0..10 {
         let x = 10 + (i * 10) % 100;
         let y = 20 + (i * 7) % 80;
         add(game.coins, Coin::new(x, y), None);
     }
+
+    // Reset powerup
+    game.powerup = Powerup::new(60, 60);
 }
 
 fn _update() {
@@ -170,16 +268,26 @@ fn _update() {
         },
         GameState::Playing => {
             game.time = game.time + 1;
-            
-            // Update player.
+
+            // Update player using trait method.
             game.player.update();
-            
-            // Update coins.
+
+            // Update powerup using trait method.
+            game.powerup.update();
+
+            // Check powerup collection.
+            game.powerup.check_collection(&game.player);
+
+            // Update coins and apply score multiplier.
             for coin in game.coins {
+                let old_score = game.score;
                 coin.update(&game.player);
+                // Double points if powerup is active
+                if game.powerup.active && game.score > old_score {
+                    game.score = game.score + (game.score - old_score);
+                }
             }
-            
-            
+
             // Check victory.
             let mut all_collected = true;
             let mut has_coins = false;
@@ -189,7 +297,7 @@ fn _update() {
                     all_collected = false;
                 }
             }
-            
+
             if all_collected && has_coins {
                 game.state = GameState::Victory;
                 music(-1, 0, 0);
@@ -213,7 +321,7 @@ fn _update() {
 
 fn _draw() {
     cls(1);  // Clear with dark blue.
-    
+
     match game.state {
         GameState::Title => {
             // Title screen.
@@ -226,20 +334,27 @@ fn _draw() {
         GameState::Playing => {
             // Clear screen with dark blue.
             cls(1);
-            
-            // Draw coins.
+
+            // Draw coins using trait method.
             for coin in game.coins {
                 coin.draw();
             }
-            
-            
-            // Draw player.
+
+            // Draw powerup using trait method.
+            game.powerup.draw();
+
+            // Draw player using trait method.
             game.player.draw();
-            
+
             // Draw HUD.
             rectfill(0, 0, 127, 7, 0);
             print("SCORE: " + tostr(game.score, false), 2, 1, 7);
             print("TIME: " + tostr(flr(game.time / 30), false) + "s", 80, 1, 7);
+
+            // Show powerup status.
+            if game.powerup.active {
+                print("2X!", 60, 1, 8);
+            }
         },
         GameState::GameOver => {
             rectfill(20, 48, 107, 80, 0);
