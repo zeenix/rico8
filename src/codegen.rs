@@ -201,13 +201,27 @@ impl Generator {
 
             // If this is a new() method, we need to set the metatable
             if method.name == "new" {
-                // Validate that new() has a return statement
-                let has_return = method
-                    .body
-                    .statements
-                    .iter()
-                    .any(|stmt| matches!(stmt, Statement::Return(Some(_))));
-                if !has_return {
+                // Check if there's an explicit return or implicit return (last expression)
+                let return_expr = method.body.statements.iter().find_map(|stmt| {
+                    if let Statement::Return(Some(expr)) = stmt {
+                        Some(expr)
+                    } else {
+                        None
+                    }
+                });
+
+                let implicit_return = if return_expr.is_none() && !method.body.statements.is_empty()
+                {
+                    // Check if last statement is an expression that could be a return
+                    match method.body.statements.last() {
+                        Some(Statement::Expr(expr)) => Some(expr),
+                        _ => None,
+                    }
+                } else {
+                    None
+                };
+
+                if return_expr.is_none() && implicit_return.is_none() {
                     return Err(CodegenError::InvalidStructure(format!(
                         "Constructor '{}::new' must return a value",
                         target_name
@@ -216,13 +230,22 @@ impl Generator {
 
                 // Generate the body but capture any return statements
                 self.write_line("  local obj");
-                for stmt in &method.body.statements {
+                let num_stmts = method.body.statements.len();
+                for (i, stmt) in method.body.statements.iter().enumerate() {
                     if let Statement::Return(Some(expr)) = stmt {
-                        // Instead of returning directly, assign to obj
+                        // Explicit return - assign to obj
                         self.write_indent();
                         self.write("  obj = ");
                         self.generate_expr(expr)?;
                         self.write_line("");
+                    } else if i == num_stmts - 1 && implicit_return.is_some() {
+                        // Last statement is implicit return
+                        if let Statement::Expr(expr) = stmt {
+                            self.write_indent();
+                            self.write("  obj = ");
+                            self.generate_expr(expr)?;
+                            self.write_line("");
+                        }
                     } else {
                         self.generate_statement(stmt)?;
                     }

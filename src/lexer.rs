@@ -143,6 +143,32 @@ impl Lexer {
 
     fn read_number(&mut self) -> Result<Token, LexerError> {
         let start_pos = self.position;
+
+        // Check for hexadecimal prefix
+        if self.current == Some('0') && self.peek() == Some('x') {
+            self.advance(); // consume '0'
+            self.advance(); // consume 'x'
+
+            let mut hex_str = String::new();
+            while let Some(ch) = self.current {
+                if ch.is_ascii_hexdigit() {
+                    hex_str.push(ch);
+                    self.advance();
+                } else {
+                    break;
+                }
+            }
+
+            if hex_str.is_empty() {
+                return Err(LexerError::InvalidNumber(start_pos));
+            }
+
+            return i32::from_str_radix(&hex_str, 16)
+                .map(Token::IntLiteral)
+                .map_err(|_| LexerError::InvalidNumber(start_pos));
+        }
+
+        // Regular decimal number
         let mut num_str = String::new();
         let mut is_float = false;
 
@@ -451,4 +477,195 @@ pub fn tokenize(input: &str) -> Result<Vec<Token>, LexerError> {
     }
 
     Ok(tokens)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_keywords() {
+        let input =
+            "struct enum trait impl fn let const mut if else while for in match return self use";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::Struct);
+        assert_eq!(tokens[1], Token::Enum);
+        assert_eq!(tokens[2], Token::Trait);
+        assert_eq!(tokens[3], Token::Impl);
+        assert_eq!(tokens[4], Token::Fn);
+        assert_eq!(tokens[5], Token::Let);
+        assert_eq!(tokens[6], Token::Const);
+        assert_eq!(tokens[7], Token::Mut);
+        assert_eq!(tokens[8], Token::If);
+        assert_eq!(tokens[9], Token::Else);
+        assert_eq!(tokens[10], Token::While);
+        assert_eq!(tokens[11], Token::For);
+        assert_eq!(tokens[12], Token::In);
+        assert_eq!(tokens[13], Token::Match);
+        assert_eq!(tokens[14], Token::Return);
+        assert_eq!(tokens[15], Token::Self_);
+        assert_eq!(tokens[16], Token::Use);
+    }
+
+    #[test]
+    fn test_identifiers() {
+        let input = "foo bar_baz _test test123";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::Ident("foo".to_string()));
+        assert_eq!(tokens[1], Token::Ident("bar_baz".to_string()));
+        assert_eq!(tokens[2], Token::Ident("_test".to_string()));
+        assert_eq!(tokens[3], Token::Ident("test123".to_string()));
+    }
+
+    #[test]
+    fn test_numbers() {
+        let input = "42 3.14 0 999";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::IntLiteral(42));
+        assert_eq!(tokens[1], Token::FloatLiteral(3.14));
+        assert_eq!(tokens[2], Token::IntLiteral(0));
+        assert_eq!(tokens[3], Token::IntLiteral(999));
+    }
+
+    #[test]
+    fn test_strings() {
+        let input = r#""hello" "world\n" "escaped\"quote""#;
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::StringLiteral("hello".to_string()));
+        assert_eq!(tokens[1], Token::StringLiteral("world\n".to_string()));
+        assert_eq!(
+            tokens[2],
+            Token::StringLiteral("escaped\"quote".to_string())
+        );
+    }
+
+    #[test]
+    fn test_chars() {
+        let input = "'a' '\\n' '\\''";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::CharLiteral('a'));
+        assert_eq!(tokens[1], Token::CharLiteral('\n'));
+        assert_eq!(tokens[2], Token::CharLiteral('\''));
+    }
+
+    #[test]
+    fn test_operators() {
+        let input = "+ - * / % & | ^ ~ ! && || == != < <= > >= << >> = -> =>";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::Plus);
+        assert_eq!(tokens[1], Token::Minus);
+        assert_eq!(tokens[2], Token::Star);
+        assert_eq!(tokens[3], Token::Slash);
+        assert_eq!(tokens[4], Token::Percent);
+        assert_eq!(tokens[5], Token::Ampersand);
+        assert_eq!(tokens[6], Token::Pipe);
+        assert_eq!(tokens[7], Token::Caret);
+        assert_eq!(tokens[8], Token::Tilde);
+        assert_eq!(tokens[9], Token::Bang);
+        assert_eq!(tokens[10], Token::AndAnd);
+        assert_eq!(tokens[11], Token::OrOr);
+        assert_eq!(tokens[12], Token::EqEq);
+        assert_eq!(tokens[13], Token::Ne);
+        assert_eq!(tokens[14], Token::Lt);
+        assert_eq!(tokens[15], Token::Le);
+        assert_eq!(tokens[16], Token::Gt);
+        assert_eq!(tokens[17], Token::Ge);
+        assert_eq!(tokens[18], Token::Shl);
+        assert_eq!(tokens[19], Token::Shr);
+        assert_eq!(tokens[20], Token::Eq);
+        assert_eq!(tokens[21], Token::Arrow);
+        assert_eq!(tokens[22], Token::FatArrow);
+    }
+
+    #[test]
+    fn test_punctuation() {
+        let input = "( ) { } [ ] ; , . .. : ::";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::LeftParen);
+        assert_eq!(tokens[1], Token::RightParen);
+        assert_eq!(tokens[2], Token::LeftBrace);
+        assert_eq!(tokens[3], Token::RightBrace);
+        assert_eq!(tokens[4], Token::LeftBracket);
+        assert_eq!(tokens[5], Token::RightBracket);
+        assert_eq!(tokens[6], Token::Semicolon);
+        assert_eq!(tokens[7], Token::Comma);
+        assert_eq!(tokens[8], Token::Dot);
+        assert_eq!(tokens[9], Token::DotDot);
+        assert_eq!(tokens[10], Token::Colon);
+        assert_eq!(tokens[11], Token::ColonColon);
+    }
+
+    #[test]
+    fn test_booleans() {
+        let input = "true false";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::BoolLiteral(true));
+        assert_eq!(tokens[1], Token::BoolLiteral(false));
+    }
+
+    #[test]
+    fn test_comments() {
+        let input = "foo // this is a comment\nbar";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::Ident("foo".to_string()));
+        assert_eq!(tokens[1], Token::Ident("bar".to_string()));
+    }
+
+    #[test]
+    fn test_whitespace() {
+        let input = "  foo  \t  bar\n  baz  ";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::Ident("foo".to_string()));
+        assert_eq!(tokens[1], Token::Ident("bar".to_string()));
+        assert_eq!(tokens[2], Token::Ident("baz".to_string()));
+    }
+
+    #[test]
+    fn test_use_syntax() {
+        let input = "use crate::module::{Item1, Item2}";
+        let tokens = tokenize(input).unwrap();
+
+        assert_eq!(tokens[0], Token::Use);
+        assert_eq!(tokens[1], Token::Crate);
+        assert_eq!(tokens[2], Token::ColonColon);
+        assert_eq!(tokens[3], Token::Ident("module".to_string()));
+        assert_eq!(tokens[4], Token::ColonColon);
+        assert_eq!(tokens[5], Token::LeftBrace);
+        assert_eq!(tokens[6], Token::Ident("Item1".to_string()));
+        assert_eq!(tokens[7], Token::Comma);
+        assert_eq!(tokens[8], Token::Ident("Item2".to_string()));
+        assert_eq!(tokens[9], Token::RightBrace);
+    }
+
+    #[test]
+    fn test_error_unterminated_string() {
+        let input = r#""unterminated"#;
+        let result = tokenize(input);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            LexerError::UnterminatedString(_)
+        ));
+    }
+
+    #[test]
+    fn test_error_unexpected_char() {
+        let input = "foo @ bar";
+        let result = tokenize(input);
+        assert!(result.is_err());
+        assert!(matches!(
+            result.unwrap_err(),
+            LexerError::UnexpectedChar('@', _)
+        ));
+    }
 }

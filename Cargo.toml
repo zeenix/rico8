@@ -6,6 +6,14 @@ authors = ["Your Name"]
 description = "A Rust-like language that transpiles to Pico-8 Lua"
 license = "MIT OR Apache-2.0"
 
+[lib]
+name = "rico8"
+path = "src/lib.rs"
+
+[[bin]]
+name = "rico8"
+path = "src/main.rs"
+
 [dependencies]
 clap = { version = "4.5", features = ["derive"] }
 thiserror = "1.0"

@@ -210,6 +210,11 @@ impl Parser {
     }
 
     fn parse_item(&mut self) -> Result<Item, ParseError> {
+        // Skip pub modifier if present (we don't need to track visibility for codegen)
+        if self.current() == &Token::Pub {
+            self.advance();
+        }
+
         match self.current() {
             Token::Struct => self.parse_struct().map(Item::Struct),
             Token::Enum => self.parse_enum().map(Item::Enum),
@@ -390,6 +395,10 @@ impl Parser {
 
         let mut methods = Vec::new();
         while self.current() != &Token::RightBrace {
+            // Skip pub modifier if present
+            if self.current() == &Token::Pub {
+                self.advance();
+            }
             methods.push(self.parse_function()?);
         }
 
