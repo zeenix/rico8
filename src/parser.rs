@@ -1,4 +1,4 @@
-use crate::ast::{self, *};
+use crate::ast::*;
 use crate::lexer::Token;
 use thiserror::Error;
 
@@ -6,8 +6,6 @@ use thiserror::Error;
 pub enum ParseError {
     #[error("Unexpected token: expected {expected}, found {found:?}")]
     UnexpectedToken { expected: String, found: Token },
-    #[error("Unexpected end of file")]
-    UnexpectedEof,
     #[error("Invalid expression")]
     InvalidExpression,
 }
@@ -840,12 +838,48 @@ impl Parser {
     }
 
     fn parse_and_expr(&mut self) -> Result<Expr, ParseError> {
-        let mut left = self.parse_equality_expr()?;
+        let mut left = self.parse_bitwise_or_expr()?;
 
         while self.current() == &Token::AndAnd {
             self.advance();
-            let right = self.parse_equality_expr()?;
+            let right = self.parse_bitwise_or_expr()?;
             left = Expr::Binary(BinaryOp::And, Box::new(left), Box::new(right));
+        }
+
+        Ok(left)
+    }
+
+    fn parse_bitwise_or_expr(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_bitwise_xor_expr()?;
+
+        while self.current() == &Token::Pipe {
+            self.advance();
+            let right = self.parse_bitwise_xor_expr()?;
+            left = Expr::Binary(BinaryOp::BitOr, Box::new(left), Box::new(right));
+        }
+
+        Ok(left)
+    }
+
+    fn parse_bitwise_xor_expr(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_bitwise_and_expr()?;
+
+        while self.current() == &Token::Caret {
+            self.advance();
+            let right = self.parse_bitwise_and_expr()?;
+            left = Expr::Binary(BinaryOp::BitXor, Box::new(left), Box::new(right));
+        }
+
+        Ok(left)
+    }
+
+    fn parse_bitwise_and_expr(&mut self) -> Result<Expr, ParseError> {
+        let mut left = self.parse_equality_expr()?;
+
+        while self.current() == &Token::Ampersand {
+            self.advance();
+            let right = self.parse_equality_expr()?;
+            left = Expr::Binary(BinaryOp::BitAnd, Box::new(left), Box::new(right));
         }
 
         Ok(left)

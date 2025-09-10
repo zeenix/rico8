@@ -1,11 +1,14 @@
 use crate::ast::*;
-use std::fmt::Write;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CodegenError {
-    #[error("Code generation failed: {0}")]
-    GenerationFailed(String),
+    #[error("Unsupported feature: {0}")]
+    Unsupported(String),
+    #[error("Invalid code structure: {0}")]
+    InvalidStructure(String),
+    #[error("Type error: {0}")]
+    TypeError(String),
 }
 
 pub struct Generator {
@@ -80,7 +83,11 @@ impl Generator {
                         }
                         self.write_line("");
                     }
-                    _ => self.generate_statement(stmt)?,
+                    _ => {
+                        return Err(CodegenError::Unsupported(
+                            "Only 'let' statements are supported at the global scope".to_string(),
+                        ))
+                    }
                 }
                 Ok(())
             }
@@ -176,7 +183,6 @@ impl Generator {
         }
 
         // First, check if there's a new() method and modify it to set metatable
-        let has_new = i.methods.iter().any(|m| m.name == "new");
 
         for method in &i.methods {
             self.write(&format!("function {}:{}", target_name, method.name));
@@ -195,6 +201,19 @@ impl Generator {
 
             // If this is a new() method, we need to set the metatable
             if method.name == "new" {
+                // Validate that new() has a return statement
+                let has_return = method
+                    .body
+                    .statements
+                    .iter()
+                    .any(|stmt| matches!(stmt, Statement::Return(Some(_))));
+                if !has_return {
+                    return Err(CodegenError::InvalidStructure(format!(
+                        "Constructor '{}::new' must return a value",
+                        target_name
+                    )));
+                }
+
                 // Generate the body but capture any return statements
                 self.write_line("  local obj");
                 for stmt in &method.body.statements {
@@ -429,6 +448,33 @@ impl Generator {
                 self.write(&lua_name)
             }
             Expr::Binary(op, left, right) => {
+                // Check for bitwise operations first
+                match op {
+                    BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
+                        // Bitwise operations should only work on integers
+                        if Self::is_string_expr(left) || Self::is_string_expr(right) {
+                            return Err(CodegenError::TypeError(format!(
+                                "Bitwise operations cannot be performed on strings"
+                            )));
+                        }
+
+                        let func_name = match op {
+                            BinaryOp::BitAnd => "band",
+                            BinaryOp::BitOr => "bor",
+                            BinaryOp::BitXor => "bxor",
+                            _ => unreachable!(),
+                        };
+                        self.write(func_name);
+                        self.write("(");
+                        self.generate_expr(left)?;
+                        self.write(", ");
+                        self.generate_expr(right)?;
+                        self.write(")");
+                        return Ok(());
+                    }
+                    _ => {}
+                }
+
                 // Check if this is string concatenation (+ with string operands)
                 let is_string_concat = matches!(op, BinaryOp::Add)
                     && (Self::is_string_expr(left) || Self::is_string_expr(right));
@@ -454,9 +500,9 @@ impl Generator {
                         BinaryOp::Le => "<=",
                         BinaryOp::Gt => ">",
                         BinaryOp::Ge => ">=",
-                        BinaryOp::BitAnd => "&",
-                        BinaryOp::BitOr => "|",
-                        BinaryOp::BitXor => "^^",
+                        BinaryOp::BitAnd | BinaryOp::BitOr | BinaryOp::BitXor => {
+                            unreachable!("Bitwise ops handled above")
+                        }
                         BinaryOp::Shl => "<<",
                         BinaryOp::Shr => ">>",
                     });
@@ -475,7 +521,7 @@ impl Generator {
             }
             Expr::Call(func, args) => {
                 // Check if this is a constructor/method call pattern (e.g., Player::new)
-                let func_name = if let Expr::Ident(name) = &**func {
+                if let Expr::Ident(name) = &**func {
                     if name.contains("::") {
                         // Split on :: to handle Rust-style paths.
                         if let Some(sep_pos) = name.find("::") {
@@ -498,15 +544,12 @@ impl Generator {
                         } else {
                             self.write(name);
                         }
-                        Some(name.clone())
                     } else {
                         self.write(name);
-                        Some(name.clone())
                     }
                 } else {
                     self.generate_expr(func)?;
-                    None
-                };
+                }
 
                 self.write("(");
 
@@ -554,7 +597,7 @@ impl Generator {
                 self.generate_expr(index)?;
                 self.write("]");
             }
-            Expr::Struct(name, fields) => {
+            Expr::Struct(_, fields) => {
                 // Generate inline table literal for struct construction
                 self.write("{");
                 for (i, (field_name, value)) in fields.iter().enumerate() {
