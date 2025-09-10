@@ -1,0 +1,119 @@
+// Collectibles module - coins and powerups
+
+use player::{Drawable, Updatable, Player};
+
+struct Coin {
+    x: i32,
+    y: i32,
+    collected: bool,
+    anim_timer: i32,
+}
+
+impl Coin {
+    fn new(x: i32, y: i32) -> Coin {
+        return Coin {
+            x: x,
+            y: y,
+            collected: false,
+            anim_timer: rnd(30),
+        };
+    }
+
+    fn update(&mut self, player: &Player) -> bool {
+        if self.collected {
+            return false;
+        }
+
+        self.anim_timer = self.anim_timer + 1;
+
+        // Check collection.
+        let dx = self.x - flr(player.x);
+        let dy = self.y - flr(player.y);
+        if abs(dx) < 6 && abs(dy) < 6 {
+            self.collected = true;
+            sfx(1, -1, 0, 0);  // Play collect sound.
+            return true;  // Return true when collected
+        }
+        return false;
+    }
+}
+
+impl Drawable for Coin {
+    fn draw(&self) {
+        if !self.collected {
+            // Draw a simple circle for coins.
+            let color = self.get_color();
+            circfill(self.x, self.y, 3, color);
+            circ(self.x, self.y, 3, 9);
+        }
+    }
+
+    fn get_color(&self) -> i32 {
+        return 10;  // Yellow
+    }
+}
+
+// Powerup that doubles the score
+struct Powerup {
+    x: i32,
+    y: i32,
+    collected: bool,
+    active: bool,
+    timer: i32,
+}
+
+impl Powerup {
+    fn new(x: i32, y: i32) -> Powerup {
+        return Powerup {
+            x: x,
+            y: y,
+            collected: false,
+            active: false,
+            timer: 0,
+        };
+    }
+
+    fn check_collection(&mut self, player: &Player) {
+        if self.collected {
+            return;
+        }
+
+        let dx = self.x - flr(player.x);
+        let dy = self.y - flr(player.y);
+        if abs(dx) < 8 && abs(dy) < 8 {
+            self.collected = true;
+            self.active = true;
+            self.timer = 300;  // 10 seconds at 30 FPS
+            sfx(2, -1, 0, 0);
+        }
+    }
+}
+
+impl Updatable for Powerup {
+    fn update(&mut self) {
+        if self.active && self.timer > 0 {
+            self.timer = self.timer - 1;
+            if self.timer == 0 {
+                self.active = false;
+            }
+        }
+    }
+}
+
+impl Drawable for Powerup {
+    fn draw(&self) {
+        if !self.collected {
+            let color = self.get_color();
+            // Draw a star shape
+            circfill(self.x, self.y, 4, color);
+            pset(self.x - 6, self.y, color);
+            pset(self.x + 6, self.y, color);
+            pset(self.x, self.y - 6, color);
+            pset(self.x, self.y + 6, color);
+        }
+    }
+
+    fn get_color(&self) -> i32 {
+        return 8;  // Red
+    }
+}

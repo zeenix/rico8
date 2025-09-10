@@ -1,0 +1,85 @@
+// Player module - traits and player implementation
+
+// Define a trait for objects that can be drawn
+trait Drawable {
+    fn draw(&self);
+    fn get_color(&self) -> i32;
+}
+
+// Define a trait for objects that can be updated
+trait Updatable {
+    fn update(&mut self);
+}
+
+struct Player {
+    x: f32,
+    y: f32,
+    dx: f32,
+    dy: f32,
+    flip: bool,
+}
+
+impl Player {
+    fn new() -> Player {
+        return Player {
+            x: 64.0,
+            y: 64.0,
+            dx: 0.0,
+            dy: 0.0,
+            flip: false,
+        };
+    }
+}
+
+impl Updatable for Player {
+    fn update(&mut self) {
+        // Handle input - simple 8-direction movement.
+        if btn(0, 0) {  // Left.
+            self.dx = -2.0;
+            self.flip = true;
+        } else if btn(1, 0) {  // Right.
+            self.dx = 2.0;
+            self.flip = false;
+        } else {
+            self.dx = self.dx * 0.8;  // Friction.
+        }
+
+        if btn(2, 0) {  // Up.
+            self.dy = -2.0;
+        } else if btn(3, 0) {  // Down.
+            self.dy = 2.0;
+        } else {
+            self.dy = self.dy * 0.8;  // Friction.
+        }
+
+        // Move.
+        self.x = self.x + self.dx;
+        self.y = self.y + self.dy;
+
+        // Keep in bounds.
+        if self.x < 4.0 {
+            self.x = 4.0;
+        }
+        if self.x > 120.0 {
+            self.x = 120.0;
+        }
+        if self.y < 4.0 {
+            self.y = 4.0;
+        }
+        if self.y > 120.0 {
+            self.y = 120.0;
+        }
+    }
+}
+
+impl Drawable for Player {
+    fn draw(&self) {
+        // Draw a simple square for the player.
+        let color = self.get_color();
+        rectfill(flr(self.x) - 3, flr(self.y) - 3, flr(self.x) + 3, flr(self.y) + 3, color);
+    }
+
+    fn get_color(&self) -> i32 {
+        return 12;  // Light blue
+    }
+}

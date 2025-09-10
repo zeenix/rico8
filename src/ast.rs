@@ -1,6 +1,21 @@
 #[derive(Debug, Clone, PartialEq)]
 pub struct Program {
+    pub imports: Vec<UseStatement>,
     pub items: Vec<Item>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct UseStatement {
+    pub path: Vec<String>, // e.g., ["crate", "module", "submodule"]
+    pub items: UseTree,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum UseTree {
+    Simple(String),        // use module::Item;
+    Glob,                  // use module::*;
+    List(Vec<UseTree>),    // use module::{Item1, Item2};
+    Alias(String, String), // use module::Item as Alias;
 }
 
 #[derive(Debug, Clone, PartialEq)]

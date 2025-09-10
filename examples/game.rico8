@@ -1,207 +1,8 @@
-// A dumb simple example game in Rico8
-// Demonstrates Pico-8 API usage with Rico8's type safety
-// All Pico-8 API functions are automatically available
+// A modular example game in Rico8
+// Demonstrates imports and Pico-8 API usage with Rico8's type safety
 
-// Define a trait for objects that can be drawn
-trait Drawable {
-    fn draw(&self);
-    fn get_color(&self) -> i32;
-}
-
-// Define a trait for objects that can be updated
-trait Updatable {
-    fn update(&mut self);
-}
-
-struct Player {
-    x: f32,
-    y: f32,
-    dx: f32,
-    dy: f32,
-    flip: bool,
-}
-
-impl Player {
-    fn new() -> Player {
-        return Player {
-            x: 64.0,
-            y: 64.0,
-            dx: 0.0,
-            dy: 0.0,
-            flip: false,
-        };
-    }
-}
-
-impl Updatable for Player {
-    fn update(&mut self) {
-        // Handle input - simple 8-direction movement.
-        if btn(0, 0) {  // Left.
-            self.dx = -2.0;
-            self.flip = true;
-        } else if btn(1, 0) {  // Right.
-            self.dx = 2.0;
-            self.flip = false;
-        } else {
-            self.dx = self.dx * 0.8;  // Friction.
-        }
-
-        if btn(2, 0) {  // Up.
-            self.dy = -2.0;
-        } else if btn(3, 0) {  // Down.
-            self.dy = 2.0;
-        } else {
-            self.dy = self.dy * 0.8;  // Friction.
-        }
-
-        // Move.
-        self.x = self.x + self.dx;
-        self.y = self.y + self.dy;
-
-        // Keep in bounds.
-        if self.x < 4.0 {
-            self.x = 4.0;
-        }
-        if self.x > 120.0 {
-            self.x = 120.0;
-        }
-        if self.y < 4.0 {
-            self.y = 4.0;
-        }
-        if self.y > 120.0 {
-            self.y = 120.0;
-        }
-    }
-}
-
-impl Drawable for Player {
-    fn draw(&self) {
-        // Draw a simple square for the player.
-        let color = self.get_color();
-        rectfill(flr(self.x) - 3, flr(self.y) - 3, flr(self.x) + 3, flr(self.y) + 3, color);
-    }
-
-    fn get_color(&self) -> i32 {
-        return 12;  // Light blue
-    }
-}
-
-struct Coin {
-    x: i32,
-    y: i32,
-    collected: bool,
-    anim_timer: i32,
-}
-
-impl Coin {
-    fn new(x: i32, y: i32) -> Coin {
-        return Coin {
-            x: x,
-            y: y,
-            collected: false,
-            anim_timer: rnd(30),
-        };
-    }
-
-    fn update(&mut self, player: &Player) {
-        if self.collected {
-            return;
-        }
-
-        self.anim_timer = self.anim_timer + 1;
-
-        // Check collection.
-        let dx = self.x - flr(player.x);
-        let dy = self.y - flr(player.y);
-        if abs(dx) < 6 && abs(dy) < 6 {
-            self.collected = true;
-            sfx(1, -1, 0, 0);  // Play collect sound.
-            game.score = game.score + 10;
-        }
-    }
-
-}
-
-impl Drawable for Coin {
-    fn draw(&self) {
-        if !self.collected {
-            // Draw a simple circle for coins.
-            let color = self.get_color();
-            circfill(self.x, self.y, 3, color);
-            circ(self.x, self.y, 3, 9);
-        }
-    }
-
-    fn get_color(&self) -> i32 {
-        return 10;  // Yellow
-    }
-}
-
-
-// Powerup that doubles the score
-struct Powerup {
-    x: i32,
-    y: i32,
-    collected: bool,
-    active: bool,
-    timer: i32,
-}
-
-impl Powerup {
-    fn new(x: i32, y: i32) -> Powerup {
-        return Powerup {
-            x: x,
-            y: y,
-            collected: false,
-            active: false,
-            timer: 0,
-        };
-    }
-
-    fn check_collection(&mut self, player: &Player) {
-        if self.collected {
-            return;
-        }
-
-        let dx = self.x - flr(player.x);
-        let dy = self.y - flr(player.y);
-        if abs(dx) < 8 && abs(dy) < 8 {
-            self.collected = true;
-            self.active = true;
-            self.timer = 300;  // 10 seconds at 30 FPS
-            sfx(2, -1, 0, 0);
-        }
-    }
-}
-
-impl Updatable for Powerup {
-    fn update(&mut self) {
-        if self.active && self.timer > 0 {
-            self.timer = self.timer - 1;
-            if self.timer == 0 {
-                self.active = false;
-            }
-        }
-    }
-}
-
-impl Drawable for Powerup {
-    fn draw(&self) {
-        if !self.collected {
-            let color = self.get_color();
-            // Draw a star shape
-            circfill(self.x, self.y, 4, color);
-            pset(self.x - 6, self.y, color);
-            pset(self.x + 6, self.y, color);
-            pset(self.x, self.y - 6, color);
-            pset(self.x, self.y + 6, color);
-        }
-    }
-
-    fn get_color(&self) -> i32 {
-        return 8;  // Red
-    }
-}
+use player::{Player, Drawable, Updatable};
+use collectibles::{Coin, Powerup};
 
 enum GameState {
     Title,
@@ -278,13 +79,15 @@ fn _update() {
             // Check powerup collection.
             game.powerup.check_collection(&game.player);
 
-            // Update coins and apply score multiplier.
+            // Update coins and handle scoring.
             for coin in game.coins {
-                let old_score = game.score;
-                coin.update(&game.player);
-                // Double points if powerup is active
-                if game.powerup.active && game.score > old_score {
-                    game.score = game.score + (game.score - old_score);
+                if coin.update(&game.player) {
+                    // Coin was just collected
+                    if game.powerup.active {
+                        game.score = game.score + 20;  // Double points
+                    } else {
+                        game.score = game.score + 10;
+                    }
                 }
             }
 
@@ -328,7 +131,6 @@ fn _draw() {
             print("RICO8 EXAMPLE", 24, 40, 7);
             print("COLLECT ALL COINS!", 20, 50, 10);
             print("ARROW KEYS TO MOVE", 20, 64, 6);
-            print("O BUTTON TO JUMP", 24, 72, 6);
             print("PRESS O TO START", 24, 88, 11);
         },
         GameState::Playing => {
@@ -373,4 +175,3 @@ fn _draw() {
         },
     }
 }
-

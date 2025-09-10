@@ -6,6 +6,7 @@ use std::path::PathBuf;
 mod ast;
 mod codegen;
 mod lexer;
+mod module_loader;
 mod parser;
 
 #[derive(Parser)]
@@ -29,37 +30,33 @@ struct Cli {
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let source = fs::read_to_string(&cli.input)?;
-
     if cli.verbose {
         eprintln!("Transpiling {}...", cli.input.display());
     }
 
-    let tokens = match lexer::tokenize(&source) {
-        Ok(tokens) => tokens,
+    // Use module loader to handle imports
+    let base_path = cli
+        .input
+        .parent()
+        .unwrap_or_else(|| std::path::Path::new("."))
+        .to_path_buf();
+    let mut loader = module_loader::ModuleLoader::new(base_path);
+
+    let ast = match loader.load_program(&cli.input) {
+        Ok(ast) => ast,
         Err(e) => {
-            eprintln!("Lexer error: {}", e);
+            eprintln!("Module loading error: {}", e);
             return Err(e.into());
         }
     };
 
     if cli.verbose {
-        eprintln!("Lexed {} tokens", tokens.len());
-        // Debug specific position
-        for (i, token) in tokens.iter().enumerate() {
-            if i >= 1559 && i <= 1569 {
-                eprintln!("Token {}: {:?}", i, token);
-            }
-        }
+        eprintln!(
+            "Loaded program with {} imports and {} items",
+            ast.imports.len(),
+            ast.items.len()
+        );
     }
-
-    let ast = match parser::parse(tokens) {
-        Ok(ast) => ast,
-        Err(e) => {
-            eprintln!("Parser error: {}", e);
-            return Err(e.into());
-        }
-    };
 
     let lua_code = codegen::generate(ast)?;
 

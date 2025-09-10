@@ -100,13 +100,115 @@ impl Parser {
     }
 
     fn parse_program(&mut self) -> Result<Program, ParseError> {
+        let mut imports = Vec::new();
         let mut items = Vec::new();
 
+        // Parse use statements first
+        while self.current() == &Token::Use {
+            imports.push(self.parse_use_statement()?);
+        }
+
+        // Then parse items
         while self.current() != &Token::Eof {
             items.push(self.parse_item()?);
         }
 
-        Ok(Program { items })
+        Ok(Program { imports, items })
+    }
+
+    fn parse_use_statement(&mut self) -> Result<UseStatement, ParseError> {
+        self.expect(Token::Use)?;
+
+        // Parse the path (e.g., crate::module::submodule or module)
+        let mut path = Vec::new();
+
+        // Handle special path prefixes
+        if self.current() == &Token::Crate {
+            path.push("crate".to_string());
+            self.advance();
+            self.expect(Token::ColonColon)?;
+        } else if self.current() == &Token::Super {
+            path.push("super".to_string());
+            self.advance();
+            self.expect(Token::ColonColon)?;
+        }
+
+        // Parse the module path
+        path.push(self.parse_ident()?);
+
+        while self.current() == &Token::ColonColon {
+            self.advance();
+
+            // Check for glob (*) or list ({...})
+            if self.current() == &Token::Star {
+                self.advance();
+                self.expect(Token::Semicolon)?;
+                return Ok(UseStatement {
+                    path,
+                    items: UseTree::Glob,
+                });
+            } else if self.current() == &Token::LeftBrace {
+                let items = self.parse_use_tree_list()?;
+                self.expect(Token::Semicolon)?;
+                return Ok(UseStatement {
+                    path,
+                    items: UseTree::List(items),
+                });
+            } else {
+                path.push(self.parse_ident()?);
+            }
+        }
+
+        // Check for alias (as)
+        if self.current() == &Token::As {
+            self.advance();
+            let alias = self.parse_ident()?;
+            let original = path.pop().unwrap();
+            self.expect(Token::Semicolon)?;
+            return Ok(UseStatement {
+                path,
+                items: UseTree::Alias(original, alias),
+            });
+        }
+
+        // Simple import
+        let item = path.pop().unwrap();
+        self.expect(Token::Semicolon)?;
+        Ok(UseStatement {
+            path,
+            items: UseTree::Simple(item),
+        })
+    }
+
+    fn parse_use_tree_list(&mut self) -> Result<Vec<UseTree>, ParseError> {
+        self.expect(Token::LeftBrace)?;
+        let mut items = Vec::new();
+
+        loop {
+            if self.current() == &Token::RightBrace {
+                break;
+            }
+
+            let name = self.parse_ident()?;
+
+            // Check for alias
+            if self.current() == &Token::As {
+                self.advance();
+                let alias = self.parse_ident()?;
+                items.push(UseTree::Alias(name, alias));
+            } else {
+                items.push(UseTree::Simple(name));
+            }
+
+            if self.current() == &Token::Comma {
+                self.advance();
+            } else {
+                break;
+            }
+        }
+
+        self.expect(Token::RightBrace)?;
+        Ok(items)
     }
 
     fn parse_item(&mut self) -> Result<Item, ParseError> {
