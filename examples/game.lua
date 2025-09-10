@@ -207,25 +207,3 @@ function _draw()
   end
 end
 
-function abs(x)
-  if (x < 0)   then
-    return -x
-  end
-  return x
-end
-
-function abs(x)
-  if (x < 0)   then
-    return -x
-  end
-  return x
-end
-
-function flr(x)
-  return x
-end
-
-function rnd(max)
-  return 0
-end
-

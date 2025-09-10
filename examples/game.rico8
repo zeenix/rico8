@@ -259,27 +259,3 @@ fn _draw() {
     }
 }
 
-// Helper math functions that would be in the Pico-8 wrapper.
-fn abs(x: f32) -> f32 {
-    if x < 0.0 {
-        return -x;
-    }
-    return x;
-}
-
-fn abs(x: i32) -> i32 {
-    if x < 0 {
-        return -x;
-    }
-    return x;
-}
-
-fn flr(x: f32) -> i32 {
-    // Floor function - converts float to int.
-    return x as i32;
-}
-
-fn rnd(max: i32) -> i32 {
-    // Random number (simplified).
-    return 0;  // Would use Pico-8's rnd.
-}
