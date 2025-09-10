@@ -239,7 +239,7 @@ fn _draw() {
             // Draw HUD.
             rectfill(0, 0, 127, 7, 0);
             print("SCORE: " + tostr(game.score, false), 2, 1, 7);
-            print("TIME: " + tostr(game.time / 30, false), 80, 1, 7);
+            print("TIME: " + tostr(flr(game.time / 30), false) + "s", 80, 1, 7);
         },
         GameState::GameOver => {
             rectfill(20, 48, 107, 80, 0);
@@ -253,7 +253,7 @@ fn _draw() {
             rect(20, 48, 107, 80, 11);
             print("VICTORY!", 48, 56, 11);
             print("SCORE: " + tostr(game.score, false), 36, 66, 7);
-            print("TIME: " + tostr(game.time / 30, false) + "s", 40, 74, 7);
+            print("TIME: " + tostr(flr(game.time / 30), false) + "s", 40, 74, 7);
             print("PRESS O TO MENU", 28, 96, 10);
         },
     }
