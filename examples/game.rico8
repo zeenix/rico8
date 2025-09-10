@@ -1,4 +1,4 @@
-// Simple platformer game in Rico8
+// A dumb simple example game in Rico8
 // Demonstrates Pico-8 API usage with Rico8's type safety
 // All Pico-8 API functions are automatically available
 
@@ -217,7 +217,7 @@ fn _draw() {
     match game.state {
         GameState::Title => {
             // Title screen.
-            print("RICO8 PLATFORMER", 24, 40, 7);
+            print("RICO8 EXAMPLE", 24, 40, 7);
             print("COLLECT ALL COINS!", 20, 50, 10);
             print("ARROW KEYS TO MOVE", 20, 64, 6);
             print("O BUTTON TO JUMP", 24, 72, 6);
