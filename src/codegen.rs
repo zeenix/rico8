@@ -258,7 +258,9 @@ impl Generator {
                 self.write_indent();
                 self.write_line("  return obj");
             } else {
-                self.generate_block(&method.body)?;
+                // For regular methods, check if they have a return type to handle implicit returns
+                let has_return_type = method.return_type.is_some();
+                self.generate_block_with_implicit_return(&method.body, has_return_type)?;
             }
 
             self.write_line("end");
@@ -272,7 +274,9 @@ impl Generator {
         self.write("(");
         self.generate_params(&f.params)?;
         self.write_line(")");
-        self.generate_block(&f.body)?;
+        // Handle implicit returns if the function has a return type
+        let has_return_type = f.return_type.is_some();
+        self.generate_block_with_implicit_return(&f.body, has_return_type)?;
         self.write_line("end");
 
         Ok(())
@@ -298,9 +302,31 @@ impl Generator {
     }
 
     fn generate_block(&mut self, block: &Block) -> Result<(), CodegenError> {
+        self.generate_block_with_implicit_return(block, false)
+    }
+
+    fn generate_block_with_implicit_return(
+        &mut self,
+        block: &Block,
+        handle_implicit_return: bool,
+    ) -> Result<(), CodegenError> {
         self.indent();
-        for statement in &block.statements {
-            self.generate_statement(statement)?;
+        let num_stmts = block.statements.len();
+        for (i, statement) in block.statements.iter().enumerate() {
+            // Check if this is the last statement and should be an implicit return
+            if handle_implicit_return && i == num_stmts - 1 {
+                if let Statement::Expr(expr) = statement {
+                    // Convert the expression to a return statement
+                    self.write_indent();
+                    self.write("return ");
+                    self.generate_expr(expr)?;
+                    self.write_line("");
+                } else {
+                    self.generate_statement(statement)?;
+                }
+            } else {
+                self.generate_statement(statement)?;
+            }
         }
         self.dedent();
         Ok(())

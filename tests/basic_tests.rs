@@ -274,6 +274,27 @@ fn test_use_statement() {
 }
 
 #[test]
+fn test_implicit_return() {
+    let source = r#"
+        fn add(a: i32, b: i32) -> i32 {
+            a + b
+        }
+
+        fn get_value() -> i32 {
+            42
+        }
+    "#;
+
+    let result = compile_source(source);
+    assert!(result.is_ok(), "Compilation failed: {:?}", result.err());
+    let lua = result.unwrap();
+
+    // Check that implicit returns are converted to explicit returns
+    assert!(lua.contains("return (a + b)"));
+    assert!(lua.contains("return 42"));
+}
+
+#[test]
 fn test_no_trailing_whitespace() {
     let source = r#"
         fn test() {
