@@ -179,14 +179,11 @@ impl Generator {
                 }
 
                 self.write_line(")");
-                self.indent();
 
-                // Generate the method body
-                for stmt in &body.statements {
-                    self.generate_statement(stmt)?;
-                }
+                // Generate the method body with implicit return handling
+                let has_return_type = method.return_type.is_some();
+                self.generate_block_with_implicit_return(body, has_return_type)?;
 
-                self.dedent();
                 self.write_line("end");
             }
         }
@@ -346,14 +343,21 @@ impl Generator {
         for (i, statement) in block.statements.iter().enumerate() {
             // Check if this is the last statement and should be an implicit return
             if handle_implicit_return && i == num_stmts - 1 {
-                if let Statement::Expr(expr) = statement {
-                    // Convert the expression to a return statement
-                    self.write_indent();
-                    self.write("return ");
-                    self.generate_expr(expr)?;
-                    self.write_line("");
-                } else {
-                    self.generate_statement(statement)?;
+                match statement {
+                    Statement::Expr(expr) => {
+                        // Convert the expression to a return statement
+                        self.write_indent();
+                        self.write("return ");
+                        self.generate_expr(expr)?;
+                        self.write_line("");
+                    }
+                    Statement::Match(match_stmt) => {
+                        // Generate match with return in each arm
+                        self.generate_match_statement_with_return(match_stmt)?;
+                    }
+                    _ => {
+                        self.generate_statement(statement)?;
+                    }
                 }
             } else {
                 self.generate_statement(statement)?;
@@ -448,6 +452,21 @@ impl Generator {
         &mut self,
         match_stmt: &MatchStatement,
     ) -> Result<(), CodegenError> {
+        self.generate_match_statement_impl(match_stmt, false)
+    }
+
+    fn generate_match_statement_with_return(
+        &mut self,
+        match_stmt: &MatchStatement,
+    ) -> Result<(), CodegenError> {
+        self.generate_match_statement_impl(match_stmt, true)
+    }
+
+    fn generate_match_statement_impl(
+        &mut self,
+        match_stmt: &MatchStatement,
+        with_return: bool,
+    ) -> Result<(), CodegenError> {
         self.write_indent();
         self.write("local __match = ");
         self.generate_expr(&match_stmt.expr)?;
@@ -465,12 +484,42 @@ impl Generator {
             self.generate_pattern_condition(&arm.pattern, "__match")?;
             self.write_line(" then");
             self.indent();
-            self.write_indent();
-            self.generate_expr(&arm.body)?;
-            self.write_line("");
+
+            // Handle block expressions specially in match arms to avoid IIFEs
+            match &arm.body {
+                Expr::Block(block) => {
+                    // Generate block statements directly without wrapping in IIFE
+                    for (i, stmt) in block.statements.iter().enumerate() {
+                        if with_return && i == block.statements.len() - 1 {
+                            // Last statement in block with return
+                            if let Statement::Expr(expr) = stmt {
+                                self.write_indent();
+                                self.write("return ");
+                                self.generate_expr(expr)?;
+                                self.write_line("");
+                            } else {
+                                self.generate_statement(stmt)?;
+                            }
+                        } else {
+                            self.generate_statement(stmt)?;
+                        }
+                    }
+                }
+                _ => {
+                    // For non-block expressions, generate as before
+                    self.write_indent();
+                    if with_return {
+                        self.write("return ");
+                    }
+                    self.generate_expr(&arm.body)?;
+                    self.write_line("");
+                }
+            }
+
             self.dedent();
         }
 
+        self.write_indent();
         self.write_line("end");
         Ok(())
     }
