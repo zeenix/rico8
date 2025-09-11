@@ -160,12 +160,33 @@ impl Generator {
         self.write_line(&format!("-- trait {}", t.name));
         self.write_line(&format!("{} = {{}}", t.name));
 
+        // Generate default method implementations
         for method in &t.methods {
             if let Some(body) = &method.body {
-                self.write(&format!("{}.{} = function(", t.name, method.name));
-                self.generate_params(&method.params)?;
+                // Generate the default implementation as a function in the trait table
+                self.write_line(&format!("function {}:{}(", t.name, method.name));
+
+                // Generate parameters (skip self as it's implicit in Lua)
+                let non_self_params: Vec<String> = method
+                    .params
+                    .iter()
+                    .filter(|p| !p.is_self)
+                    .map(|p| p.name.clone())
+                    .collect();
+
+                if !non_self_params.is_empty() {
+                    self.write(&non_self_params.join(", "));
+                }
+
                 self.write_line(")");
-                self.generate_block(body)?;
+                self.indent();
+
+                // Generate the method body
+                for stmt in &body.statements {
+                    self.generate_statement(stmt)?;
+                }
+
+                self.dedent();
                 self.write_line("end");
             }
         }
@@ -182,8 +203,7 @@ impl Generator {
             self.write_line(&format!("-- impl {}", target_name));
         }
 
-        // First, check if there's a new() method and modify it to set metatable
-
+        // Generate all methods in the impl block
         for method in &i.methods {
             self.write(&format!("function {}:{}", target_name, method.name));
             self.write("(");
@@ -263,6 +283,17 @@ impl Generator {
                 self.generate_block_with_implicit_return(&method.body, has_return_type)?;
             }
 
+            self.write_line("end");
+        }
+
+        // If implementing a trait, copy default methods that weren't overridden
+        if let Some(trait_name) = &i.trait_name {
+            // Generate code to copy default methods from trait
+            self.write_line(&format!("-- Copy default methods from {}", trait_name));
+            self.write_line(&format!("for k, v in pairs({}) do", trait_name));
+            self.write_line(&format!("  if {}[k] == nil then", target_name));
+            self.write_line(&format!("    {}[k] = v", target_name));
+            self.write_line("  end");
             self.write_line("end");
         }
 
