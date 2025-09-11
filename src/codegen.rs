@@ -841,7 +841,8 @@ impl Generator {
             Expr::Match(match_stmt) => {
                 self.write("(function()\n");
                 self.indent();
-                self.generate_match_statement(match_stmt)?;
+                // Match expressions need to return values from their arms
+                self.generate_match_statement_with_return(match_stmt)?;
                 self.dedent();
                 self.write_indent();
                 self.write("end)()");
