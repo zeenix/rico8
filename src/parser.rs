@@ -569,7 +569,13 @@ impl Parser {
             return Ok(Type::Array(Box::new(elem_type), size));
         }
 
-        let name = self.parse_ident()?;
+        // Handle Self type
+        let name = if self.current() == &Token::Self_ {
+            self.advance();
+            "Self".to_string()
+        } else {
+            self.parse_ident()?
+        };
 
         if self.current() == &Token::Lt {
             self.advance();
@@ -1061,7 +1067,7 @@ impl Parser {
                     self.advance();
                     if matches!(
                         self.current(),
-                        Token::IntLiteral(_) | Token::Ident(_) | Token::LeftParen
+                        Token::IntLiteral(_) | Token::Ident(_) | Token::LeftParen | Token::Self_
                     ) {
                         let end = self.parse_expr()?;
                         Ok(Expr::Range(
@@ -1144,7 +1150,27 @@ impl Parser {
             }
             Token::Self_ => {
                 self.advance();
-                Ok(Expr::Ident("self".to_string()))
+                // Check if this is a struct constructor `Self { ... }`
+                if self.current() == &Token::LeftBrace {
+                    self.advance(); // consume {
+                    let mut fields = Vec::new();
+                    while self.current() != &Token::RightBrace {
+                        let field_name = self.parse_ident()?;
+                        self.expect(Token::Colon)?;
+                        let value = self.parse_expr()?;
+                        fields.push((field_name, value));
+
+                        if self.current() == &Token::Comma {
+                            self.advance();
+                        } else {
+                            break;
+                        }
+                    }
+                    self.expect(Token::RightBrace)?;
+                    Ok(Expr::Struct("Self".to_string(), fields))
+                } else {
+                    Ok(Expr::Ident("self".to_string()))
+                }
             }
             Token::Ident(name) => {
                 let name = name.clone();
@@ -1215,7 +1241,7 @@ impl Parser {
                     self.advance();
                     if matches!(
                         self.current(),
-                        Token::IntLiteral(_) | Token::Ident(_) | Token::LeftParen
+                        Token::IntLiteral(_) | Token::Ident(_) | Token::LeftParen | Token::Self_
                     ) {
                         let end = self.parse_expr()?;
                         Ok(Expr::Range(
@@ -1233,7 +1259,7 @@ impl Parser {
                 self.advance();
                 if matches!(
                     self.current(),
-                    Token::IntLiteral(_) | Token::Ident(_) | Token::LeftParen
+                    Token::IntLiteral(_) | Token::Ident(_) | Token::LeftParen | Token::Self_
                 ) {
                     let end = self.parse_expr()?;
                     Ok(Expr::Range(None, Some(Box::new(end))))
