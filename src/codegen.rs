@@ -495,6 +495,9 @@ impl Generator {
             self.write_line(" then");
             self.indent();
 
+            // Generate pattern bindings for enum variants with values
+            self.generate_pattern_bindings(&arm.pattern, "__match")?;
+
             // Handle block expressions specially in match arms to avoid IIFEs
             match &arm.body {
                 Expr::Block(block) => {
@@ -551,6 +554,34 @@ impl Generator {
             }
             Pattern::Struct(_, _) | Pattern::Tuple(_) => {
                 self.write("true");
+            }
+        }
+        Ok(())
+    }
+
+    fn generate_pattern_bindings(
+        &mut self,
+        pattern: &Pattern,
+        var: &str,
+    ) -> Result<(), CodegenError> {
+        match pattern {
+            Pattern::Ident(name) => {
+                // Bind the entire value to the identifier
+                self.write_indent();
+                self.write(&format!("local {} = {}", name, var));
+                self.write_line("");
+            }
+            Pattern::Enum(_, _, Some(inner_pattern)) => {
+                // For enum variants with values, extract the value
+                // Enum values are stored in _0, _1, etc.
+                if let Pattern::Ident(name) = &**inner_pattern {
+                    self.write_indent();
+                    self.write(&format!("local {} = {}._0", name, var));
+                    self.write_line("");
+                }
+            }
+            _ => {
+                // No bindings needed for other patterns
             }
         }
         Ok(())
