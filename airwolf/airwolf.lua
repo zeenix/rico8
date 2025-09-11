@@ -211,6 +211,17 @@ end
 -- struct RotorProps
 RotorProps = {}
 
+-- enum Scene
+Start = {
+  tag = "Start"
+}
+Game = {
+  tag = "Game"
+}
+GameOver = {
+  tag = "GameOver"
+}
+
 -- struct TheLady
 TheLady = {}
 
@@ -223,7 +234,15 @@ local bullet_props = {x_offset = 0, y_offset = -1, interval = 0.4, sw = 1, sh = 
   return obj
 end
 function TheLady:update(scene)
-  local outside = ((scene == 1) and self:move_player() or false)
+  local is_game = (function()
+    local __match = scene
+    if __match.tag == "Game"     then
+      true
+    elseif true     then
+      false
+        end
+  end)()
+  local outside = (is_game and self:move_player() or false)
   self.shooter:update(self.x, self.y)
   self.main_rotor:update(self.x, self.y)
   self.tail_rotor:update(self.x, self.y)
@@ -352,7 +371,15 @@ function EnemyAircraft:update(scene, airwolf_x)
   if not self.alive   then
     return true
   end
-  local outside = ((scene == 1) and self:move_enemy(airwolf_x) or false)
+  local is_game = (function()
+    local __match = scene
+    if __match.tag == "Game"     then
+      true
+    elseif true     then
+      false
+        end
+  end)()
+  local outside = (is_game and self:move_enemy(airwolf_x) or false)
   self.shooter:update(self.x, self.y)
   self.main_rotor:update(self.x, self.y)
   self.tail_rotor:update(self.x, self.y)
@@ -582,7 +609,15 @@ function Entities:update(scene, score)
   if not self.player:is_alive()   then
     return -1
   end
-  if (scene ~= 1)   then
+  local is_game = (function()
+    local __match = scene
+    if __match.tag == "Game"     then
+      true
+    elseif true     then
+      false
+        end
+  end)()
+  if not is_game   then
     return new_score
   end
   self.enemy_spawn_timer = (self.enemy_spawn_timer + 1)
@@ -595,7 +630,7 @@ function Entities:update(scene, score)
   while (i < count(self.enemies))   do
     local enemy = self.enemies[(i + 1)]
     local should_remove = enemy:update(scene, player_x)
-    if (((scene == 1) and enemy:is_alive()) and enemy:should_shoot())     then
+    if ((is_game and enemy:is_alive()) and enemy:should_shoot())     then
       self:add_enemy_bullet((enemy:get_x() + 3), (enemy:get_y() + 4))
       enemy:did_shoot()
     end
@@ -633,8 +668,7 @@ function Entities:update(scene, score)
           hit_something = true
         end
       else
-        for j=0,(count(self.enemies) - 1)         do
-          local enemy = self.enemies[(j + 1)]
+        for _,enemy in pairs(self.enemies)         do
           if (enemy:is_alive() and bullet:collides_with(enemy:get_x(), enemy:get_y(), enemy:get_size()))           then
             enemy:hit()
             self:add_explosion(enemy:get_x(), enemy:get_y())
@@ -707,17 +741,6 @@ function Entities:get_bullet_count()
   return count(self.bullets)
 end
 
--- enum Scene
-Start = {
-  tag = "Start"
-}
-Game = {
-  tag = "Game"
-}
-GameOver = {
-  tag = "GameOver"
-}
-
 -- struct GameState
 GameState = {}
 
@@ -725,63 +748,67 @@ game = nil
 
 function _init()
   poke(24374, 2)
-  game = {smap = SMap:new(), entities = Entities:new(), scene = 0, score = 0, go_timer = 90, hscore = 0, start_timer = 0}
+  game = {smap = SMap:new(), entities = Entities:new(), scene = Start, score = 0, go_timer = 90, hscore = 0, start_timer = 0}
 end
 
 function _update60()
   game.smap:update()
   local score_result = game.entities:update(game.scene, game.score)
-  if ((score_result == -1) and (game.scene == 1))   then
+  local is_game_scene = (function()
+    local __match = game.scene
+    if __match.tag == "Game"     then
+      true
+    elseif true     then
+      false
+        end
+  end)()
+  if ((score_result == -1) and is_game_scene)   then
     game_over()
   else
-    game.score = score_result
+    if (score_result ~= -1)     then
+      game.score = score_result
+    end
   end
-  if (game.scene == 0)   then
+  local __match = game.scene
+  if __match.tag == "Start"   then
     if btnp(BUTTONS.o, 0)     then
       start_game()
     end
-  else
-    if (game.scene == 1)     then
-      game.start_timer = (game.start_timer + 1)
-      if (game.start_timer > 900)       then
-        music(-1, 5000, 0)
-      end
-    else
-      if (game.scene == 2)       then
-        game.go_timer = (game.go_timer - 1)
-        if (game.go_timer <= 0)         then
-          if btnp(BUTTONS.o, 0)           then
-            start_game()
-          end
-        end
+  elseif __match.tag == "Game"   then
+    game.start_timer = (game.start_timer + 1)
+    if (game.start_timer > 900)     then
+      music(-1, 5000, 0)
+    end
+  elseif __match.tag == "GameOver"   then
+    game.go_timer = (game.go_timer - 1)
+    if (game.go_timer <= 0)     then
+      if btnp(BUTTONS.o, 0)       then
+        start_game()
       end
     end
-  end
+    end
 end
 
 function _draw()
   game.smap:draw()
   game.entities:draw()
-  if (game.scene == 0)   then
+  local __match = game.scene
+  if __match.tag == "Start"   then
     print("AIRWOLF", 48, 50, COLORS.yellow)
     print("press o to start", 30, 70, COLORS.white)
-  else
-    if (game.scene == 1)     then
-      print(("SCORE: " .. tostr(game.score, false)), 2, 2, COLORS.white)
-    else
-      if (game.scene == 2)       then
-        print("game over", 44, 60, COLORS.white)
-        print(("SCORE: " .. tostr(game.score, false)), 36, 70, COLORS.yellow)
-        if (game.go_timer <= 0)         then
-          print("press o to restart", 26, 80, COLORS.white)
-        end
-      end
+  elseif __match.tag == "Game"   then
+    print(("SCORE: " .. tostr(game.score, false)), 2, 2, COLORS.white)
+  elseif __match.tag == "GameOver"   then
+    print("game over", 44, 60, COLORS.white)
+    print(("SCORE: " .. tostr(game.score, false)), 36, 70, COLORS.yellow)
+    if (game.go_timer <= 0)     then
+      print("press o to restart", 26, 80, COLORS.white)
     end
-  end
+    end
 end
 
 function start_game()
-  game.scene = 1
+  game.scene = Game
   game.score = 0
   game.entities = Entities:new()
   game.smap = SMap:new()
@@ -790,7 +817,7 @@ function start_game()
 end
 
 function game_over()
-  game.scene = 2
+  game.scene = GameOver
   game.go_timer = 90
   music(-1, 100, 0)
   if (game.score > game.hscore)   then

@@ -5,6 +5,7 @@ use the_lady::TheLady;
 use enemy_aircraft::EnemyAircraft;
 use bullet::Bullet;
 use explosion::Explosion;
+use scene::Scene;
 
 // Entities manager with Vec arrays for each entity type
 struct Entities {
@@ -26,7 +27,7 @@ impl Entities {
         }
     }
 
-    fn update(&mut self, scene: i32, score: i32) -> i32 {  // 0=menu, 1=game
+    fn update(&mut self, scene: Scene, score: i32) -> i32 {
         let mut new_score = score;
 
         // Update player
@@ -36,8 +37,13 @@ impl Entities {
         if !self.player.is_alive() {
             return -1;
         }
-        
-        if scene != 1 {
+
+        let is_game = match scene {
+            Scene::Game => true,
+            _ => false,
+        };
+
+        if !is_game {
             return new_score;
         }
 
@@ -58,7 +64,7 @@ impl Entities {
             let mut should_remove = enemy.update(scene, player_x);
 
             // Check if enemy should shoot
-            if scene == 1 && enemy.is_alive() && enemy.should_shoot() {
+            if is_game && enemy.is_alive() && enemy.should_shoot() {
                 // Enemy shoots downward
                 self.add_enemy_bullet(enemy.get_x() + 3.0, enemy.get_y() + 4.0);
                 enemy.did_shoot();
@@ -113,8 +119,7 @@ impl Entities {
                     }
                 } else {
                     // Player bullet - check collision with enemies
-                    for j in 0..self.enemies.len() {
-                        let enemy = self.enemies[j];
+                    for enemy in self.enemies {
                         if enemy.is_alive() && bullet.collides_with(enemy.get_x(), enemy.get_y(), enemy.get_size()) {
                             // Hit enemy
                             enemy.hit();

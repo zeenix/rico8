@@ -4,19 +4,13 @@
 use consts::{BUTTONS, COLORS};
 use smap::SMap;
 use entities::Entities;
+use scene::Scene;
 
-// Game state enum
-enum Scene {
-    Start,
-    Game,
-    GameOver,
-}
-
-// Game state variables (simplified - in real game would be in a struct)
+// Game state variables
 struct GameState {
     smap: SMap,
     entities: Entities,
-    scene: i32,  // 0=start, 1=game, 2=game-over
+    scene: Scene,
     score: i32,
     go_timer: i32,  // Game over timer
     hscore: i32,    // High score
@@ -33,7 +27,7 @@ fn _init() {
     game = GameState {
         smap: SMap::new(),
         entities: Entities::new(),
-        scene: 0,  // Start scene
+        scene: Scene::Start,
         score: 0,
         go_timer: 90,  // 3 seconds at 30fps
         hscore: 0,
@@ -44,29 +38,39 @@ fn _init() {
 fn _update60() {
     game.smap.update();
     let score_result = game.entities.update(game.scene, game.score);
-    
+
     // Check if player died (indicated by -1 return)
-    if score_result == -1 && game.scene == 1 {
+    let is_game_scene = match game.scene {
+        Scene::Game => true,
+        _ => false,
+    };
+
+    if score_result == -1 && is_game_scene {
         game_over();
-    } else {
+    } else if score_result != -1 {
+        // Only update score if it's not the death signal
         game.score = score_result;
     }
 
-    if game.scene == 0 {  // Start scene
-        if btnp(BUTTONS.o, 0) {
-            start_game();
-        }
-    } else if game.scene == 1 {  // Game scene
-        game.start_timer = game.start_timer + 1;
-        if game.start_timer > 900 {  // 30s at 30fps
-            // Stop the music after 30s
-            music(-1, 5000, 0);
-        }
-    } else if game.scene == 2 {  // Game over scene
-        game.go_timer = game.go_timer - 1;
-        if game.go_timer <= 0 {
+    match game.scene {
+        Scene::Start => {
             if btnp(BUTTONS.o, 0) {
                 start_game();
+            }
+        },
+        Scene::Game => {
+            game.start_timer = game.start_timer + 1;
+            if game.start_timer > 900 {  // 30s at 30fps
+                // Stop the music after 30s
+                music(-1, 5000, 0);
+            }
+        },
+        Scene::GameOver => {
+            game.go_timer = game.go_timer - 1;
+            if game.go_timer <= 0 {
+                if btnp(BUTTONS.o, 0) {
+                    start_game();
+                }
             }
         }
     }
@@ -76,23 +80,27 @@ fn _draw() {
     game.smap.draw();
     game.entities.draw();
 
-    if game.scene == 0 {  // Start scene
-        print("AIRWOLF", 48, 50, COLORS.yellow);
-        print("press o to start", 30, 70, COLORS.white);
-    } else if game.scene == 1 {  // Game scene
-        // Draw HUD
-        print("SCORE: " + tostr(game.score, false), 2, 2, COLORS.white);
-    } else if game.scene == 2 {  // Game over scene
-        print("game over", 44, 60, COLORS.white);
-        print("SCORE: " + tostr(game.score, false), 36, 70, COLORS.yellow);
-        if game.go_timer <= 0 {
-            print("press o to restart", 26, 80, COLORS.white);
+    match game.scene {
+        Scene::Start => {
+            print("AIRWOLF", 48, 50, COLORS.yellow);
+            print("press o to start", 30, 70, COLORS.white);
+        },
+        Scene::Game => {
+            // Draw HUD
+            print("SCORE: " + tostr(game.score, false), 2, 2, COLORS.white);
+        },
+        Scene::GameOver => {
+            print("game over", 44, 60, COLORS.white);
+            print("SCORE: " + tostr(game.score, false), 36, 70, COLORS.yellow);
+            if game.go_timer <= 0 {
+                print("press o to restart", 26, 80, COLORS.white);
+            }
         }
     }
 }
 
 fn start_game() {
-    game.scene = 1;  // Game scene
+    game.scene = Scene::Game;
     game.score = 0;
     game.entities = Entities::new();
     game.smap = SMap::new();
@@ -101,7 +109,7 @@ fn start_game() {
 }
 
 fn game_over() {
-    game.scene = 2;  // Game over scene
+    game.scene = Scene::GameOver;
     game.go_timer = 90;  // 3 seconds at 30fps
     music(-1, 100, 0);  // Fade out music
 

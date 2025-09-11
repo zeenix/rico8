@@ -5,6 +5,7 @@ use entity::{Entity, EntityType, Sprite, Size, Direction};
 use shooter::{Shooter, BulletProps};
 use rotor::{Rotor, RotorProps};
 use consts::BUTTON_MASKS;
+use scene::Scene;
 
 struct TheLady {
     x: f32,
@@ -48,8 +49,13 @@ impl TheLady {
     }
 
     // Returns true if helicopter moved outside boundaries
-    fn update(&mut self, scene: i32) -> bool {  // 0=menu, 1=game
-        let outside = if scene == 1 {
+    fn update(&mut self, scene: Scene) -> bool {
+        let is_game = match scene {
+            Scene::Game => true,
+            _ => false,
+        };
+
+        let outside = if is_game {
             self.move_player()
         } else {
             false

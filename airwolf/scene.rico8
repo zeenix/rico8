@@ -1,0 +1,7 @@
+// Scene enum for game state management
+
+enum Scene {
+    Start,
+    Game,
+    GameOver,
+}

@@ -4,6 +4,7 @@
 use entity::{Entity, EntityType, Sprite, Size};
 use shooter::{Shooter, BulletProps};
 use rotor::{Rotor, RotorProps};
+use scene::Scene;
 
 struct EnemyAircraft {
     x: f32,
@@ -49,12 +50,17 @@ impl EnemyAircraft {
     }
 
     // Returns true if aircraft is destroyed or moved off screen
-    fn update(&mut self, scene: i32, airwolf_x: f32) -> bool {  // 0=menu, 1=game
+    fn update(&mut self, scene: Scene, airwolf_x: f32) -> bool {
         if !self.alive {
             return true;
         }
 
-        let outside = if scene == 1 {
+        let is_game = match scene {
+            Scene::Game => true,
+            _ => false,
+        };
+
+        let outside = if is_game {
             self.move_enemy(airwolf_x)
         } else {
             false
@@ -84,7 +90,7 @@ impl EnemyAircraft {
             self.x = self.x + 0.5; // Move right
             self.y = self.y + 0.3; // Move down
         } else if self.x > airwolf_x {
-            self.x = self.x - 0.5; // Move left  
+            self.x = self.x - 0.5; // Move left
             self.y = self.y + 0.3; // Move down
         } else {
             self.y = self.y + 0.5; // Move straight down
