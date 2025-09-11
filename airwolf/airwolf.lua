@@ -249,13 +249,15 @@ function TheLady:update(scene)
   return outside
 end
 function TheLady:draw()
-  palt(256)
-  local x = (flr(self.x) + 0.5)
-  local y = (flr(self.y) + 0.5)
-  spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
-  palt(32768)
-  self.main_rotor:draw()
-  self.tail_rotor:draw()
+  if self.alive   then
+    palt(256)
+    local x = (flr(self.x) + 0.5)
+    local y = (flr(self.y) + 0.5)
+    spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
+    palt(32768)
+    self.main_rotor:draw()
+    self.tail_rotor:draw()
+  end
 end
 function TheLady:move_player()
   local can_l = (self.x > -1)
@@ -606,6 +608,15 @@ end
 function Entities:update(scene, score)
   local new_score = score
   self.player:update(scene)
+  local i = count(self.explosions)
+  while (i > 0)   do
+    i = (i - 1)
+    local explosion = self.explosions[(i + 1)]
+    local should_remove = explosion:update()
+    if should_remove     then
+      deli(self.explosions, (i + 1))
+    end
+  end
   if not self.player:is_alive()   then
     return -1
   end
@@ -650,7 +661,7 @@ function Entities:update(scene, score)
           self:add_explosion(enemy:get_x(), enemy:get_y())
         end
       end
-      del(self.enemies, enemy)
+      deli(self.enemies, (i + 1))
     else
       i = (i + 1)
     end
@@ -680,17 +691,7 @@ function Entities:update(scene, score)
       end
     end
     if (should_remove or hit_something)     then
-      del(self.bullets, bullet)
-    else
-      i = (i + 1)
-    end
-  end
-  i = 0
-  while (i < count(self.explosions))   do
-    local explosion = self.explosions[(i + 1)]
-    local should_remove = explosion:update()
-    if should_remove     then
-      del(self.explosions, explosion)
+      deli(self.bullets, (i + 1))
     else
       i = (i + 1)
     end

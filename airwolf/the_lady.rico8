@@ -69,14 +69,16 @@ impl TheLady {
     }
 
     fn draw(&self) {
-        palt(256); // Set transparency
-        // Draw helicopter sprite
-        let x = flr(self.x) + 0.5;
-        let y = flr(self.y) + 0.5;
-        spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h);
-        palt(32768); // Reset transparency
-        self.main_rotor.draw();
-        self.tail_rotor.draw();
+        if self.alive {
+            palt(256); // Set transparency
+            // Draw helicopter sprite
+            let x = flr(self.x) + 0.5;
+            let y = flr(self.y) + 0.5;
+            spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h);
+            palt(32768); // Reset transparency
+            self.main_rotor.draw();
+            self.tail_rotor.draw();
+        }
     }
 
     fn move_player(&mut self) -> bool {

@@ -33,7 +33,21 @@ impl Entities {
         // Update player
         self.player.update(scene);
 
+        // Update explosions ALWAYS - they need to animate even after player death
+        // Iterate backwards to safely remove items
+        let mut i = self.explosions.len();
+        while i > 0 {
+            i = i - 1;
+            let explosion = self.explosions[i];
+            let should_remove = explosion.update();
+
+            if should_remove {
+                deli(self.explosions, i + 1);  // Use deli with 1-based index for Lua
+            }
+        }
+
         // Check if player is dead - return -1 to signal game over
+        // But only AFTER updating explosions so they can animate
         if !self.player.is_alive() {
             return -1;
         }
@@ -94,8 +108,8 @@ impl Entities {
                     }
                 }
 
-                // Remove enemy
-                del(self.enemies, enemy);
+                // Remove enemy using deli with 1-based index
+                deli(self.enemies, i + 1);
             } else {
                 i = i + 1;
             }
@@ -133,24 +147,12 @@ impl Entities {
             }
 
             if should_remove || hit_something {
-                del(self.bullets, bullet);
+                deli(self.bullets, i + 1);  // Use deli with 1-based index
             } else {
                 i = i + 1;
             }
         }
 
-        // Update explosions and check for removal
-        i = 0;
-        while i < self.explosions.len() {
-            let explosion = self.explosions[i];
-            let should_remove = explosion.update();
-
-            if should_remove {
-                del(self.explosions, explosion);
-            } else {
-                i = i + 1;
-            }
-        }
 
         // Check if player shoots
         if btnp(4, 0) || btnp(5, 0) {  // O or X button
