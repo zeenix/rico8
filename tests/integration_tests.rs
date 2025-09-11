@@ -190,7 +190,7 @@ fn test_loops() {
     for i in 0..5 {
         print(i);
     }
-    
+
     let mut x = 0;
     while x < 3 {
         x = x + 1;
