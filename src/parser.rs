@@ -42,7 +42,7 @@ impl Parser {
             self.advance();
             Ok(())
         } else {
-            // Debug: show context around the error
+            // Special case for common parsing mistakes
             if expected == Token::LeftBrace && self.current() == &Token::If {
                 eprintln!(
                     "Debug: Expecting LeftBrace but found If at position {}",
@@ -553,20 +553,36 @@ impl Parser {
 
         if self.current() == &Token::LeftBracket {
             self.advance();
+
+            // Check for empty brackets [] (dynamic array)
+            if self.current() == &Token::RightBracket {
+                self.advance();
+                // For dynamic arrays, we'll use size 0 to indicate dynamic
+                return Ok(Type::Array(Box::new(Type::Path("Any".to_string())), 0));
+            }
+
             let elem_type = self.parse_type()?;
-            self.expect(Token::Semicolon)?;
-            let size = match self.current() {
-                Token::IntLiteral(n) => *n as usize,
-                _ => {
-                    return Err(ParseError::UnexpectedToken {
-                        expected: "array size".to_string(),
-                        found: self.current().clone(),
-                    })
-                }
-            };
-            self.advance();
+
+            // Check for fixed-size array [T; size]
+            if self.current() == &Token::Semicolon {
+                self.advance();
+                let size = match self.current() {
+                    Token::IntLiteral(n) => *n as usize,
+                    _ => {
+                        return Err(ParseError::UnexpectedToken {
+                            expected: "array size".to_string(),
+                            found: self.current().clone(),
+                        })
+                    }
+                };
+                self.advance();
+                self.expect(Token::RightBracket)?;
+                return Ok(Type::Array(Box::new(elem_type), size));
+            }
+
+            // Dynamic array [T]
             self.expect(Token::RightBracket)?;
-            return Ok(Type::Array(Box::new(elem_type), size));
+            return Ok(Type::Array(Box::new(elem_type), 0));
         }
 
         // Handle Self type
@@ -1311,4 +1327,420 @@ impl Parser {
 pub fn parse(tokens: Vec<Token>) -> Result<Program, ParseError> {
     let mut parser = Parser::new(tokens);
     parser.parse_program()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::tokenize;
+
+    fn parse_test(input: &str) -> Result<Program, ParseError> {
+        let tokens = tokenize(input).expect("Lexer error");
+        parse(tokens)
+    }
+
+    #[test]
+    fn test_vec_type_parsing() {
+        let input = r#"
+            struct Container {
+                items: Vec<i32>,
+                strings: Vec<String>,
+            }
+        "#;
+
+        let program = parse_test(input).expect("Failed to parse");
+        assert_eq!(program.items.len(), 1);
+
+        if let Item::Struct(s) = &program.items[0] {
+            assert_eq!(s.name, "Container");
+            assert_eq!(s.fields.len(), 2);
+
+            // Check Vec<i32>
+            assert_eq!(s.fields[0].name, "items");
+            if let Type::Generic(name, args) = &s.fields[0].ty {
+                assert_eq!(name, "Vec");
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0], Type::Path("i32".to_string()));
+            } else {
+                panic!("Expected Vec<i32> type");
+            }
+
+            // Check Vec<String>
+            assert_eq!(s.fields[1].name, "strings");
+            if let Type::Generic(name, args) = &s.fields[1].ty {
+                assert_eq!(name, "Vec");
+                assert_eq!(args.len(), 1);
+                assert_eq!(args[0], Type::Path("String".to_string()));
+            } else {
+                panic!("Expected Vec<String> type");
+            }
+        } else {
+            panic!("Expected struct item");
+        }
+    }
+
+    #[test]
+    fn test_vec_methods() {
+        let input = r#"
+            fn test_vec() {
+                let mut v = Vec::new();
+                v.push(42);
+                let len = v.len();
+            }
+        "#;
+
+        let program = parse_test(input).expect("Failed to parse");
+        assert_eq!(program.items.len(), 1);
+
+        if let Item::Function(f) = &program.items[0] {
+            assert_eq!(f.name, "test_vec");
+            assert_eq!(f.body.statements.len(), 3);
+
+            // Check Vec::new()
+            if let Statement::Let(let_stmt) = &f.body.statements[0] {
+                assert_eq!(let_stmt.name, "v");
+                assert!(let_stmt.is_mut);
+                if let Some(Expr::Call(func, args)) = &let_stmt.value {
+                    if let Expr::Ident(name) = &**func {
+                        assert_eq!(name, "Vec::new");
+                        assert_eq!(args.len(), 0);
+                    } else {
+                        panic!("Expected Vec::new call");
+                    }
+                } else {
+                    panic!("Expected function call");
+                }
+            } else {
+                panic!("Expected let statement");
+            }
+
+            // Check v.push(42)
+            if let Statement::Expr(expr) = &f.body.statements[1] {
+                if let Expr::MethodCall(obj, method, args) = expr {
+                    assert_eq!(method, "push");
+                    assert_eq!(args.len(), 1);
+                    if let Expr::Ident(name) = &**obj {
+                        assert_eq!(name, "v");
+                    } else {
+                        panic!("Expected identifier");
+                    }
+                } else {
+                    panic!("Expected method call");
+                }
+            } else {
+                panic!("Expected expression statement");
+            }
+
+            // Check v.len()
+            if let Statement::Let(let_stmt) = &f.body.statements[2] {
+                assert_eq!(let_stmt.name, "len");
+                if let Some(Expr::MethodCall(obj, method, args)) = &let_stmt.value {
+                    assert_eq!(method, "len");
+                    assert_eq!(args.len(), 0);
+                    if let Expr::Ident(name) = &**obj {
+                        assert_eq!(name, "v");
+                    } else {
+                        panic!("Expected identifier");
+                    }
+                } else {
+                    panic!("Expected method call");
+                }
+            } else {
+                panic!("Expected let statement");
+            }
+        } else {
+            panic!("Expected function item");
+        }
+    }
+
+    #[test]
+    fn test_fixed_size_arrays() {
+        let input = r#"
+            struct Arrays {
+                buffer: [u8; 256],
+                matrix: [f32; 16],
+            }
+        "#;
+
+        let program = parse_test(input).expect("Failed to parse");
+        assert_eq!(program.items.len(), 1);
+
+        if let Item::Struct(s) = &program.items[0] {
+            assert_eq!(s.name, "Arrays");
+            assert_eq!(s.fields.len(), 2);
+
+            // Check [u8; 256]
+            assert_eq!(s.fields[0].name, "buffer");
+            if let Type::Array(elem_type, size) = &s.fields[0].ty {
+                assert_eq!(**elem_type, Type::Path("u8".to_string()));
+                assert_eq!(*size, 256);
+            } else {
+                panic!("Expected array type");
+            }
+
+            // Check [f32; 16]
+            assert_eq!(s.fields[1].name, "matrix");
+            if let Type::Array(elem_type, size) = &s.fields[1].ty {
+                assert_eq!(**elem_type, Type::Path("f32".to_string()));
+                assert_eq!(*size, 16);
+            } else {
+                panic!("Expected array type");
+            }
+        } else {
+            panic!("Expected struct item");
+        }
+    }
+
+    #[test]
+    fn test_dynamic_arrays() {
+        let input = r#"
+            struct DynamicArrays {
+                items: [Thing],
+                numbers: [i32],
+            }
+        "#;
+
+        let program = parse_test(input).expect("Failed to parse");
+        assert_eq!(program.items.len(), 1);
+
+        if let Item::Struct(s) = &program.items[0] {
+            assert_eq!(s.name, "DynamicArrays");
+            assert_eq!(s.fields.len(), 2);
+
+            // Check [Thing] (dynamic array)
+            assert_eq!(s.fields[0].name, "items");
+            if let Type::Array(elem_type, size) = &s.fields[0].ty {
+                assert_eq!(**elem_type, Type::Path("Thing".to_string()));
+                assert_eq!(*size, 0); // 0 indicates dynamic array
+            } else {
+                panic!("Expected array type");
+            }
+
+            // Check [i32] (dynamic array)
+            assert_eq!(s.fields[1].name, "numbers");
+            if let Type::Array(elem_type, size) = &s.fields[1].ty {
+                assert_eq!(**elem_type, Type::Path("i32".to_string()));
+                assert_eq!(*size, 0); // 0 indicates dynamic array
+            } else {
+                panic!("Expected array type");
+            }
+        } else {
+            panic!("Expected struct item");
+        }
+    }
+
+    #[test]
+    fn test_array_indexing() {
+        let input = r#"
+            fn test_indexing() {
+                let arr = [1, 2, 3];
+                let first = arr[0];
+                let last = arr[2];
+                arr[1] = 42;
+            }
+        "#;
+
+        let program = parse_test(input).expect("Failed to parse");
+        assert_eq!(program.items.len(), 1);
+
+        if let Item::Function(f) = &program.items[0] {
+            assert_eq!(f.name, "test_indexing");
+            assert_eq!(f.body.statements.len(), 4);
+
+            // Check array literal
+            if let Statement::Let(let_stmt) = &f.body.statements[0] {
+                assert_eq!(let_stmt.name, "arr");
+                if let Some(Expr::Array(elements)) = &let_stmt.value {
+                    assert_eq!(elements.len(), 3);
+                } else {
+                    panic!("Expected array literal");
+                }
+            } else {
+                panic!("Expected let statement");
+            }
+
+            // Check arr[0]
+            if let Statement::Let(let_stmt) = &f.body.statements[1] {
+                assert_eq!(let_stmt.name, "first");
+                if let Some(Expr::Index(arr, index)) = &let_stmt.value {
+                    if let Expr::Ident(name) = &**arr {
+                        assert_eq!(name, "arr");
+                    } else {
+                        panic!("Expected identifier");
+                    }
+                    if let Expr::Literal(Literal::Int(n)) = &**index {
+                        assert_eq!(*n, 0);
+                    } else {
+                        panic!("Expected integer literal");
+                    }
+                } else {
+                    panic!("Expected index expression");
+                }
+            } else {
+                panic!("Expected let statement");
+            }
+
+            // Check arr[2]
+            if let Statement::Let(let_stmt) = &f.body.statements[2] {
+                assert_eq!(let_stmt.name, "last");
+                if let Some(Expr::Index(arr, index)) = &let_stmt.value {
+                    if let Expr::Ident(name) = &**arr {
+                        assert_eq!(name, "arr");
+                    } else {
+                        panic!("Expected identifier");
+                    }
+                    if let Expr::Literal(Literal::Int(n)) = &**index {
+                        assert_eq!(*n, 2);
+                    } else {
+                        panic!("Expected integer literal");
+                    }
+                } else {
+                    panic!("Expected index expression");
+                }
+            } else {
+                panic!("Expected let statement");
+            }
+
+            // Check arr[1] = 42
+            if let Statement::Assign(lhs, rhs) = &f.body.statements[3] {
+                if let Expr::Index(arr, index) = lhs {
+                    if let Expr::Ident(name) = &**arr {
+                        assert_eq!(name, "arr");
+                    } else {
+                        panic!("Expected identifier");
+                    }
+                    if let Expr::Literal(Literal::Int(n)) = &**index {
+                        assert_eq!(*n, 1);
+                    } else {
+                        panic!("Expected integer literal");
+                    }
+                } else {
+                    panic!("Expected index expression");
+                }
+                if let Expr::Literal(Literal::Int(n)) = rhs {
+                    assert_eq!(*n, 42);
+                } else {
+                    panic!("Expected integer literal");
+                }
+            } else {
+                panic!("Expected assignment statement");
+            }
+        } else {
+            panic!("Expected function item");
+        }
+    }
+
+    #[test]
+    fn test_range_with_self() {
+        let input = r#"
+            impl Thing {
+                fn test() {
+                    for i in 0..self.items.len() {
+                        let x = i;
+                    }
+                }
+            }
+        "#;
+
+        let program = parse_test(input).expect("Failed to parse");
+        assert_eq!(program.items.len(), 1);
+
+        if let Item::Impl(impl_block) = &program.items[0] {
+            assert_eq!(impl_block.target_type, Type::Path("Thing".to_string()));
+            assert_eq!(impl_block.methods.len(), 1);
+
+            let method = &impl_block.methods[0];
+            assert_eq!(method.name, "test");
+            assert_eq!(method.body.statements.len(), 1);
+
+            if let Statement::For(for_stmt) = &method.body.statements[0] {
+                assert_eq!(for_stmt.var, "i");
+                if let Expr::Range(start, end) = &for_stmt.iter {
+                    // Check start is 0
+                    if let Some(start_expr) = start {
+                        if let Expr::Literal(Literal::Int(n)) = &**start_expr {
+                            assert_eq!(*n, 0);
+                        } else {
+                            panic!("Expected integer literal for range start");
+                        }
+                    } else {
+                        panic!("Expected range start");
+                    }
+
+                    // Check end is self.items.len()
+                    if let Some(end_expr) = end {
+                        if let Expr::MethodCall(obj, method, args) = &**end_expr {
+                            assert_eq!(method, "len");
+                            assert_eq!(args.len(), 0);
+                            if let Expr::Field(self_expr, field) = &**obj {
+                                if let Expr::Ident(name) = &**self_expr {
+                                    assert_eq!(name, "self");
+                                    assert_eq!(field, "items");
+                                } else {
+                                    panic!("Expected self identifier");
+                                }
+                            } else {
+                                panic!("Expected field access");
+                            }
+                        } else {
+                            panic!("Expected method call for range end");
+                        }
+                    } else {
+                        panic!("Expected range end");
+                    }
+                } else {
+                    panic!("Expected range expression");
+                }
+            } else {
+                panic!("Expected for statement");
+            }
+        } else {
+            panic!("Expected impl block");
+        }
+    }
+
+    #[test]
+    fn test_self_type_in_return() {
+        let input = r#"
+            impl Builder {
+                fn new() -> Self {
+                    Self { field: 42 }
+                }
+            }
+        "#;
+
+        let program = parse_test(input).expect("Failed to parse");
+        assert_eq!(program.items.len(), 1);
+
+        if let Item::Impl(impl_block) = &program.items[0] {
+            assert_eq!(impl_block.target_type, Type::Path("Builder".to_string()));
+            assert_eq!(impl_block.methods.len(), 1);
+
+            let method = &impl_block.methods[0];
+            assert_eq!(method.name, "new");
+
+            // Check return type is Self
+            if let Some(return_type) = &method.return_type {
+                assert_eq!(*return_type, Type::Path("Self".to_string()));
+            } else {
+                panic!("Expected return type");
+            }
+
+            // Check Self constructor in body
+            assert_eq!(method.body.statements.len(), 1);
+            if let Statement::Expr(expr) = &method.body.statements[0] {
+                if let Expr::Struct(name, fields) = expr {
+                    assert_eq!(name, "Self");
+                    assert_eq!(fields.len(), 1);
+                    assert_eq!(fields[0].0, "field");
+                } else {
+                    panic!("Expected struct constructor");
+                }
+            } else {
+                panic!("Expected expression statement");
+            }
+        } else {
+            panic!("Expected impl block");
+        }
+    }
 }

@@ -163,7 +163,7 @@ fn test_for_loop() {
     let result = compile_source(source);
     assert!(result.is_ok());
     let lua = result.unwrap();
-    assert!(lua.contains("for i=0,10"));
+    assert!(lua.contains("for i=0,9")); // Rico8 correctly handles exclusive ranges
 }
 
 #[test]

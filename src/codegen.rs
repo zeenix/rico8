@@ -844,3 +844,250 @@ pub fn generate(program: Program) -> Result<String, CodegenError> {
     generator.generate_program(&program)?;
     Ok(generator.output)
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::lexer::tokenize;
+    use crate::parser::parse;
+
+    fn generate_lua(input: &str) -> String {
+        let tokens = tokenize(input).expect("Lexer error");
+        let program = parse(tokens).expect("Parser error");
+        generate(program).expect("Codegen error")
+    }
+
+    #[test]
+    fn test_vec_new_generates_empty_table() {
+        let input = r#"
+            fn test() {
+                let v = Vec::new();
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("local v = {}"),
+            "Vec::new() should generate empty table"
+        );
+    }
+
+    #[test]
+    fn test_vec_push_generates_add() {
+        let input = r#"
+            fn test() {
+                let mut v = Vec::new();
+                v.push(42);
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("local v = {}"),
+            "Vec::new() should generate empty table"
+        );
+        assert!(
+            lua.contains("add(v, 42)"),
+            "v.push(42) should generate add(v, 42)"
+        );
+    }
+
+    #[test]
+    fn test_vec_len_generates_count() {
+        let input = r#"
+            fn test() {
+                let v = Vec::new();
+                let size = v.len();
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("local size = count(v)"),
+            "v.len() should generate count(v)"
+        );
+    }
+
+    #[test]
+    fn test_vec_in_struct() {
+        let input = r#"
+            struct Container {
+                items: Vec<Thing>,
+            }
+
+            impl Container {
+                fn new() -> Container {
+                    Container {
+                        items: Vec::new(),
+                    }
+                }
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("obj = {items = {}}"),
+            "Struct with Vec field should initialize with empty table"
+        );
+    }
+
+    #[test]
+    fn test_array_literal_generates_table() {
+        let input = r#"
+            fn test() {
+                let arr = [1, 2, 3];
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("local arr = {1, 2, 3}"),
+            "Array literal should generate Lua table"
+        );
+    }
+
+    #[test]
+    fn test_array_indexing() {
+        let input = r#"
+            fn test() {
+                let arr = [10, 20, 30];
+                let first = arr[0];
+                arr[1] = 25;
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("local first = arr[(0 + 1)]") || lua.contains("local first = arr[1]"),
+            "Array indexing should handle 0-based to 1-based conversion"
+        );
+        assert!(
+            lua.contains("arr[(1 + 1)] = 25") || lua.contains("arr[2] = 25"),
+            "Array assignment should handle 0-based to 1-based conversion"
+        );
+    }
+
+    #[test]
+    fn test_range_for_loop() {
+        let input = r#"
+            fn test() {
+                for i in 0..10 {
+                    let x = i;
+                }
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("for i=0,9"),
+            "Range 0..10 should generate for i=0,9 (exclusive end)"
+        );
+    }
+
+    #[test]
+    fn test_range_with_vec_len() {
+        let input = r#"
+            struct Thing {
+                items: Vec<i32>,
+            }
+
+            impl Thing {
+                fn process(&self) {
+                    for i in 0..self.items.len() {
+                        let x = i;
+                    }
+                }
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("for i=0,count(self.items)")
+                || lua.contains("for i=0,(count(self.items) - 1)"),
+            "Range with vec.len() should use count()"
+        );
+    }
+
+    #[test]
+    fn test_self_constructor() {
+        let input = r#"
+            impl Builder {
+                fn new() -> Self {
+                    Self {
+                        value: 42,
+                    }
+                }
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        // Self should be replaced with the actual type name in codegen
+        assert!(
+            lua.contains("obj = {value = 42}"),
+            "Self constructor should generate object with fields"
+        );
+    }
+
+    #[test]
+    fn test_vec_operations_in_loop() {
+        let input = r#"
+            fn test() {
+                let mut numbers = Vec::new();
+                for i in 0..5 {
+                    numbers.push(i);
+                }
+                let total = numbers.len();
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("local numbers = {}"),
+            "Vec::new() generates empty table"
+        );
+        assert!(
+            lua.contains("add(numbers, i)"),
+            "push in loop generates add()"
+        );
+        assert!(
+            lua.contains("local total = count(numbers)"),
+            "len() generates count()"
+        );
+    }
+
+    #[test]
+    fn test_nested_vec_types() {
+        let input = r#"
+            struct Matrix {
+                rows: Vec<f32>,
+            }
+
+            impl Matrix {
+                fn new() -> Matrix {
+                    Matrix {
+                        rows: Vec::new(),
+                    }
+                }
+
+                fn add_row(&mut self) {
+                    let row = Vec::new();
+                    self.rows.push(row);
+                }
+            }
+        "#;
+
+        let lua = generate_lua(input);
+        assert!(
+            lua.contains("obj = {rows = {}}"),
+            "Nested Vec should initialize as empty table"
+        );
+        assert!(
+            lua.contains("local row = {}"),
+            "Inner Vec::new() should generate empty table"
+        );
+        assert!(
+            lua.contains("add(self.rows, row)"),
+            "Pushing inner vec should use add()"
+        );
+    }
+}

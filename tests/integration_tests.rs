@@ -203,7 +203,7 @@ fn test_loops() {
 
     let lua = compile_file(test_file).unwrap();
 
-    assert!(lua.contains("for i=0,5"));
+    assert!(lua.contains("for i=0,4")); // 0..5 is exclusive, so generates 0,4
     assert!(lua.contains("while (x < 3)"));
 
     // Cleanup
