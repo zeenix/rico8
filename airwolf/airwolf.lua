@@ -237,9 +237,9 @@ function TheLady:update(scene)
   local is_game = (function()
     local __match = scene
     if __match.tag == "Game"     then
-      true
+      return true
     elseif true     then
-      false
+      return false
         end
   end)()
   local outside = (is_game and self:move_player() or false)
@@ -374,9 +374,9 @@ function EnemyAircraft:update(scene, airwolf_x)
   local is_game = (function()
     local __match = scene
     if __match.tag == "Game"     then
-      true
+      return true
     elseif true     then
-      false
+      return false
         end
   end)()
   local outside = (is_game and self:move_enemy(airwolf_x) or false)
@@ -612,9 +612,9 @@ function Entities:update(scene, score)
   local is_game = (function()
     local __match = scene
     if __match.tag == "Game"     then
-      true
+      return true
     elseif true     then
-      false
+      return false
         end
   end)()
   if not is_game   then
@@ -757,9 +757,9 @@ function _update60()
   local is_game_scene = (function()
     local __match = game.scene
     if __match.tag == "Game"     then
-      true
+      return true
     elseif true     then
-      false
+      return false
         end
   end)()
   if ((score_result == -1) and is_game_scene)   then
