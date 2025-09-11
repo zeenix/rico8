@@ -227,8 +227,8 @@ fn test_arrays() {
     let lua = compile_file(test_file).unwrap();
 
     assert!(lua.contains("{1, 2, 3}"));
-    assert!(lua.contains("arr[0]"));
-    assert!(lua.contains("arr[1] = 10"));
+    assert!(lua.contains("arr[1]")); // 0-based index converted to 1-based
+    assert!(lua.contains("arr[2] = 10")); // 1-based index converted to 2-based
 
     // Cleanup
     fs::remove_file(test_file).ok();

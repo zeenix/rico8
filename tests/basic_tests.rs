@@ -198,7 +198,7 @@ fn test_arrays() {
     assert!(result.is_ok());
     let lua = result.unwrap();
     assert!(lua.contains("{1, 2, 3}"));
-    assert!(lua.contains("arr[0]"));
+    assert!(lua.contains("arr[1]")); // Rico8 converts 0-based to 1-based indexing for Lua
 }
 
 #[test]

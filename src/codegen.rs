@@ -679,7 +679,16 @@ impl Generator {
             Expr::Index(obj, index) => {
                 self.generate_expr(obj)?;
                 self.write("[");
-                self.generate_expr(index)?;
+                // Lua uses 1-based indexing, so we need to add 1 to numeric indices
+                // Check if index is a simple integer literal
+                if let Expr::Literal(Literal::Int(n)) = &**index {
+                    self.write(&format!("{}", n + 1));
+                } else {
+                    // For non-literal indices, add 1 at runtime
+                    self.write("(");
+                    self.generate_expr(index)?;
+                    self.write(" + 1)");
+                }
                 self.write("]");
             }
             Expr::Struct(_, fields) => {
@@ -755,7 +764,17 @@ impl Generator {
                 }
                 self.write(",");
                 if let Some(end) = end {
-                    self.generate_expr(end)?;
+                    // Rust ranges are exclusive of the end, Lua for loops are inclusive
+                    // So we need to subtract 1 from the end value
+                    if let Expr::Literal(Literal::Int(n)) = &**end {
+                        // For literal integers, subtract 1 at compile time
+                        self.write(&format!("{}", n - 1));
+                    } else {
+                        // For expressions, subtract 1 at runtime
+                        self.write("(");
+                        self.generate_expr(end)?;
+                        self.write(" - 1)");
+                    }
                 } else {
                     self.write("#t");
                 }
