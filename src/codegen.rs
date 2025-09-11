@@ -576,6 +576,13 @@ impl Generator {
                         if let Some(sep_pos) = name.find("::") {
                             let obj = &name[..sep_pos];
                             let method = &name[sep_pos + 2..];
+
+                            // Special case for Vec::new() - generate empty table
+                            if obj == "Vec" && method == "new" {
+                                self.write("{}");
+                                return Ok(());
+                            }
+
                             // Constructor patterns should use : for method syntax.
                             if method == "new"
                                 || method.starts_with("from_")
@@ -625,16 +632,45 @@ impl Generator {
                 self.write(")");
             }
             Expr::MethodCall(obj, method, args) => {
-                self.generate_expr(obj)?;
-                self.write(&format!(":{}", method));
-                self.write("(");
-                for (i, arg) in args.iter().enumerate() {
-                    self.generate_expr(arg)?;
-                    if i < args.len() - 1 {
-                        self.write(", ");
+                // Special handling for Vec methods
+                if method == "push" {
+                    // vec.push(item) -> add(vec, item)
+                    self.write("add(");
+                    self.generate_expr(obj)?;
+                    self.write(", ");
+                    if !args.is_empty() {
+                        self.generate_expr(&args[0])?;
                     }
+                    self.write(")");
+                } else if method == "pop" {
+                    // vec.pop() -> del(vec, #vec)
+                    self.write("del(");
+                    self.generate_expr(obj)?;
+                    self.write(", count(");
+                    self.generate_expr(obj)?;
+                    self.write(") - 1)");
+                } else if method == "len" {
+                    // vec.len() -> count(vec)
+                    self.write("count(");
+                    self.generate_expr(obj)?;
+                    self.write(")");
+                } else if method == "clear" {
+                    // vec.clear() -> vec = {}
+                    self.generate_expr(obj)?;
+                    self.write(" = {}");
+                } else {
+                    // Regular method call
+                    self.generate_expr(obj)?;
+                    self.write(&format!(":{}", method));
+                    self.write("(");
+                    for (i, arg) in args.iter().enumerate() {
+                        self.generate_expr(arg)?;
+                        if i < args.len() - 1 {
+                            self.write(", ");
+                        }
+                    }
+                    self.write(")");
                 }
-                self.write(")");
             }
             Expr::Field(obj, field) => {
                 self.generate_expr(obj)?;
@@ -750,7 +786,14 @@ impl Generator {
     fn type_to_string(&self, ty: &Type) -> String {
         match ty {
             Type::Path(name) => name.clone(),
-            Type::Generic(name, _) => name.clone(),
+            Type::Generic(name, _) => {
+                // Special handling for Vec<T> - just use the base name
+                if name == "Vec" {
+                    "Vec".to_string()
+                } else {
+                    name.clone()
+                }
+            }
             Type::Reference(inner, _) => self.type_to_string(inner),
             Type::Array(_, _) => "array".to_string(),
             Type::Tuple(_) => "tuple".to_string(),
