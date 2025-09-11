@@ -1,0 +1,6 @@
+// Update result enum for game state updates
+
+enum UpdateResult {
+    Score(i32),      // Continue playing with updated score
+    PlayerDied,      // Player died, trigger game over
+}

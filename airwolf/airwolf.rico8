@@ -5,6 +5,7 @@ use consts::{BUTTONS, COLORS};
 use smap::SMap;
 use entities::Entities;
 use scene::Scene;
+use update_result::UpdateResult;
 
 // Game state variables
 struct GameState {
@@ -37,19 +38,22 @@ fn _init() {
 
 fn _update60() {
     game.smap.update();
-    let score_result = game.entities.update(game.scene, game.score);
+    let update_result = game.entities.update(game.scene, game.score);
 
-    // Check if player died (indicated by -1 return)
-    let is_game_scene = match game.scene {
-        Scene::Game => true,
-        _ => false,
-    };
-
-    if score_result == -1 && is_game_scene {
-        game_over();
-    } else if score_result != -1 {
-        // Only update score if it's not the death signal
-        game.score = score_result;
+    // Handle the update result
+    match update_result {
+        UpdateResult::PlayerDied => {
+            let is_game_scene = match game.scene {
+                Scene::Game => true,
+                _ => false,
+            };
+            if is_game_scene {
+                game_over();
+            }
+        },
+        UpdateResult::Score(score) => {
+            game.score = score;
+        }
     }
 
     match game.scene {

@@ -6,6 +6,7 @@ use enemy_aircraft::EnemyAircraft;
 use bullet::Bullet;
 use explosion::Explosion;
 use scene::Scene;
+use update_result::UpdateResult;
 
 // Entities manager with Vec arrays for each entity type
 struct Entities {
@@ -27,7 +28,7 @@ impl Entities {
         }
     }
 
-    fn update(&mut self, scene: Scene, score: i32) -> i32 {
+    fn update(&mut self, scene: Scene, score: i32) -> UpdateResult {
         let mut new_score = score;
 
         // Update player
@@ -46,10 +47,10 @@ impl Entities {
             }
         }
 
-        // Check if player is dead - return -1 to signal game over
+        // Check if player is dead - signal game over
         // But only AFTER updating explosions so they can animate
         if !self.player.is_alive() {
-            return -1;
+            return PlayerDied;
         }
 
         let is_game = match scene {
@@ -58,7 +59,7 @@ impl Entities {
         };
 
         if !is_game {
-            return new_score;
+            return Score(new_score);
         }
 
         // Spawn enemies periodically
@@ -159,7 +160,7 @@ impl Entities {
             self.add_bullet(self.player.get_x() + 3, self.player.get_y() - 2, 0, -2);
         }
 
-        new_score
+        Score(new_score)
     }
 
     fn draw(&self) {

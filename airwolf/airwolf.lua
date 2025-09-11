@@ -595,6 +595,18 @@ for k, v in pairs(Entity) do
   end
 end
 
+-- enum UpdateResult
+function Score(...)
+  local args = {...}
+  return {
+    tag = "Score",
+    _0 = args[1],
+  }
+end
+PlayerDied = {
+  tag = "PlayerDied"
+}
+
 -- struct Entities
 Entities = {}
 
@@ -618,7 +630,7 @@ function Entities:update(scene, score)
     end
   end
   if not self.player:is_alive()   then
-    return -1
+    return PlayerDied
   end
   local is_game = (function()
     local __match = scene
@@ -629,7 +641,7 @@ function Entities:update(scene, score)
         end
   end)()
   if not is_game   then
-    return new_score
+    return Score(new_score)
   end
   self.enemy_spawn_timer = (self.enemy_spawn_timer + 1)
   if (self.enemy_spawn_timer > 90)   then
@@ -699,7 +711,7 @@ function Entities:update(scene, score)
   if (btnp(4, 0) or btnp(5, 0))   then
     self:add_bullet((self.player:get_x() + 3), (self.player:get_y() - 2), 0, -2)
   end
-  return new_score
+  return Score(new_score)
 end
 function Entities:draw()
   self.player:draw()
@@ -754,22 +766,24 @@ end
 
 function _update60()
   game.smap:update()
-  local score_result = game.entities:update(game.scene, game.score)
-  local is_game_scene = (function()
-    local __match = game.scene
-    if __match.tag == "Game"     then
-      return true
-    elseif true     then
-      return false
-        end
-  end)()
-  if ((score_result == -1) and is_game_scene)   then
-    game_over()
-  else
-    if (score_result ~= -1)     then
-      game.score = score_result
+  local update_result = game.entities:update(game.scene, game.score)
+  local __match = update_result
+  if __match.tag == "PlayerDied"   then
+    local is_game_scene = (function()
+      local __match = game.scene
+      if __match.tag == "Game"       then
+        return true
+      elseif true       then
+        return false
+            end
+    end)()
+    if is_game_scene     then
+      game_over()
     end
-  end
+  elseif __match.tag == "Score"   then
+    local score = __match._0
+    game.score = score
+    end
   local __match = game.scene
   if __match.tag == "Start"   then
     if btnp(BUTTONS.o, 0)     then
