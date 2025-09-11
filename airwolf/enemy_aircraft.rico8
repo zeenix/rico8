@@ -1,0 +1,161 @@
+// Enemy Aircraft module for Airwolf game
+// Ported from Lua to Rico8
+
+use entity::{Entity, EntityType, Sprite, Size};
+use shooter::{Shooter, BulletProps};
+use rotor::{Rotor, RotorProps};
+
+struct EnemyAircraft {
+    x: f32,
+    y: f32,
+    sprite: Sprite,
+    size: Size,
+    shooter: Shooter,
+    main_rotor: Rotor,
+    tail_rotor: Rotor,
+    alive: bool,
+}
+
+impl EnemyAircraft {
+    fn new() -> EnemyAircraft {
+        let x = flr(rnd(127.0));
+
+        let bullet_props = BulletProps {
+            x_offset: 3.0,
+            y_offset: 4.0,
+            interval: 1.0,
+            sw: 1,
+            sh: 1,
+        };
+
+        EnemyAircraft {
+            x: x,
+            y: -8.0,
+            sprite: Sprite { num: 32, w: 1, h: 1 },
+            size: Size { w: 6.0, h: 8.0 },
+            shooter: Shooter::new(bullet_props),
+            main_rotor: Rotor::new(RotorProps {
+                x: 2.5,
+                y: 4.0,
+                length: 2.0,
+            }),
+            tail_rotor: Rotor::new(RotorProps {
+                x: 2.0,
+                y: 0.0,
+                length: 1.0,
+            }),
+            alive: true,
+        }
+    }
+
+    // Returns true if aircraft is destroyed or moved off screen
+    fn update(&mut self, scene: i32, airwolf_x: f32) -> bool {  // 0=menu, 1=game
+        if !self.alive {
+            return true;
+        }
+
+        let outside = if scene == 1 {
+            self.move_enemy(airwolf_x)
+        } else {
+            false
+        };
+
+        self.shooter.update(self.x, self.y);
+        self.main_rotor.update(self.x, self.y);
+        self.tail_rotor.update(self.x, self.y);
+
+        outside
+    }
+
+    fn draw(&self) {
+        if self.alive {
+            // Draw enemy sprite
+            let x = flr(self.x) + 0.5;
+            let y = flr(self.y) + 0.5;
+            spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h);
+            self.main_rotor.draw();
+            self.tail_rotor.draw();
+        }
+    }
+
+    fn move_enemy(&mut self, airwolf_x: f32) -> bool {
+        // Move towards Airwolf's position and downward
+        if self.x < airwolf_x {
+            self.x = self.x + 0.5; // Move right
+            self.y = self.y + 0.3; // Move down
+        } else if self.x > airwolf_x {
+            self.x = self.x - 0.5; // Move left  
+            self.y = self.y + 0.3; // Move down
+        } else {
+            self.y = self.y + 0.5; // Move straight down
+        }
+
+        // Shoot occasionally
+        if rnd(100) < 2 {
+            // Enemy shoots downward
+            // This would need entities manager to add bullet
+        }
+
+        // Check if moved off screen
+        self.y > 140.0
+    }
+
+    fn hit(&mut self) {
+        self.alive = false;
+    }
+
+    fn is_alive(&self) -> bool {
+        self.alive
+    }
+
+    fn should_shoot(&self) -> bool {
+        // Check if enough time has passed since last shot
+        self.shooter.can_shoot()
+    }
+
+    fn did_shoot(&mut self) {
+        self.shooter.shoot();
+    }
+
+    fn get_x(&self) -> f32 {
+        self.x
+    }
+
+    fn get_y(&self) -> f32 {
+        self.y
+    }
+
+    fn get_size(&self) -> Size {
+        self.size
+    }
+}
+
+impl Entity for EnemyAircraft {
+    fn get_x(&self) -> f32 {
+        self.x
+    }
+
+    fn get_y(&self) -> f32 {
+        self.y
+    }
+
+    fn set_x(&mut self, x: f32) {
+        self.x = x;
+    }
+
+    fn set_y(&mut self, y: f32) {
+        self.y = y;
+    }
+
+    fn get_sprite(&self) -> Sprite {
+        self.sprite
+    }
+
+    fn get_size(&self) -> Size {
+        self.size
+    }
+
+    fn get_type(&self) -> EntityType {
+        EntityType::Enemy
+    }
+}

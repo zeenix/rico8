@@ -1,0 +1,78 @@
+// Constants module for Airwolf game
+// Ported from Lua to Rico8
+
+// Mathematical constants
+const PI: f32 = 3.14159265359;
+
+// Button bitmasks for input handling
+struct ButtonMasks {
+    left: i32,
+    right: i32,
+    up: i32,
+    down: i32,
+    left_up: i32,
+    right_up: i32,
+    left_down: i32,
+    right_down: i32,
+}
+
+const BUTTON_MASKS: ButtonMasks = ButtonMasks {
+    left: 1,
+    right: 2,
+    up: 4,
+    down: 8,
+    left_up: 5,
+    right_up: 6,
+    left_down: 9,
+    right_down: 10,
+};
+
+// Button indices
+struct Buttons {
+    o: i32,
+    x: i32,
+}
+
+const BUTTONS: Buttons = Buttons {
+    o: 4,
+    x: 5,
+};
+
+// Pico-8 color palette
+struct Colors {
+    black: i32,
+    dark_blue: i32,
+    dark_purple: i32,
+    dark_green: i32,
+    brown: i32,
+    dark_grey: i32,
+    light_grey: i32,
+    white: i32,
+    red: i32,
+    orange: i32,
+    yellow: i32,
+    green: i32,
+    blue: i32,
+    lavender: i32,
+    pink: i32,
+    light_peach: i32,
+}
+
+const COLORS: Colors = Colors {
+    black: 0,
+    dark_blue: 1,
+    dark_purple: 2,
+    dark_green: 3,
+    brown: 4,
+    dark_grey: 5,
+    light_grey: 6,
+    white: 7,
+    red: 8,
+    orange: 9,
+    yellow: 10,
+    green: 11,
+    blue: 12,
+    lavender: 13,
+    pink: 14,
+    light_peach: 15,
+};

@@ -1,0 +1,83 @@
+// Bullet module for Airwolf game
+// Ported from Lua to Rico8
+
+use entity::{Entity, EntityType, Sprite, Size};
+
+struct Bullet {
+    x: f32,
+    y: f32,
+    velx: f32,
+    vely: f32,
+    sprite: Sprite,
+    size: Size,
+    is_enemy: bool,
+}
+
+impl Bullet {
+    fn new(x: f32, y: f32, velx: f32, vely: f32) -> Bullet {
+        Bullet {
+            x: x,
+            y: y,
+            velx: velx,
+            vely: vely,
+            sprite: Sprite { num: 64, w: 1, h: 1 },  // Player bullet sprite
+            size: Size { w: 6.0, h: 8.0 },  // Player bullet size
+            is_enemy: false,
+        }
+    }
+
+    fn new_enemy(x: f32, y: f32, velx: f32, vely: f32) -> Bullet {
+        Bullet {
+            x: x,
+            y: y,
+            velx: velx,
+            vely: vely,
+            sprite: Sprite { num: 65, w: 1, h: 1 },  // Enemy bullet sprite
+            size: Size { w: 1.0, h: 6.0 },  // Enemy bullet size
+            is_enemy: true,
+        }
+    }
+
+    // Returns true if bullet should be removed
+    fn update(&mut self) -> bool {
+        self.x = self.x + self.velx;
+        self.y = self.y + self.vely;
+
+        // Remove if out of bounds
+        self.x < -8.0 || self.x > 136.0 || self.y < -8.0 || self.y > 136.0
+    }
+
+    fn is_enemy_bullet(&self) -> bool {
+        self.is_enemy
+    }
+}
+
+impl Entity for Bullet {
+    fn get_x(&self) -> f32 {
+        self.x
+    }
+
+    fn get_y(&self) -> f32 {
+        self.y
+    }
+
+    fn set_x(&mut self, x: f32) {
+        self.x = x;
+    }
+
+    fn set_y(&mut self, y: f32) {
+        self.y = y;
+    }
+
+    fn get_sprite(&self) -> Sprite {
+        self.sprite
+    }
+
+    fn get_size(&self) -> Size {
+        self.size
+    }
+
+    fn get_type(&self) -> EntityType {
+        EntityType::Bullet
+    }
+}

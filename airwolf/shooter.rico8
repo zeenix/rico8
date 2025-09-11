@@ -1,0 +1,47 @@
+// Shooter module for Airwolf game
+// Ported from Lua to Rico8
+
+struct BulletProps {
+    x_offset: f32,
+    y_offset: f32,
+    interval: f32,
+    sw: i32,
+    sh: i32,
+}
+
+struct Shooter {
+    props: BulletProps,
+    last_shot_time: f32,
+}
+
+impl Shooter {
+    fn new(props: BulletProps) -> Shooter {
+        Shooter {
+            props: props,
+            last_shot_time: 0.0,
+        }
+    }
+
+    fn update(&mut self, entity_x: f32, entity_y: f32) {
+        // Update shooting timer
+        self.last_shot_time = self.last_shot_time + 0.033;  // ~30fps
+    }
+
+    fn can_shoot(&self) -> bool {
+        self.last_shot_time >= self.props.interval
+    }
+
+    fn shoot(&mut self) {
+        if self.can_shoot() {
+            self.last_shot_time = 0.0;
+        }
+    }
+
+    fn get_bullet_spawn_x(&self, entity_x: f32) -> f32 {
+        entity_x + self.props.x_offset
+    }
+
+    fn get_bullet_spawn_y(&self, entity_y: f32) -> f32 {
+        entity_y + self.props.y_offset
+    }
+}

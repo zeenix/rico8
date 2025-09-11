@@ -1,0 +1,45 @@
+// Scrolling map module for Airwolf game
+// Ported from Lua to Rico8
+
+use consts::COLORS;
+
+struct SMap {
+    scroll: f32,
+    scrolling: bool,
+}
+
+impl SMap {
+    fn new() -> SMap {
+        SMap {
+            scroll: -128.0,
+            scrolling: true,
+        }
+    }
+
+    fn stop_scroll(&mut self) {
+        self.scrolling = false;
+    }
+
+    fn update(&mut self) {
+        if !self.scrolling {
+            return;
+        }
+
+        let last_y = 128.0 * 16.0 - 128.0;
+        if self.scroll >= last_y {
+            self.scroll = -256.0;
+        }
+
+        self.scroll = self.scroll + 0.3;
+    }
+
+    fn draw(&self) {
+        cls(COLORS.dark_grey);
+
+        for i in 0..8 {
+            let tile_x = i * 16;
+            let map_y = (i as f32) * -256.0 + self.scroll;
+            map(tile_x, 0, 0, map_y, 16, 32);
+        }
+    }
+}

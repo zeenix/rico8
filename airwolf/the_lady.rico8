@@ -1,0 +1,172 @@
+// The Lady (Airwolf helicopter) module for Airwolf game
+// Ported from Lua to Rico8
+
+use entity::{Entity, EntityType, Sprite, Size, Direction};
+use shooter::{Shooter, BulletProps};
+use rotor::{Rotor, RotorProps};
+use consts::BUTTON_MASKS;
+
+struct TheLady {
+    x: f32,
+    y: f32,
+    sprite: Sprite,
+    size: Size,
+    shooter: Shooter,
+    main_rotor: Rotor,
+    tail_rotor: Rotor,
+    alive: bool,
+}
+
+impl TheLady {
+    fn new() -> TheLady {
+        let bullet_props = BulletProps {
+            x_offset: 0.0,
+            y_offset: -1.0,
+            interval: 0.4,
+            sw: 1,
+            sh: 1,
+        };
+
+        TheLady {
+            x: 63.0,
+            y: 111.0,
+            sprite: Sprite { num: 1, w: 1, h: 1 },
+            size: Size { w: 8.0, h: 8.0 },
+            shooter: Shooter::new(bullet_props),
+            main_rotor: Rotor::new(RotorProps {
+                x: 4.5,
+                y: 3.5,
+                length: 2.0,
+            }),
+            tail_rotor: Rotor::new(RotorProps {
+                x: 4.0,
+                y: 7.0,
+                length: 1.0,
+            }),
+            alive: true,
+        }
+    }
+
+    // Returns true if helicopter moved outside boundaries
+    fn update(&mut self, scene: i32) -> bool {  // 0=menu, 1=game
+        let outside = if scene == 1 {
+            self.move_player()
+        } else {
+            false
+        };
+
+        self.shooter.update(self.x, self.y);
+        self.main_rotor.update(self.x, self.y);
+        self.tail_rotor.update(self.x, self.y);
+
+        outside
+    }
+
+    fn draw(&self) {
+        palt(256); // Set transparency
+        // Draw helicopter sprite
+        let x = flr(self.x) + 0.5;
+        let y = flr(self.y) + 0.5;
+        spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h);
+        palt(32768); // Reset transparency
+        self.main_rotor.draw();
+        self.tail_rotor.draw();
+    }
+
+    fn move_player(&mut self) -> bool {
+        let can_l = self.x > -1.0;
+        let can_r = (self.x + self.size.w) < 126.0;
+        let can_u = self.y > 0.0;
+        let can_d = (self.y + self.size.h) < 128.0;
+        let can_lu = can_l && can_u;
+        let can_ld = can_l && can_d;
+        let can_ru = can_r && can_u;
+        let can_rd = can_r && can_d;
+
+        // Determine movement direction based on input
+        let mut direction: Direction;
+        let mut should_move = false;
+
+        // Check diagonal movement first
+        if btn(0) && btn(2) && can_lu {  // Left-Up
+            direction = Direction::LeftUp;
+            should_move = true;
+        } else if btn(1) && btn(2) && can_ru {  // Right-Up
+            direction = Direction::RightUp;
+            should_move = true;
+        } else if btn(0) && btn(3) && can_ld {  // Left-Down
+            direction = Direction::LeftDown;
+            should_move = true;
+        } else if btn(1) && btn(3) && can_rd {  // Right-Down
+            direction = Direction::RightDown;
+            should_move = true;
+        } else if btn(0) && can_l {  // Left
+            direction = Direction::Left;
+            should_move = true;
+        } else if btn(1) && can_r {  // Right
+            direction = Direction::Right;
+            should_move = true;
+        } else if btn(2) && can_u {  // Up
+            direction = Direction::Up;
+            should_move = true;
+        } else if btn(3) && can_d {  // Down
+            direction = Direction::Down;
+            should_move = true;
+        }
+
+        // Apply movement using the move_dir method from Entity trait
+        if should_move {
+            self.move_dir(direction, 1.0);
+        }
+
+        // Check if moved outside boundaries
+        self.x < -10.0 || self.x > 138.0 || self.y < -10.0 || self.y > 138.0
+    }
+
+    fn get_x(&self) -> f32 {
+        self.x
+    }
+
+    fn get_y(&self) -> f32 {
+        self.y
+    }
+
+    fn hit(&mut self) {
+        self.alive = false;
+        sfx(1);  // Play explosion sound
+    }
+
+    fn is_alive(&self) -> bool {
+        self.alive
+    }
+}
+
+impl Entity for TheLady {
+    fn get_x(&self) -> f32 {
+        self.x
+    }
+
+    fn get_y(&self) -> f32 {
+        self.y
+    }
+
+    fn set_x(&mut self, x: f32) {
+        self.x = x;
+    }
+
+    fn set_y(&mut self, y: f32) {
+        self.y = y;
+    }
+
+    fn get_sprite(&self) -> Sprite {
+        self.sprite
+    }
+
+    fn get_size(&self) -> Size {
+        self.size
+    }
+
+    fn get_type(&self) -> EntityType {
+        EntityType::Player
+    }
+}
