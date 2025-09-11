@@ -216,8 +216,18 @@ impl Generator {
 
             self.write_line(")");
 
-            // If this is a new() method, we need to set the metatable
-            if method.name == "new" {
+            // If this is a constructor method (new, new_enemy, etc.), we need to set the metatable
+            // Check if method returns the struct type and starts with "new"
+            let is_constructor = method.name.starts_with("new")
+                && method.return_type.as_ref().map_or(false, |t| {
+                    if let Type::Path(name) = t {
+                        name == &target_name
+                    } else {
+                        false
+                    }
+                });
+
+            if is_constructor {
                 // Check if there's an explicit return or implicit return (last expression)
                 let return_expr = method.body.statements.iter().find_map(|stmt| {
                     if let Statement::Return(Some(expr)) = stmt {
