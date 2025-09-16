@@ -524,6 +524,12 @@ impl Parser {
     }
 
     fn parse_type(&mut self) -> Result<Type, ParseError> {
+        if self.current() == &Token::Dyn {
+            self.advance();
+            let trait_name = self.parse_ident()?;
+            return Ok(Type::TraitObject(trait_name));
+        }
+
         if self.current() == &Token::Ampersand {
             self.advance();
             let is_mut = if self.current() == &Token::Mut {

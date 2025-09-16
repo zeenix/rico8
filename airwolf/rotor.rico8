@@ -1,6 +1,8 @@
 // Rotor module for Airwolf game
 // Ported from Lua to Rico8
 
+use consts::COLORS;
+
 struct RotorProps {
     x: f32,      // X offset from entity
     y: f32,      // Y offset from entity
@@ -49,7 +51,7 @@ impl Rotor {
             center_y - dy,
             center_x + dx,
             center_y + dy,
-            6  // Dark grey color
+            COLORS.lavender
         );
 
         // Draw perpendicular blade for main rotor (cross pattern)
@@ -63,7 +65,7 @@ impl Rotor {
                 center_y - dy2,
                 center_x + dx2,
                 center_y + dy2,
-                6
+                COLORS.lavender
             );
         }
     }

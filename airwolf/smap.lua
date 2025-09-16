@@ -28,7 +28,7 @@ function SMap:update()
 end
 function SMap:draw()
   cls(COLORS.dark_grey)
-  for i=0,8   do
+  for i=0,7   do
     local tile_x = (i * 16)
     local map_y = ((i * -256) + self.scroll)
     map(tile_x, 0, 0, map_y, 16, 32)

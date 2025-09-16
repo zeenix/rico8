@@ -3,6 +3,7 @@
 
 -- trait Entity
 Entity = {}
+
 function Entity:draw(
 )
   local sprite = self:get_sprite()
@@ -10,112 +11,19 @@ function Entity:draw(
   local y = (flr(self:get_y()) + 0.5)
   spr(sprite.num, x, y, sprite.w, sprite.h)
 end
-function Entity:move_dir(
-dir, speed)
-  local x = self:get_x()
-  local y = self:get_y()
-  local __match = dir
-  if __match.tag == "Left"   then
-    self:set_x((x - speed))
-  elseif __match.tag == "Right"   then
-    self:set_x((x + speed))
-  elseif __match.tag == "Up"   then
-    self:set_y((y - speed))
-  elseif __match.tag == "Down"   then
-    self:set_y((y + speed))
-  elseif __match.tag == "LeftUp"   then
-        (function()
-      self:set_x((x - speed))
-      self:set_y((y - speed))
-    end)()
-  elseif __match.tag == "RightUp"   then
-        (function()
-      self:set_x((x + speed))
-      self:set_y((y - speed))
-    end)()
-  elseif __match.tag == "LeftDown"   then
-        (function()
-      self:set_x((x - speed))
-      self:set_y((y + speed))
-    end)()
-  elseif __match.tag == "RightDown"   then
-        (function()
-      self:set_x((x + speed))
-      self:set_y((y + speed))
-    end)()
-  end
-end
 function Entity:collides_with(
 other_x, other_y, other_size)
   local my_x = self:get_x()
   local my_y = self:get_y()
   local my_size = self:get_size()
-  ((((my_x < (other_x + other_size.w)) and ((my_x + my_size.w) > other_x)) and (my_y < (other_y + other_size.h))) and ((my_y + my_size.h) > other_y))
+  return ((((my_x < (other_x + other_size.w)) and ((my_x + my_size.w) > other_x)) and (my_y < (other_y + other_size.h))) and ((my_y + my_size.h) > other_y))
 end
-function Entity:is_enemy(
-)
-  local __match = self:get_type()
-  if __match.tag == "Enemy"   then
-    true
-  elseif true   then
-    false
-  end
-end
-function Entity:is_player(
-)
-  local __match = self:get_type()
-  if __match.tag == "Player"   then
-    true
-  elseif true   then
-    false
-  end
-end
-
--- enum EntityType
-Player = {
-  tag = "Player"
-}
-Enemy = {
-  tag = "Enemy"
-}
-Bullet = {
-  tag = "Bullet"
-}
-Explosion = {
-  tag = "Explosion"
-}
 
 -- struct Sprite
 Sprite = {}
 
 -- struct Size
 Size = {}
-
--- enum Direction
-Left = {
-  tag = "Left"
-}
-Right = {
-  tag = "Right"
-}
-Up = {
-  tag = "Up"
-}
-Down = {
-  tag = "Down"
-}
-LeftUp = {
-  tag = "LeftUp"
-}
-RightUp = {
-  tag = "RightUp"
-}
-LeftDown = {
-  tag = "LeftDown"
-}
-RightDown = {
-  tag = "RightDown"
-}
 
 -- struct Shooter
 Shooter = {}
@@ -185,6 +93,17 @@ RotorProps = {}
 
 BUTTON_MASKS = {left = 1, right = 2, up = 4, down = 8, left_up = 5, right_up = 6, left_down = 9, right_down = 10}
 
+-- enum Scene
+Start = {
+  tag = "Start"
+}
+Game = {
+  tag = "Game"
+}
+GameOver = {
+  tag = "GameOver"
+}
+
 -- struct TheLady
 TheLady = {}
 
@@ -192,25 +111,24 @@ TheLady = {}
 function TheLady:new()
   local obj
 local bullet_props = {x_offset = 0, y_offset = -1, interval = 0.4, sw = 1, sh = 1}
-  obj = {x = 63, y = 111, sprite = {num = 1, w = 1, h = 1}, size = {w = 8, h = 8}, shooter = Shooter:new(bullet_props), main_rotor = Rotor:new({x = 4.5, y = 3.5, length = 2}), tail_rotor = Rotor:new({x = 4, y = 7, length = 1})}
+  obj = {x = 63, y = 111, sprite = {num = 1, w = 1, h = 1}, size = {w = 8, h = 8}, shooter = Shooter:new(bullet_props), main_rotor = Rotor:new({x = 4.5, y = 3.5, length = 2}), tail_rotor = Rotor:new({x = 4, y = 7, length = 1}), alive = true}
   setmetatable(obj, {__index = TheLady})
   return obj
 end
 function TheLady:update(scene)
-  local outside = ((scene == 1) and self:move_player() or false)
+  local is_game = (function()
+    local __match = scene
+    if __match.tag == "Game"     then
+      return true
+    elseif true     then
+      return false
+        end
+  end)()
+  local outside = (is_game and self:move_player() or false)
   self.shooter:update(self.x, self.y)
   self.main_rotor:update(self.x, self.y)
   self.tail_rotor:update(self.x, self.y)
   return outside
-end
-function TheLady:draw()
-  palt(256)
-  local x = (flr(self.x) + 0.5)
-  local y = (flr(self.y) + 0.5)
-  spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
-  palt(32768)
-  self.main_rotor:draw()
-  self.tail_rotor:draw()
 end
 function TheLady:move_player()
   local can_l = (self.x > -1)
@@ -221,39 +139,33 @@ function TheLady:move_player()
   local can_ld = (can_l and can_d)
   local can_ru = (can_r and can_u)
   local can_rd = (can_r and can_d)
-  local direction = nil
-  local should_move = false
   if ((btn(0) and btn(2)) and can_lu)   then
-    direction = LeftUp
-    should_move = true
+    self.x = (self.x - 1)
+    self.y = (self.y - 1)
   else
     if ((btn(1) and btn(2)) and can_ru)     then
-      direction = RightUp
-      should_move = true
+      self.x = (self.x + 1)
+      self.y = (self.y - 1)
     else
       if ((btn(0) and btn(3)) and can_ld)       then
-        direction = LeftDown
-        should_move = true
+        self.x = (self.x - 1)
+        self.y = (self.y + 1)
       else
         if ((btn(1) and btn(3)) and can_rd)         then
-          direction = RightDown
-          should_move = true
+          self.x = (self.x + 1)
+          self.y = (self.y + 1)
         else
           if (btn(0) and can_l)           then
-            direction = Left
-            should_move = true
+            self.x = (self.x - 1)
           else
             if (btn(1) and can_r)             then
-              direction = Right
-              should_move = true
+              self.x = (self.x + 1)
             else
               if (btn(2) and can_u)               then
-                direction = Up
-                should_move = true
+                self.y = (self.y - 1)
               else
                 if (btn(3) and can_d)                 then
-                  direction = Down
-                  should_move = true
+                  self.y = (self.y + 1)
                 end
               end
             end
@@ -261,9 +173,6 @@ function TheLady:move_player()
         end
       end
     end
-  end
-  if should_move   then
-    Entity:move_dir(self, direction, 1)
   end
   return ((((self.x < -10) or (self.x > 138)) or (self.y < -10)) or (self.y > 138))
 end
@@ -273,6 +182,16 @@ end
 function TheLady:get_y()
   return self.y
 end
+function TheLady:hit()
+  self.alive = false
+  sfx(1)
+end
+function TheLady:is_alive()
+  return self.alive
+end
+function TheLady:get_size()
+  return self.size
+end
 
 -- impl Entity for TheLady
 function TheLady:get_x()
@@ -281,20 +200,22 @@ end
 function TheLady:get_y()
   return self.y
 end
-function TheLady:set_x(x)
-  self.x = x
-end
-function TheLady:set_y(y)
-  self.y = y
-end
 function TheLady:get_sprite()
   return self.sprite
 end
 function TheLady:get_size()
   return self.size
 end
-function TheLady:get_type()
-  return Player
+function TheLady:draw()
+  if self.alive   then
+    palt(256)
+    local x = (flr(self.x) + 0.5)
+    local y = (flr(self.y) + 0.5)
+    spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
+    palt(32768)
+    self.main_rotor:draw()
+    self.tail_rotor:draw()
+  end
 end
 -- Copy default methods from Entity
 for k, v in pairs(Entity) do

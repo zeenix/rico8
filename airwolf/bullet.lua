@@ -3,11 +3,21 @@
 
 -- trait Entity
 Entity = {}
--- Default implementation for Entity:draw
--- Default implementation for Entity:move_dir
--- Default implementation for Entity:collides_with
--- Default implementation for Entity:is_enemy
--- Default implementation for Entity:is_player
+
+function Entity:draw(
+)
+  local sprite = self:get_sprite()
+  local x = (flr(self:get_x()) + 0.5)
+  local y = (flr(self:get_y()) + 0.5)
+  spr(sprite.num, x, y, sprite.w, sprite.h)
+end
+function Entity:collides_with(
+other_x, other_y, other_size)
+  local my_x = self:get_x()
+  local my_y = self:get_y()
+  local my_size = self:get_size()
+  return ((((my_x < (other_x + other_size.w)) and ((my_x + my_size.w) > other_x)) and (my_y < (other_y + other_size.h))) and ((my_y + my_size.h) > other_y))
+end
 
 -- struct Sprite
 Sprite = {}
@@ -21,7 +31,13 @@ Bullet = {}
 -- impl Bullet
 function Bullet:new(x, y, velx, vely)
   local obj
-  obj = {x = x, y = y, velx = velx, vely = vely, sprite = {num = 16, w = 1, h = 1}, size = {w = 2, h = 2}}
+  obj = {x = x, y = y, velx = velx, vely = vely, sprite = {num = 64, w = 1, h = 1}, size = {w = 6, h = 8}, is_enemy = false}
+  setmetatable(obj, {__index = Bullet})
+  return obj
+end
+function Bullet:new_enemy(x, y, velx, vely)
+  local obj
+  obj = {x = x, y = y, velx = velx, vely = vely, sprite = {num = 65, w = 1, h = 1}, size = {w = 1, h = 6}, is_enemy = true}
   setmetatable(obj, {__index = Bullet})
   return obj
 end
@@ -29,6 +45,11 @@ function Bullet:update()
   self.x = (self.x + self.velx)
   self.y = (self.y + self.vely)
   return ((((self.x < -8) or (self.x > 136)) or (self.y < -8)) or (self.y > 136))
+end
+function Bullet:is_enemy_bullet()
+  return self.is_enemy
+end
+function Bullet:hit()
 end
 
 -- impl Entity for Bullet
@@ -38,19 +59,16 @@ end
 function Bullet:get_y()
   return self.y
 end
-function Bullet:set_x(x)
-  self.x = x
-end
-function Bullet:set_y(y)
-  self.y = y
-end
 function Bullet:get_sprite()
   return self.sprite
 end
 function Bullet:get_size()
   return self.size
 end
-function Bullet:get_type()
-  return 2
+-- Copy default methods from Entity
+for k, v in pairs(Entity) do
+  if Bullet[k] == nil then
+    Bullet[k] = v
+  end
 end
 

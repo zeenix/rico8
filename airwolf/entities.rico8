@@ -1,5 +1,5 @@
 // Entities manager module for Airwolf game
-// Ported from Lua to Rico8 with idiomatic Rust Vec<T>
+// Simple manager for game entities - like the original
 
 use the_lady::TheLady;
 use enemy_aircraft::EnemyAircraft;
@@ -8,7 +8,6 @@ use explosion::Explosion;
 use scene::Scene;
 use update_result::UpdateResult;
 
-// Entities manager with Vec arrays for each entity type
 struct Entities {
     player: TheLady,
     enemies: Vec<EnemyAircraft>,
@@ -34,25 +33,12 @@ impl Entities {
         // Update player
         self.player.update(scene);
 
-        // Update explosions ALWAYS - they need to animate even after player death
-        // Iterate backwards to safely remove items
-        let mut i = self.explosions.len();
-        while i > 0 {
-            i = i - 1;
-            let explosion = self.explosions[i];
-            let should_remove = explosion.update();
-
-            if should_remove {
-                deli(self.explosions, i + 1);  // Use deli with 1-based index for Lua
-            }
-        }
-
-        // Check if player is dead - signal game over
-        // But only AFTER updating explosions so they can animate
+        // Check if player is dead
         if !self.player.is_alive() {
             return PlayerDied;
         }
 
+        // Only continue if in game scene
         let is_game = match scene {
             Scene::Game => true,
             _ => false,
@@ -64,154 +50,133 @@ impl Entities {
 
         // Spawn enemies periodically
         self.enemy_spawn_timer = self.enemy_spawn_timer + 1;
-        if self.enemy_spawn_timer > 90 {  // Every 3 seconds at 30fps
-            self.spawn_enemy();
+        if self.enemy_spawn_timer > 90 {
+            self.enemies.push(EnemyAircraft::new());
             self.enemy_spawn_timer = 0;
         }
 
-        // Get player position for enemy AI
+        // Update enemies
         let player_x = self.player.get_x();
+        let mut i = self.enemies.len();
+        while i > 0 {
+            i = i - 1;
+            let should_remove = self.enemies[i].update(scene, player_x);
 
-        // Update enemies and check for removal
-        let mut i = 0;
-        while i < self.enemies.len() {
-            let enemy = self.enemies[i];
-            let mut should_remove = enemy.update(scene, player_x);
-
-            // Check if enemy should shoot
-            if is_game && enemy.is_alive() && enemy.should_shoot() {
-                // Enemy shoots downward
-                self.add_enemy_bullet(enemy.get_x() + 3.0, enemy.get_y() + 4.0);
-                enemy.did_shoot();
-            }
-
-            // Check collision with player
-            if !should_remove && self.player.is_alive() && self.player.collides_with(enemy.get_x(), enemy.get_y(), enemy.get_size()) {
-                // Player hit by enemy - create explosions
-                self.add_explosion(enemy.get_x(), enemy.get_y());
-                self.add_explosion(self.player.get_x(), self.player.get_y());
-
-                // Destroy both the enemy and player
-                enemy.hit();
-                self.player.hit();
-                should_remove = true;
+            // Check if enemy wants to shoot
+            if self.enemies[i].should_shoot() {
+                let ex = self.enemies[i].get_x();
+                let ey = self.enemies[i].get_y();
+                self.bullets.push(Bullet::new_enemy(ex + 3.0, ey + 4.0, 0.0, 2.0));
+                self.enemies[i].did_shoot();
+                sfx(0);
             }
 
             if should_remove {
-                // Award points
-                if enemy.is_alive() {
-                    new_score = new_score + 20;  // Enemy escaped
-                } else {
-                    new_score = new_score + 10;  // Enemy destroyed
-                    // Create explosion at enemy position (if not already created from collision)
-                    if !self.player.collides_with(enemy.get_x(), enemy.get_y(), enemy.get_size()) {
-                        self.add_explosion(enemy.get_x(), enemy.get_y());
-                    }
+                if !self.enemies[i].is_alive() {
+                    self.add_explosion(self.enemies[i].get_x(), self.enemies[i].get_y());
+                    new_score = new_score + 100;
                 }
-
-                // Remove enemy using deli with 1-based index
                 deli(self.enemies, i + 1);
-            } else {
-                i = i + 1;
             }
         }
 
-        // Update bullets and check for removal
-        i = 0;
-        while i < self.bullets.len() {
-            let bullet = self.bullets[i];
-            let should_remove = bullet.update();
-            let mut hit_something = false;
-
-            if !should_remove {
-                if bullet.is_enemy_bullet() {
-                    // Enemy bullet - check collision with player
-                    if self.player.is_alive() && bullet.collides_with(self.player.get_x(), self.player.get_y(), self.player.get_size()) {
-                        // Hit player
-                        self.player.hit();
-                        self.add_explosion(self.player.get_x(), self.player.get_y());
-                        hit_something = true;
-                    }
-                } else {
-                    // Player bullet - check collision with enemies
-                    for enemy in self.enemies {
-                        if enemy.is_alive() && bullet.collides_with(enemy.get_x(), enemy.get_y(), enemy.get_size()) {
-                            // Hit enemy
-                            enemy.hit();
-                            self.add_explosion(enemy.get_x(), enemy.get_y());
-                            new_score = new_score + 10;
-                            hit_something = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            if should_remove || hit_something {
-                deli(self.bullets, i + 1);  // Use deli with 1-based index
-            } else {
-                i = i + 1;
+        // Update bullets
+        i = self.bullets.len();
+        while i > 0 {
+            i = i - 1;
+            if self.bullets[i].update() {
+                deli(self.bullets, i + 1);
             }
         }
 
-
-        // Check if player shoots
-        if btnp(4, 0) || btnp(5, 0) {  // O or X button
-            self.add_bullet(self.player.get_x() + 3, self.player.get_y() - 2, 0, -2);
+        // Update explosions
+        i = self.explosions.len();
+        while i > 0 {
+            i = i - 1;
+            if self.explosions[i].update() {
+                deli(self.explosions, i + 1);
+            }
         }
+
+        // Handle shooting
+        if btnp(4) || btnp(5) {
+            let px = self.player.get_x();
+            let py = self.player.get_y();
+            self.bullets.push(Bullet::new(px, py - 2.0, 0.0, -2.0));
+            sfx(0);
+        }
+
+        // Simple collision checks
+        new_score = self.check_collisions(new_score);
 
         Score(new_score)
     }
 
     fn draw(&self) {
-        // Draw all entities
         self.player.draw();
 
-        for enemy in self.enemies {
+        for enemy in &self.enemies {
             enemy.draw();
         }
 
-        for bullet in self.bullets {
+        for bullet in &self.bullets {
             bullet.draw();
         }
 
-        for explosion in self.explosions {
+        for explosion in &self.explosions {
             explosion.draw();
         }
     }
 
-    fn spawn_enemy(&mut self) {
-        let enemy = EnemyAircraft::new();
-        self.enemies.push(enemy);
-    }
-
-    fn add_bullet(&mut self, x: f32, y: f32, velx: f32, vely: f32) {
-        let bullet = Bullet::new(x, y, velx, vely);
-        self.bullets.push(bullet);
-        sfx(0);  // Play shoot sound
-    }
-
-    fn add_enemy_bullet(&mut self, x: f32, y: f32) {
-        let bullet = Bullet::new_enemy(x, y, 0.0, 2.0);  // Enemy bullets go down
-        self.bullets.push(bullet);
-        sfx(0);  // Play shoot sound
-    }
-
     fn add_explosion(&mut self, x: f32, y: f32) {
-        let explosion = Explosion::new(x, y);
-        self.explosions.push(explosion);
-        sfx(1);  // Play explosion sound
+        self.explosions.push(Explosion::new(x, y));
+        sfx(1);
     }
 
-    fn get_player(&self) -> TheLady {
-        self.player
-    }
+    fn check_collisions(&mut self, score: i32) -> i32 {
+        let mut new_score = score;
 
-    fn get_enemy_count(&self) -> i32 {
-        self.enemies.len()
-    }
+        // Check all bullets
+        for i in 0..self.bullets.len() {
+            if self.bullets[i].is_enemy_bullet() {
+                // Enemy bullet - check against player
+                if self.bullets[i].collides_with(
+                    self.player.get_x(),
+                    self.player.get_y(),
+                    self.player.get_size()
+                ) {
+                    self.player.hit();
+                    self.bullets[i].hit();
+                }
+            } else {
+                // Player bullet - check against enemies
+                for j in 0..self.enemies.len() {
+                    if self.bullets[i].collides_with(
+                        self.enemies[j].get_x(),
+                        self.enemies[j].get_y(),
+                        self.enemies[j].get_size()
+                    ) {
+                        self.enemies[j].hit();
+                        self.bullets[i].hit();
+                        new_score = new_score + 10;
+                    }
+                }
+            }
+        }
 
-    fn get_bullet_count(&self) -> i32 {
-        self.bullets.len()
+        // Check enemies vs player
+        for i in 0..self.enemies.len() {
+            if self.enemies[i].is_alive() &&
+               self.enemies[i].collides_with(
+                   self.player.get_x(),
+                   self.player.get_y(),
+                   self.player.get_size()
+               ) {
+                self.player.hit();
+                self.enemies[i].hit();
+            }
+        }
+
+        new_score
     }
 }

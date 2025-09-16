@@ -7,48 +7,9 @@ Sprite = {}
 -- struct Size
 Size = {}
 
--- enum EntityType
-Player = {
-  tag = "Player"
-}
-Enemy = {
-  tag = "Enemy"
-}
-Bullet = {
-  tag = "Bullet"
-}
-Explosion = {
-  tag = "Explosion"
-}
-
--- enum Direction
-Left = {
-  tag = "Left"
-}
-Right = {
-  tag = "Right"
-}
-Up = {
-  tag = "Up"
-}
-Down = {
-  tag = "Down"
-}
-LeftUp = {
-  tag = "LeftUp"
-}
-RightUp = {
-  tag = "RightUp"
-}
-LeftDown = {
-  tag = "LeftDown"
-}
-RightDown = {
-  tag = "RightDown"
-}
-
 -- trait Entity
 Entity = {}
+
 function Entity:draw(
 )
   local sprite = self:get_sprite()
@@ -56,64 +17,11 @@ function Entity:draw(
   local y = (flr(self:get_y()) + 0.5)
   spr(sprite.num, x, y, sprite.w, sprite.h)
 end
-function Entity:move_dir(
-dir, speed)
-  local x = self:get_x()
-  local y = self:get_y()
-  local __match = dir
-  if __match.tag == "Left"   then
-    self:set_x((x - speed))
-  elseif __match.tag == "Right"   then
-    self:set_x((x + speed))
-  elseif __match.tag == "Up"   then
-    self:set_y((y - speed))
-  elseif __match.tag == "Down"   then
-    self:set_y((y + speed))
-  elseif __match.tag == "LeftUp"   then
-        (function()
-      self:set_x((x - speed))
-      self:set_y((y - speed))
-    end)()
-  elseif __match.tag == "RightUp"   then
-        (function()
-      self:set_x((x + speed))
-      self:set_y((y - speed))
-    end)()
-  elseif __match.tag == "LeftDown"   then
-        (function()
-      self:set_x((x - speed))
-      self:set_y((y + speed))
-    end)()
-  elseif __match.tag == "RightDown"   then
-        (function()
-      self:set_x((x + speed))
-      self:set_y((y + speed))
-    end)()
-  end
-end
 function Entity:collides_with(
 other_x, other_y, other_size)
   local my_x = self:get_x()
   local my_y = self:get_y()
   local my_size = self:get_size()
-  ((((my_x < (other_x + other_size.w)) and ((my_x + my_size.w) > other_x)) and (my_y < (other_y + other_size.h))) and ((my_y + my_size.h) > other_y))
-end
-function Entity:is_enemy(
-)
-  local __match = self:get_type()
-  if __match.tag == "Enemy"   then
-    true
-  elseif true   then
-    false
-  end
-end
-function Entity:is_player(
-)
-  local __match = self:get_type()
-  if __match.tag == "Player"   then
-    true
-  elseif true   then
-    false
-  end
+  return ((((my_x < (other_x + other_size.w)) and ((my_x + my_size.w) > other_x)) and (my_y < (other_y + other_size.h))) and ((my_y + my_size.h) > other_y))
 end
 

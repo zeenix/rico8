@@ -1,5 +1,4 @@
-// Entity module for Airwolf game
-// Ported from Lua to Rico8 with Entity as a trait
+// Common types and traits for Airwolf game entities
 
 // Type representing sprite information
 struct Sprite {
@@ -14,36 +13,14 @@ struct Size {
     h: f32,
 }
 
-// Enum for entity types
-enum EntityType {
-    Player,
-    Enemy,
-    Bullet,
-    Explosion,
-}
-
-// Enum for movement directions
-enum Direction {
-    Left,
-    Right,
-    Up,
-    Down,
-    LeftUp,
-    RightUp,
-    LeftDown,
-    RightDown,
-}
-
-// Entity trait that all game objects implement
+// Trait for common entity behavior
 trait Entity {
     fn get_x(&self) -> f32;
     fn get_y(&self) -> f32;
-    fn set_x(&mut self, x: f32);
-    fn set_y(&mut self, y: f32);
     fn get_sprite(&self) -> Sprite;
     fn get_size(&self) -> Size;
-    fn get_type(&self) -> EntityType;
 
+    // Default implementation for drawing
     fn draw(&self) {
         let sprite = self.get_sprite();
         let x = flr(self.get_x()) + 0.5;
@@ -51,34 +28,7 @@ trait Entity {
         spr(sprite.num, x, y, sprite.w, sprite.h);
     }
 
-    fn move_dir(&mut self, dir: Direction, speed: f32) {
-        let x = self.get_x();
-        let y = self.get_y();
-
-        match dir {
-            Direction::Left => self.set_x(x - speed),
-            Direction::Right => self.set_x(x + speed),
-            Direction::Up => self.set_y(y - speed),
-            Direction::Down => self.set_y(y + speed),
-            Direction::LeftUp => {
-                self.set_x(x - speed);
-                self.set_y(y - speed);
-            },
-            Direction::RightUp => {
-                self.set_x(x + speed);
-                self.set_y(y - speed);
-            },
-            Direction::LeftDown => {
-                self.set_x(x - speed);
-                self.set_y(y + speed);
-            },
-            Direction::RightDown => {
-                self.set_x(x + speed);
-                self.set_y(y + speed);
-            },
-        }
-    }
-
+    // Default implementation for collision detection
     fn collides_with(&self, other_x: f32, other_y: f32, other_size: Size) -> bool {
         let my_x = self.get_x();
         let my_y = self.get_y();
@@ -89,19 +39,5 @@ trait Entity {
         my_x + my_size.w > other_x &&
         my_y < other_y + other_size.h &&
         my_y + my_size.h > other_y
-    }
-
-    fn is_enemy(&self) -> bool {
-        match self.get_type() {
-            EntityType::Enemy => true,
-            _ => false,
-        }
-    }
-
-    fn is_player(&self) -> bool {
-        match self.get_type() {
-            EntityType::Player => true,
-            _ => false,
-        }
     }
 }

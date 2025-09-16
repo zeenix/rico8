@@ -3,11 +3,21 @@
 
 -- trait Entity
 Entity = {}
--- Default implementation for Entity:draw
--- Default implementation for Entity:move_dir
--- Default implementation for Entity:collides_with
--- Default implementation for Entity:is_enemy
--- Default implementation for Entity:is_player
+
+function Entity:draw(
+)
+  local sprite = self:get_sprite()
+  local x = (flr(self:get_x()) + 0.5)
+  local y = (flr(self:get_y()) + 0.5)
+  spr(sprite.num, x, y, sprite.w, sprite.h)
+end
+function Entity:collides_with(
+other_x, other_y, other_size)
+  local my_x = self:get_x()
+  local my_y = self:get_y()
+  local my_size = self:get_size()
+  return ((((my_x < (other_x + other_size.w)) and ((my_x + my_size.w) > other_x)) and (my_y < (other_y + other_size.h))) and ((my_y + my_size.h) > other_y))
+end
 
 -- struct Sprite
 Sprite = {}
@@ -23,10 +33,7 @@ Explosion = {}
 -- impl Explosion
 function Explosion:new(x, y)
   local obj
-local sprite = {num = 0, w = 1, h = 1}
-local size = {w = 1, h = 1}
-local entity = Entity:new(x, y, sprite, 3, size)
-  obj = {entity = entity, active = true, timer = 30}
+  obj = {x = x, y = y, sprite = {num = 0, w = 1, h = 1}, size = {w = 1, h = 1}, active = true, timer = 30}
   setmetatable(obj, {__index = Explosion})
   return obj
 end
@@ -41,28 +48,51 @@ function Explosion:update()
   end
   return false
 end
+function Explosion:get_x()
+  return self.x
+end
+function Explosion:get_y()
+  return self.y
+end
+
+-- impl Entity for Explosion
+function Explosion:get_x()
+  return self.x
+end
+function Explosion:get_y()
+  return self.y
+end
+function Explosion:get_sprite()
+  return self.sprite
+end
+function Explosion:get_size()
+  return self.size
+end
 function Explosion:draw()
   if self.active   then
-    local x = self.entity.x
-    local y = self.entity.y
+    local x = self.x
+    local y = self.y
     local r = (self.timer / 5)
     if (r > 0)     then
-      circfill(x, y, r, COLORS.light_grey)
-      circ(x, y, (r + 1), COLORS.dark_grey)
+      circfill(x, y, r, 6)
+      circ(x, y, (r + 1), 5)
     end
-    for i=0,4     do
+    for i=0,3     do
       local angle = (i * 90)
       local dist = (8 - (self.timer / 4))
       if (dist > 0)       then
-        pset((x + dist), y, COLORS.yellow)
-        pset((x - dist), y, COLORS.yellow)
-        pset(x, (y + dist), COLORS.yellow)
-        pset(x, (y - dist), COLORS.yellow)
+        pset((x + dist), y, 10)
+        pset((x - dist), y, 10)
+        pset(x, (y + dist), 10)
+        pset(x, (y - dist), 10)
       end
     end
   end
 end
-function Explosion:get_entity()
-  return self.entity
+-- Copy default methods from Entity
+for k, v in pairs(Entity) do
+  if Explosion[k] == nil then
+    Explosion[k] = v
+  end
 end
 

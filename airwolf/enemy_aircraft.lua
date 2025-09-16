@@ -3,11 +3,21 @@
 
 -- trait Entity
 Entity = {}
--- Default implementation for Entity:draw
--- Default implementation for Entity:move_dir
--- Default implementation for Entity:collides_with
--- Default implementation for Entity:is_enemy
--- Default implementation for Entity:is_player
+
+function Entity:draw(
+)
+  local sprite = self:get_sprite()
+  local x = (flr(self:get_x()) + 0.5)
+  local y = (flr(self:get_y()) + 0.5)
+  spr(sprite.num, x, y, sprite.w, sprite.h)
+end
+function Entity:collides_with(
+other_x, other_y, other_size)
+  local my_x = self:get_x()
+  local my_y = self:get_y()
+  local my_size = self:get_size()
+  return ((((my_x < (other_x + other_size.w)) and ((my_x + my_size.w) > other_x)) and (my_y < (other_y + other_size.h))) and ((my_y + my_size.h) > other_y))
+end
 
 -- struct Sprite
 Sprite = {}
@@ -81,6 +91,17 @@ end
 -- struct RotorProps
 RotorProps = {}
 
+-- enum Scene
+Start = {
+  tag = "Start"
+}
+Game = {
+  tag = "Game"
+}
+GameOver = {
+  tag = "GameOver"
+}
+
 -- struct EnemyAircraft
 EnemyAircraft = {}
 
@@ -97,20 +118,19 @@ function EnemyAircraft:update(scene, airwolf_x)
   if not self.alive   then
     return true
   end
-  local outside = ((scene == 1) and self:move_enemy(airwolf_x) or false)
+  local is_game = (function()
+    local __match = scene
+    if __match.tag == "Game"     then
+      return true
+    elseif true     then
+      return false
+        end
+  end)()
+  local outside = (is_game and self:move_enemy(airwolf_x) or false)
   self.shooter:update(self.x, self.y)
   self.main_rotor:update(self.x, self.y)
   self.tail_rotor:update(self.x, self.y)
   return outside
-end
-function EnemyAircraft:draw()
-  if self.alive   then
-    local x = (flr(self.x) + 0.5)
-    local y = (flr(self.y) + 0.5)
-    spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
-    self.main_rotor:draw()
-    self.tail_rotor:draw()
-  end
 end
 function EnemyAircraft:move_enemy(airwolf_x)
   if (self.x < airwolf_x)   then
@@ -124,8 +144,6 @@ function EnemyAircraft:move_enemy(airwolf_x)
       self.y = (self.y + 0.5)
     end
   end
-  if (rnd(100) < 2)   then
-  end
   return (self.y > 140)
 end
 function EnemyAircraft:hit()
@@ -133,6 +151,12 @@ function EnemyAircraft:hit()
 end
 function EnemyAircraft:is_alive()
   return self.alive
+end
+function EnemyAircraft:should_shoot()
+  return self.shooter:can_shoot()
+end
+function EnemyAircraft:did_shoot()
+  self.shooter:shoot()
 end
 function EnemyAircraft:get_x()
   return self.x
@@ -142,6 +166,12 @@ function EnemyAircraft:get_y()
 end
 function EnemyAircraft:get_size()
   return self.size
+end
+function EnemyAircraft:should_shoot()
+  return (self.shooter:can_shoot() and (rnd(100) < 2))
+end
+function EnemyAircraft:did_shoot()
+  self.shooter:shoot()
 end
 
 -- impl Entity for EnemyAircraft
@@ -151,19 +181,25 @@ end
 function EnemyAircraft:get_y()
   return self.y
 end
-function EnemyAircraft:set_x(x)
-  self.x = x
-end
-function EnemyAircraft:set_y(y)
-  self.y = y
-end
 function EnemyAircraft:get_sprite()
   return self.sprite
 end
 function EnemyAircraft:get_size()
   return self.size
 end
-function EnemyAircraft:get_type()
-  return 1
+function EnemyAircraft:draw()
+  if self.alive   then
+    local x = (flr(self.x) + 0.5)
+    local y = (flr(self.y) + 0.5)
+    spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
+    self.main_rotor:draw()
+    self.tail_rotor:draw()
+  end
+end
+-- Copy default methods from Entity
+for k, v in pairs(Entity) do
+  if EnemyAircraft[k] == nil then
+    EnemyAircraft[k] = v
+  end
 end
 

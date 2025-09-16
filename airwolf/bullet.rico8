@@ -1,7 +1,7 @@
 // Bullet module for Airwolf game
 // Ported from Lua to Rico8
 
-use entity::{Entity, EntityType, Sprite, Size};
+use entity::{Entity, Sprite, Size};
 
 struct Bullet {
     x: f32,
@@ -50,6 +50,10 @@ impl Bullet {
     fn is_enemy_bullet(&self) -> bool {
         self.is_enemy
     }
+
+    fn hit(&mut self) {
+        // Mark bullet as hit - it will be removed
+    }
 }
 
 impl Entity for Bullet {
@@ -61,14 +65,6 @@ impl Entity for Bullet {
         self.y
     }
 
-    fn set_x(&mut self, x: f32) {
-        self.x = x;
-    }
-
-    fn set_y(&mut self, y: f32) {
-        self.y = y;
-    }
-
     fn get_sprite(&self) -> Sprite {
         self.sprite
     }
@@ -76,8 +72,5 @@ impl Entity for Bullet {
     fn get_size(&self) -> Size {
         self.size
     }
-
-    fn get_type(&self) -> EntityType {
-        EntityType::Bullet
-    }
+    // Uses default draw() and collides_with() from trait
 }

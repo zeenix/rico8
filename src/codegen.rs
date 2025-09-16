@@ -160,6 +160,8 @@ impl Generator {
         self.write_line(&format!("-- trait {}", t.name));
         self.write_line(&format!("{} = {{}}", t.name));
 
+        self.write_line("");
+
         // Generate default method implementations
         for method in &t.methods {
             if let Some(body) = &method.body {
@@ -938,6 +940,7 @@ impl Generator {
             Type::Reference(inner, _) => self.type_to_string(inner),
             Type::Array(_, _) => "array".to_string(),
             Type::Tuple(_) => "tuple".to_string(),
+            Type::TraitObject(trait_name) => format!("dyn_{}", trait_name),
         }
     }
 

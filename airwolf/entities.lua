@@ -3,11 +3,21 @@
 
 -- trait Entity
 Entity = {}
--- Default implementation for Entity:draw
--- Default implementation for Entity:move_dir
--- Default implementation for Entity:collides_with
--- Default implementation for Entity:is_enemy
--- Default implementation for Entity:is_player
+
+function Entity:draw(
+)
+  local sprite = self:get_sprite()
+  local x = (flr(self:get_x()) + 0.5)
+  local y = (flr(self:get_y()) + 0.5)
+  spr(sprite.num, x, y, sprite.w, sprite.h)
+end
+function Entity:collides_with(
+other_x, other_y, other_size)
+  local my_x = self:get_x()
+  local my_y = self:get_y()
+  local my_size = self:get_size()
+  return ((((my_x < (other_x + other_size.w)) and ((my_x + my_size.w) > other_x)) and (my_y < (other_y + other_size.h))) and ((my_y + my_size.h) > other_y))
+end
 
 -- struct Sprite
 Sprite = {}
@@ -83,6 +93,17 @@ RotorProps = {}
 
 BUTTON_MASKS = {left = 1, right = 2, up = 4, down = 8, left_up = 5, right_up = 6, left_down = 9, right_down = 10}
 
+-- enum Scene
+Start = {
+  tag = "Start"
+}
+Game = {
+  tag = "Game"
+}
+GameOver = {
+  tag = "GameOver"
+}
+
 -- struct TheLady
 TheLady = {}
 
@@ -90,25 +111,24 @@ TheLady = {}
 function TheLady:new()
   local obj
 local bullet_props = {x_offset = 0, y_offset = -1, interval = 0.4, sw = 1, sh = 1}
-  obj = {x = 63, y = 111, sprite = {num = 1, w = 1, h = 1}, size = {w = 8, h = 8}, shooter = Shooter:new(bullet_props), main_rotor = Rotor:new({x = 4.5, y = 3.5, length = 2}), tail_rotor = Rotor:new({x = 4, y = 7, length = 1})}
+  obj = {x = 63, y = 111, sprite = {num = 1, w = 1, h = 1}, size = {w = 8, h = 8}, shooter = Shooter:new(bullet_props), main_rotor = Rotor:new({x = 4.5, y = 3.5, length = 2}), tail_rotor = Rotor:new({x = 4, y = 7, length = 1}), alive = true}
   setmetatable(obj, {__index = TheLady})
   return obj
 end
 function TheLady:update(scene)
-  local outside = ((scene == 1) and self:move_player() or false)
+  local is_game = (function()
+    local __match = scene
+    if __match.tag == "Game"     then
+      return true
+    elseif true     then
+      return false
+        end
+  end)()
+  local outside = (is_game and self:move_player() or false)
   self.shooter:update(self.x, self.y)
   self.main_rotor:update(self.x, self.y)
   self.tail_rotor:update(self.x, self.y)
   return outside
-end
-function TheLady:draw()
-  palt(256)
-  local x = (flr(self.x) + 0.5)
-  local y = (flr(self.y) + 0.5)
-  spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
-  palt(32768)
-  self.main_rotor:draw()
-  self.tail_rotor:draw()
 end
 function TheLady:move_player()
   local can_l = (self.x > -1)
@@ -162,6 +182,16 @@ end
 function TheLady:get_y()
   return self.y
 end
+function TheLady:hit()
+  self.alive = false
+  sfx(1)
+end
+function TheLady:is_alive()
+  return self.alive
+end
+function TheLady:get_size()
+  return self.size
+end
 
 -- impl Entity for TheLady
 function TheLady:get_x()
@@ -170,20 +200,28 @@ end
 function TheLady:get_y()
   return self.y
 end
-function TheLady:set_x(x)
-  self.x = x
-end
-function TheLady:set_y(y)
-  self.y = y
-end
 function TheLady:get_sprite()
   return self.sprite
 end
 function TheLady:get_size()
   return self.size
 end
-function TheLady:get_type()
-  return 0
+function TheLady:draw()
+  if self.alive   then
+    palt(256)
+    local x = (flr(self.x) + 0.5)
+    local y = (flr(self.y) + 0.5)
+    spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
+    palt(32768)
+    self.main_rotor:draw()
+    self.tail_rotor:draw()
+  end
+end
+-- Copy default methods from Entity
+for k, v in pairs(Entity) do
+  if TheLady[k] == nil then
+    TheLady[k] = v
+  end
 end
 
 -- struct EnemyAircraft
@@ -202,20 +240,19 @@ function EnemyAircraft:update(scene, airwolf_x)
   if not self.alive   then
     return true
   end
-  local outside = ((scene == 1) and self:move_enemy(airwolf_x) or false)
+  local is_game = (function()
+    local __match = scene
+    if __match.tag == "Game"     then
+      return true
+    elseif true     then
+      return false
+        end
+  end)()
+  local outside = (is_game and self:move_enemy(airwolf_x) or false)
   self.shooter:update(self.x, self.y)
   self.main_rotor:update(self.x, self.y)
   self.tail_rotor:update(self.x, self.y)
   return outside
-end
-function EnemyAircraft:draw()
-  if self.alive   then
-    local x = (flr(self.x) + 0.5)
-    local y = (flr(self.y) + 0.5)
-    spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
-    self.main_rotor:draw()
-    self.tail_rotor:draw()
-  end
 end
 function EnemyAircraft:move_enemy(airwolf_x)
   if (self.x < airwolf_x)   then
@@ -229,8 +266,6 @@ function EnemyAircraft:move_enemy(airwolf_x)
       self.y = (self.y + 0.5)
     end
   end
-  if (rnd(100) < 2)   then
-  end
   return (self.y > 140)
 end
 function EnemyAircraft:hit()
@@ -238,6 +273,12 @@ function EnemyAircraft:hit()
 end
 function EnemyAircraft:is_alive()
   return self.alive
+end
+function EnemyAircraft:should_shoot()
+  return self.shooter:can_shoot()
+end
+function EnemyAircraft:did_shoot()
+  self.shooter:shoot()
 end
 function EnemyAircraft:get_x()
   return self.x
@@ -247,6 +288,12 @@ function EnemyAircraft:get_y()
 end
 function EnemyAircraft:get_size()
   return self.size
+end
+function EnemyAircraft:should_shoot()
+  return (self.shooter:can_shoot() and (rnd(100) < 2))
+end
+function EnemyAircraft:did_shoot()
+  self.shooter:shoot()
 end
 
 -- impl Entity for EnemyAircraft
@@ -256,20 +303,26 @@ end
 function EnemyAircraft:get_y()
   return self.y
 end
-function EnemyAircraft:set_x(x)
-  self.x = x
-end
-function EnemyAircraft:set_y(y)
-  self.y = y
-end
 function EnemyAircraft:get_sprite()
   return self.sprite
 end
 function EnemyAircraft:get_size()
   return self.size
 end
-function EnemyAircraft:get_type()
-  return 1
+function EnemyAircraft:draw()
+  if self.alive   then
+    local x = (flr(self.x) + 0.5)
+    local y = (flr(self.y) + 0.5)
+    spr(self.sprite.num, x, y, self.sprite.w, self.sprite.h)
+    self.main_rotor:draw()
+    self.tail_rotor:draw()
+  end
+end
+-- Copy default methods from Entity
+for k, v in pairs(Entity) do
+  if EnemyAircraft[k] == nil then
+    EnemyAircraft[k] = v
+  end
 end
 
 -- struct Bullet
@@ -278,7 +331,13 @@ Bullet = {}
 -- impl Bullet
 function Bullet:new(x, y, velx, vely)
   local obj
-  obj = {x = x, y = y, velx = velx, vely = vely, sprite = {num = 16, w = 1, h = 1}, size = {w = 2, h = 2}}
+  obj = {x = x, y = y, velx = velx, vely = vely, sprite = {num = 64, w = 1, h = 1}, size = {w = 6, h = 8}, is_enemy = false}
+  setmetatable(obj, {__index = Bullet})
+  return obj
+end
+function Bullet:new_enemy(x, y, velx, vely)
+  local obj
+  obj = {x = x, y = y, velx = velx, vely = vely, sprite = {num = 65, w = 1, h = 1}, size = {w = 1, h = 6}, is_enemy = true}
   setmetatable(obj, {__index = Bullet})
   return obj
 end
@@ -286,6 +345,11 @@ function Bullet:update()
   self.x = (self.x + self.velx)
   self.y = (self.y + self.vely)
   return ((((self.x < -8) or (self.x > 136)) or (self.y < -8)) or (self.y > 136))
+end
+function Bullet:is_enemy_bullet()
+  return self.is_enemy
+end
+function Bullet:hit()
 end
 
 -- impl Entity for Bullet
@@ -295,20 +359,17 @@ end
 function Bullet:get_y()
   return self.y
 end
-function Bullet:set_x(x)
-  self.x = x
-end
-function Bullet:set_y(y)
-  self.y = y
-end
 function Bullet:get_sprite()
   return self.sprite
 end
 function Bullet:get_size()
   return self.size
 end
-function Bullet:get_type()
-  return 2
+-- Copy default methods from Entity
+for k, v in pairs(Entity) do
+  if Bullet[k] == nil then
+    Bullet[k] = v
+  end
 end
 
 -- struct Explosion
@@ -317,10 +378,7 @@ Explosion = {}
 -- impl Explosion
 function Explosion:new(x, y)
   local obj
-local sprite = {num = 0, w = 1, h = 1}
-local size = {w = 1, h = 1}
-local entity = Entity:new(x, y, sprite, 3, size)
-  obj = {entity = entity, active = true, timer = 30}
+  obj = {x = x, y = y, sprite = {num = 0, w = 1, h = 1}, size = {w = 1, h = 1}, active = true, timer = 30}
   setmetatable(obj, {__index = Explosion})
   return obj
 end
@@ -335,36 +393,65 @@ function Explosion:update()
   end
   return false
 end
+function Explosion:get_x()
+  return self.x
+end
+function Explosion:get_y()
+  return self.y
+end
+
+-- impl Entity for Explosion
+function Explosion:get_x()
+  return self.x
+end
+function Explosion:get_y()
+  return self.y
+end
+function Explosion:get_sprite()
+  return self.sprite
+end
+function Explosion:get_size()
+  return self.size
+end
 function Explosion:draw()
   if self.active   then
-    local x = self.entity.x
-    local y = self.entity.y
+    local x = self.x
+    local y = self.y
     local r = (self.timer / 5)
     if (r > 0)     then
-      circfill(x, y, r, COLORS.light_grey)
-      circ(x, y, (r + 1), COLORS.dark_grey)
+      circfill(x, y, r, 6)
+      circ(x, y, (r + 1), 5)
     end
-    for i=0,4     do
+    for i=0,3     do
       local angle = (i * 90)
       local dist = (8 - (self.timer / 4))
       if (dist > 0)       then
-        pset((x + dist), y, COLORS.yellow)
-        pset((x - dist), y, COLORS.yellow)
-        pset(x, (y + dist), COLORS.yellow)
-        pset(x, (y - dist), COLORS.yellow)
+        pset((x + dist), y, 10)
+        pset((x - dist), y, 10)
+        pset(x, (y + dist), 10)
+        pset(x, (y - dist), 10)
       end
     end
   end
 end
-function Explosion:get_entity()
-  return self.entity
+-- Copy default methods from Entity
+for k, v in pairs(Entity) do
+  if Explosion[k] == nil then
+    Explosion[k] = v
+  end
 end
 
-enemies = {}
-
-bullets = {}
-
-explosions = {}
+-- enum UpdateResult
+function Score(...)
+  local args = {...}
+  return {
+    tag = "Score",
+    _0 = args[1],
+  }
+end
+PlayerDied = {
+  tag = "PlayerDied"
+}
 
 -- struct Entities
 Entities = {}
@@ -372,87 +459,115 @@ Entities = {}
 -- impl Entities
 function Entities:new()
   local obj
-enemies = {}
-bullets = {}
-explosions = {}
-  obj = {player = TheLady:new(), enemy_spawn_timer = 0}
+  obj = {player = TheLady:new(), enemies = {}, bullets = {}, explosions = {}, enemy_spawn_timer = 0}
   setmetatable(obj, {__index = Entities})
   return obj
 end
 function Entities:update(scene, score)
   local new_score = score
   self.player:update(scene)
-  if (scene ~= 1)   then
-    return new_score
+  if not self.player:is_alive()   then
+    return PlayerDied
+  end
+  local is_game = (function()
+    local __match = scene
+    if __match.tag == "Game"     then
+      return true
+    elseif true     then
+      return false
+        end
+  end)()
+  if not is_game   then
+    return Score(new_score)
   end
   self.enemy_spawn_timer = (self.enemy_spawn_timer + 1)
   if (self.enemy_spawn_timer > 90)   then
-    self:spawn_enemy()
+    add(self.enemies, EnemyAircraft:new())
     self.enemy_spawn_timer = 0
   end
   local player_x = self.player:get_x()
-  for i=0,count(enemies)   do
-    local enemy = enemies[i]
-    if enemy:update(scene, player_x)     then
-      if not enemy:is_alive()       then
-        self:add_explosion(enemy:get_x(), enemy:get_y())
+  local i = count(self.enemies)
+  while (i > 0)   do
+    i = (i - 1)
+    local should_remove = self.enemies[(i + 1)]:update(scene, player_x)
+    if self.enemies[(i + 1)]:should_shoot()     then
+      local ex = self.enemies[(i + 1)]:get_x()
+      local ey = self.enemies[(i + 1)]:get_y()
+      add(self.bullets, Bullet:new_enemy((ex + 3), (ey + 4), 0, 2))
+      self.enemies[(i + 1)]:did_shoot()
+      sfx(0)
+    end
+    if should_remove     then
+      if not self.enemies[(i + 1)]:is_alive()       then
+        self:add_explosion(self.enemies[(i + 1)]:get_x(), self.enemies[(i + 1)]:get_y())
+        new_score = (new_score + 100)
       end
-      del(enemies, i)
+      deli(self.enemies, (i + 1))
     end
   end
-  for i=0,count(bullets)   do
-    local bullet = bullets[i]
-    if bullet:update()     then
-      del(bullets, i)
+  i = count(self.bullets)
+  while (i > 0)   do
+    i = (i - 1)
+    if self.bullets[(i + 1)]:update()     then
+      deli(self.bullets, (i + 1))
+    end
+  end
+  i = count(self.explosions)
+  while (i > 0)   do
+    i = (i - 1)
+    if self.explosions[(i + 1)]:update()     then
+      deli(self.explosions, (i + 1))
+    end
+  end
+  if (btnp(4) or btnp(5))   then
+    local px = self.player:get_x()
+    local py = self.player:get_y()
+    add(self.bullets, Bullet:new((px + 3), (py - 2), 0, -2))
+    sfx(0)
+  end
+  new_score = self:check_collisions(new_score)
+  return Score(new_score)
+end
+function Entities:draw()
+  self.player:draw()
+  for _,enemy in pairs(self.enemies)   do
+    enemy:draw()
+  end
+  for _,bullet in pairs(self.bullets)   do
+    bullet:draw()
+  end
+  for _,explosion in pairs(self.explosions)   do
+    explosion:draw()
+  end
+end
+function Entities:add_explosion(x, y)
+  add(self.explosions, Explosion:new(x, y))
+  sfx(1)
+end
+function Entities:check_collisions(score)
+  local new_score = score
+  for i=0,(count(self.bullets) - 1)   do
+    if self.bullets[(i + 1)]:is_enemy_bullet()     then
+      if self.bullets[(i + 1)]:collides_with(self.player:get_x(), self.player:get_y(), self.player:get_size())       then
+        self.player:hit()
+        self.bullets[(i + 1)]:hit()
+      end
     else
-      for j=0,count(enemies)       do
-        local enemy = enemies[j]
-        if bullet:collides_with(enemy:get_x(), enemy:get_y(), enemy:get_size())         then
-          enemy:hit()
-          del(bullets, i)
-          break
+      for j=0,(count(self.enemies) - 1)       do
+        if self.bullets[(i + 1)]:collides_with(self.enemies[(j + 1)]:get_x(), self.enemies[(j + 1)]:get_y(), self.enemies[(j + 1)]:get_size())         then
+          self.enemies[(j + 1)]:hit()
+          self.bullets[(i + 1)]:hit()
+          new_score = (new_score + 10)
         end
       end
     end
   end
-  for i=0,count(explosions)   do
-    local explosion = explosions[i]
-    if explosion:update()     then
-      del(explosions, i)
+  for i=0,(count(self.enemies) - 1)   do
+    if (self.enemies[(i + 1)]:is_alive() and self.enemies[(i + 1)]:collides_with(self.player:get_x(), self.player:get_y(), self.player:get_size()))     then
+      self.player:hit()
+      self.enemies[(i + 1)]:hit()
     end
   end
-  if (btnp(4, 0) or btnp(5, 0))   then
-    self:add_bullet((self.player:get_x() + 3), (self.player:get_y() - 2), 0, -2)
-  end
   return new_score
-end
-function Entities:draw()
-  self.player:draw()
-  for _,enemy in pairs(enemies)   do
-    enemy:draw()
-  end
-  for _,bullet in pairs(bullets)   do
-    bullet:draw()
-  end
-  for _,explosion in pairs(explosions)   do
-    explosion:draw()
-  end
-end
-function Entities:spawn_enemy()
-  local enemy = EnemyAircraft:new()
-  add(enemies, enemy)
-end
-function Entities:add_bullet(x, y, velx, vely)
-  local bullet = Bullet:new(x, y, velx, vely)
-  add(bullets, bullet)
-  sfx(0)
-end
-function Entities:add_explosion(x, y)
-  local explosion = Explosion:new(x, y)
-  add(explosions, explosion)
-  sfx(1)
-end
-function Entities:get_player()
-  return self.player
 end
 

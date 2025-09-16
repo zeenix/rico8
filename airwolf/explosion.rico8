@@ -1,7 +1,7 @@
 // Explosion module for Airwolf game
 // Ported from Lua to Rico8
 
-use entity::{Entity, EntityType, Sprite, Size};
+use entity::{Entity, Sprite, Size};
 use consts::COLORS;
 
 struct Explosion {
@@ -40,8 +40,6 @@ impl Explosion {
         false
     }
 
-    // Draw method moved to Entity impl to avoid duplication
-
     fn get_x(&self) -> f32 {
         self.x
     }
@@ -60,14 +58,6 @@ impl Entity for Explosion {
         self.y
     }
 
-    fn set_x(&mut self, x: f32) {
-        self.x = x;
-    }
-
-    fn set_y(&mut self, y: f32) {
-        self.y = y;
-    }
-
     fn get_sprite(&self) -> Sprite {
         self.sprite
     }
@@ -76,11 +66,7 @@ impl Entity for Explosion {
         self.size
     }
 
-    fn get_type(&self) -> EntityType {
-        EntityType::Explosion
-    }
-
-    // Override draw for custom explosion effects
+    // Override draw for explosion effect
     fn draw(&self) {
         if self.active {
             let x = self.x;
@@ -89,8 +75,8 @@ impl Entity for Explosion {
 
             // Draw explosion effect
             if r > 0 {
-                circfill(x, y, r, COLORS.light_grey);
-                circ(x, y, r + 1, COLORS.dark_grey);
+                circfill(x, y, r, 6);  // Light grey
+                circ(x, y, r + 1, 5);   // Dark grey
             }
 
             // Draw some sparks
@@ -98,10 +84,10 @@ impl Entity for Explosion {
                 let angle = i * 90;
                 let dist = 8 - self.timer / 4;
                 if dist > 0 {
-                    pset(x + dist, y, COLORS.yellow);
-                    pset(x - dist, y, COLORS.yellow);
-                    pset(x, y + dist, COLORS.yellow);
-                    pset(x, y - dist, COLORS.yellow);
+                    pset(x + dist, y, 10);  // Yellow
+                    pset(x - dist, y, 10);
+                    pset(x, y + dist, 10);
+                    pset(x, y - dist, 10);
                 }
             }
         }

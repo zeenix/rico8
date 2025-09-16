@@ -116,6 +116,7 @@ pub enum Type {
     Reference(Box<Type>, bool),
     Array(Box<Type>, usize),
     Tuple(Vec<Type>),
+    TraitObject(String), // dyn Trait
 }
 
 #[derive(Debug, Clone, PartialEq)]
