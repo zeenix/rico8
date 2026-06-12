@@ -2,6 +2,7 @@
 resolver = "2"
 members = [
     "rico8",
+    "rico8-console",
     "rico8-runtime",
 ]
 # Example carts are standalone crates built for wasm32-unknown-unknown,
