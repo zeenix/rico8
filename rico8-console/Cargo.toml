@@ -1,0 +1,24 @@
+[package]
+name = "rico8-console"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RICO-8: a PICO-8-like fantasy console for Rust games"
+
+# The package is rico8-console; the command you type is `rico8`.
+[[bin]]
+name = "rico8"
+path = "src/main.rs"
+
+[features]
+default = ["audio"]
+# Disable for machines without audio (e.g. no ALSA headers on Linux).
+audio = ["rico8-runtime/audio"]
+
+[dependencies]
+rico8-runtime.workspace = true
+anyhow.workspace = true
+winit.workspace = true
+wgpu.workspace = true
+pollster.workspace = true

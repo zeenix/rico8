@@ -2,7 +2,7 @@
 
 ```text
             +------------------------------------------------------+
-            |        rico8 (binary, `console` feature)              |
+            |                  rico8-console                        |
             |  winit window . wgpu blit . shell . prompt . editors  |
             +-----------+------------------------------+-----------+
                         |                              |
@@ -25,8 +25,9 @@
 
 Everything visible — running carts, the boot console, every editor —
 is software-rendered into a single 128x128 buffer of palette indices
-(`rico8_runtime::fb::Framebuffer`). The GPU's only job (`rico8/src/
-console/gpu.rs`) is to upload that as a texture and blit it at the largest
+(`rico8_runtime::fb::Framebuffer`). The GPU's only job
+(`rico8-console/src/gpu.rs`) is to upload that as a texture and blit it
+at the largest
 integer scale that fits the window, letterboxed, nearest-filtered.
 That is what makes the UI incapable of looking native: there is no
 other way to put pixels on screen.
@@ -34,7 +35,7 @@ other way to put pixels on screen.
 This also makes the whole console testable headless: tests and the
 `verify`/`snap` subcommands drive the same framebuffer with no window.
 
-## The SDK (`rico8`, the library)
+## The SDK (`rico8`)
 
 Carts depend on one crate, and it is deliberately dependency-free.
 `ffi.rs` declares the raw ABI imports
@@ -44,13 +45,6 @@ logging) and `Graphics` (draw-time), both zero-sized. The `game!`
 macro exports `rico8_init/update/draw` and installs a panic hook that
 forwards panic messages to the host before the trap, which is how a
 cart panic becomes a readable error screen.
-
-The same package also ships the console binary (`src/console/`),
-gated behind the `console` cargo feature with
-`required-features = ["console"]` on the bin target. The feature pulls
-in winit, wgpu and rico8-runtime; without it the package is the
-zero-dependency SDK that cart builds see. `cargo console` (a workspace
-alias) builds and runs the full console.
 
 ## The VM (`rico8-runtime/src/vm.rs`)
 
@@ -63,7 +57,7 @@ exhaustion is reported as "ran too long (infinite loop?)" instead of a
 freeze. Unknown imports fail instantiation — the sandbox is allowlist-
 only.
 
-## The shell (`rico8/src/console/shell.rs`)
+## The shell (`rico8-console/src/shell.rs`)
 
 A mode machine: `Console`, `Run`, and the five editors. The console
 owns the loaded state, which is either a *project* (directory: code +
