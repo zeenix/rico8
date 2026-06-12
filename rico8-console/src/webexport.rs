@@ -107,7 +107,7 @@ const TEMPLATE: &str = r#"<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
 <title>{{TITLE}} - rico-8</title>
 <style>
   html, body { margin: 0; height: 100%; background: #000; }
@@ -128,12 +128,54 @@ const TEMPLATE: &str = r#"<!doctype html>
   #title { color: #c2c3c7; font-size: 14px; }
   #hint { font-size: 11px; }
   a { color: #5f574f; }
+
+  /* Touch controls: hidden unless the device has a coarse pointer. */
+  #touch { display: none; width: 100%; max-width: 560px;
+           justify-content: space-between; align-items: center;
+           padding: 8px 18px; box-sizing: border-box;
+           user-select: none; -webkit-user-select: none; }
+  @media (pointer: coarse) {
+    body { justify-content: flex-start; padding-top: 10px;
+           overscroll-behavior: none; }
+    #stage { width: min(92vmin, 56vh); }
+    #touch { display: flex; touch-action: none; }
+    #hint { display: none; }
+  }
+  #dpad { position: relative; width: 34vmin; height: 34vmin;
+          max-width: 180px; max-height: 180px; }
+  #dpad::before, #dpad::after { content: ""; position: absolute;
+          background: #1d2b53; border: 2px solid #5f574f;
+          box-sizing: border-box; border-radius: 6px; }
+  #dpad::before { left: 33%; top: 0; width: 34%; height: 100%; }
+  #dpad::after { left: 0; top: 33%; width: 100%; height: 34%; }
+  #dpad .dir { position: absolute; color: #5f574f; font-size: 18px;
+          z-index: 1; transform: translate(-50%, -50%); }
+  #dpad .dir.on { color: #ffec27; }
+  #d-l { left: 16%; top: 50%; } #d-r { left: 84%; top: 50%; }
+  #d-u { left: 50%; top: 16%; } #d-d { left: 50%; top: 84%; }
+  #abtns { display: flex; gap: 14px; align-items: flex-end; }
+  .ab { width: 17vmin; height: 17vmin; max-width: 90px; max-height: 90px;
+        border-radius: 50%; border: 2px solid #5f574f;
+        background: #1d2b53; color: #c2c3c7; font-family: monospace;
+        font-size: 24px; padding: 0; }
+  #btn-o { margin-bottom: 26px; }
+  .ab.on { background: #7e2553; color: #fff1e8; border-color: #ff77a8; }
 </style>
 </head>
 <body>
 <div id="stage">
   <canvas id="screen" width="128" height="128"></canvas>
   <button id="boot"><img alt="cartridge" id="cartimg"><span>click to play</span></button>
+</div>
+<div id="touch">
+  <div id="dpad">
+    <span class="dir" id="d-l">&#9664;</span><span class="dir" id="d-r">&#9654;</span>
+    <span class="dir" id="d-u">&#9650;</span><span class="dir" id="d-d">&#9660;</span>
+  </div>
+  <div id="abtns">
+    <button class="ab" id="btn-o">o</button>
+    <button class="ab" id="btn-x">x</button>
+  </div>
 </div>
 <div id="title">{{TITLE}}</div>
 <div id="hint">arrows + z/x &middot; made with <a href="https://github.com/zeenix/rico8">rico-8</a></div>
@@ -200,6 +242,50 @@ function key(e, down) {
   if (b === undefined) return;
   e.preventDefault();
   wasm.rico8_web_set_button(b, down);
+}
+
+// --- Touch controls: d-pad + O/X, multi-touch, 8-way diagonals. ---
+const touchState = [0, 0, 0, 0, 0, 0];
+const el = (id) => document.getElementById(id);
+
+function inRect(r, t, slop) {
+  return t.clientX >= r.left - slop && t.clientX <= r.right + slop &&
+         t.clientY >= r.top - slop && t.clientY <= r.bottom + slop;
+}
+
+function readTouches(e) {
+  e.preventDefault();
+  if (!wasm) return;
+  const next = [0, 0, 0, 0, 0, 0];
+  const pad = el("dpad").getBoundingClientRect();
+  const ro = el("btn-o").getBoundingClientRect();
+  const rx = el("btn-x").getBoundingClientRect();
+  for (const t of e.touches) {
+    if (inRect(ro, t, 12)) { next[4] = 1; continue; }
+    if (inRect(rx, t, 12)) { next[5] = 1; continue; }
+    if (!inRect(pad, t, pad.width * 0.3)) continue;
+    const dx = t.clientX - (pad.left + pad.width / 2);
+    const dy = t.clientY - (pad.top + pad.height / 2);
+    if (Math.hypot(dx, dy) < pad.width * 0.1) continue; // dead zone
+    // 8-way: overlapping 135-degree sectors make 45-degree diagonals.
+    const a = Math.atan2(dy, dx) * 180 / Math.PI;
+    if (Math.abs(a) < 67.5) next[1] = 1;          // right
+    if (Math.abs(a) > 112.5) next[0] = 1;         // left
+    if (a < -22.5 && a > -157.5) next[2] = 1;     // up
+    if (a > 22.5 && a < 157.5) next[3] = 1;       // down
+  }
+  const vis = ["d-l", "d-r", "d-u", "d-d", "btn-o", "btn-x"];
+  for (let b = 0; b < 6; b++) {
+    if (next[b] !== touchState[b]) {
+      touchState[b] = next[b];
+      wasm.rico8_web_set_button(b, next[b]);
+      el(vis[b]).classList.toggle("on", next[b] === 1);
+    }
+  }
+}
+
+for (const ev of ["touchstart", "touchmove", "touchend", "touchcancel"]) {
+  el("touch").addEventListener(ev, readTouches, { passive: false });
 }
 
 // Keep a short queue of scheduled audio buffers ahead of the clock.

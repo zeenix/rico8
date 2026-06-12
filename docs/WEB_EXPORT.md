@@ -42,6 +42,13 @@ RICO-8 error screen as the desktop console, drawn by the player
 itself. Keys match the desktop: arrows + `Z`/`X` (also `C`/`V`,
 `N`/`M`).
 
+On touch devices (detected via `pointer: coarse`) the page shows
+on-screen controls under the canvas, PICO-8-web style: a d-pad on the
+left and round `O`/`X` buttons on the right. The d-pad is one touch
+zone with 8-way sectors, so diagonals and sliding between directions
+work, and multi-touch lets you hold a direction while tapping a
+button.
+
 ## Limitations
 
 - **Play only.** No console, no editors, no `Esc` to the prompt. Web
@@ -55,4 +62,4 @@ itself. Keys match the desktop: arrows + `Z`/`X` (also `C`/`V`,
 - **Exporting needs the RICO-8 source tree** (the player is compiled
   on first export; afterwards it's cached). Installed binaries can
   point elsewhere with `RICO8_WEB=/path/to/rico8-web`.
-- **No state saving** and no touch controls yet — keyboards only.
+- **No state saving.**
