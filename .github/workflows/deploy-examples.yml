@@ -1,0 +1,65 @@
+# Deploy every example cart to GitHub Pages on each push to main:
+# a shelf of cartridge PNGs, each linking to its playable web export.
+#
+# Requires Pages to be enabled with "GitHub Actions" as the source
+# (repo Settings -> Pages -> Build and deployment).
+
+name: deploy examples
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time; newer pushes win.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      # Headless export tools only: --no-default-features skips the
+      # audio backend, so no ALSA system packages are needed.
+      - name: Build the console
+        run: cargo build --release -p rico8-console --no-default-features
+
+      - name: Export and verify the example carts
+        run: |
+          mkdir -p site
+          for ex in hello sprite_move platformer map_demo sfx_demo music_demo; do
+            ./target/release/rico8 export examples/$ex site/$ex.png
+            ./target/release/rico8 verify site/$ex.png
+            ./target/release/rico8 export-web site/$ex.png site/$ex.html
+          done
+
+      - name: Build the index page
+        run: ./.github/build-index.sh site
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
