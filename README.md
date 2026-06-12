@@ -85,6 +85,11 @@ source embedded in a private chunk. Anyone can *see* the cart; RICO-8
 can *play* it; and if the source is included, `import` turns it back
 into an editable project. See [docs/CART_FORMAT.md](docs/CART_FORMAT.md).
 
+`export mygame.html` instead produces a single self-contained web page:
+the cart and the whole console runtime (compiled to wasm) embedded in
+one file you can double-click or host anywhere, PICO-8-web style. See
+[docs/WEB_EXPORT.md](docs/WEB_EXPORT.md).
+
 ## Projects are real crates
 
 A RICO-8 project is an ordinary Cargo crate that builds a `cdylib` for
@@ -98,6 +103,7 @@ rico8 new <dir>                  create a project
 rico8 build <dir>                compile it to wasm
 rico8 export <dir> <out.png>     build + write a png cart
 rico8 extract <cart.png> <dir>   editable cart -> project
+rico8 export-web <dir> <o.html>  one playable web page
 rico8 verify <cart.png>          run 60 frames headless
 ```
 
@@ -116,6 +122,7 @@ rico8/            the SDK carts depend on (zero dependencies)
 rico8-console/    the console: winit + wgpu shell, editors, prompt
                   (the binary it builds is called `rico8`)
 rico8-runtime/    framebuffer, font, palette, VM, synth, assets, carts
+rico8-web/        the browser player: the runtime compiled to wasm
 examples/
   hello/          the canonical first cart
   sprite_move/    sprite drawing, flipping, animation
@@ -152,7 +159,7 @@ then type `run`.
 
 ## Status
 
-Stages 0-9 of the original plan are in place: console, VM + ABI,
-all five editors, audio runtime, PNG carts, examples, docs and tests.
-Web export (stage 10) is future work. Expect rough edges and enjoy
-them — it's a fantasy console, not an IDE.
+All stages of the original plan are in place: console, VM + ABI, all
+five editors, audio runtime, PNG carts, web export, examples, docs and
+tests. Expect rough edges and enjoy them — it's a fantasy console, not
+an IDE.

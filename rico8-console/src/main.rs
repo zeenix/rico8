@@ -9,6 +9,7 @@ mod editor;
 mod gpu;
 mod shell;
 mod ui;
+mod webexport;
 
 use anyhow::{anyhow, bail, Context, Result};
 use rico8_runtime::cart::{self, Cart};
@@ -51,6 +52,7 @@ fn main() -> Result<()> {
             !rest.contains(&"--no-source"),
         ),
         ["extract", png, dir] => headless_extract(Path::new(png), Path::new(dir)),
+        ["export-web", input, out] => headless_export_web(Path::new(input), Path::new(out)),
         ["verify", png] => headless_verify(Path::new(png)),
         ["snap", project, outdir] => headless_snap(Path::new(project), Path::new(outdir)),
         [] => run_windowed(None),
@@ -74,6 +76,8 @@ fn print_help() {
          \x20                            build + export a png cart (headless)\n\
          \x20 rico8 extract <cart.png> <dir>\n\
          \x20                            turn an editable cart into a project\n\
+         \x20 rico8 export-web <dir|cart.png> <out.html>\n\
+         \x20                            export a self-contained playable web page\n\
          \x20 rico8 verify <cart.png>    load a cart and run 60 frames headless",
         shell::VERSION
     );
@@ -141,6 +145,32 @@ fn headless_extract(png: &Path, dir: &Path) -> Result<()> {
     project.assets = cart.assets;
     project.save()?;
     println!("extracted into {}", dir.display());
+    Ok(())
+}
+
+/// Export a project or cart as a single playable HTML file.
+fn headless_export_web(input: &Path, out: &Path) -> Result<()> {
+    let cart = if input.extension().is_some_and(|e| e == "png") {
+        cart::load_png(input)?
+    } else {
+        let project = Project::load(input)?;
+        let result = builder::run_build(input, Instant::now());
+        if !result.success {
+            for line in &result.errors {
+                eprintln!("{line}");
+            }
+            bail!("build failed");
+        }
+        let wasm = std::fs::read(project.wasm_path()).context("reading built wasm")?;
+        Cart {
+            wasm,
+            assets: project.assets.clone(),
+            // Web players can't edit; keep the page lean.
+            source: None,
+        }
+    };
+    webexport::export_html(&cart, out, &webexport::web_crate_dir(&sdk_path()))?;
+    println!("exported {}", out.display());
     Ok(())
 }
 

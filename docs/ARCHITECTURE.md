@@ -101,5 +101,15 @@ load     ->  validate + decode  ->  run, or extract back to a project
 ```
 
 Every stage of that pipeline also exists as a headless subcommand
-(`new`, `build`, `export`, `extract`, `verify`), which is how CI keeps
-the examples runnable.
+(`new`, `build`, `export`, `extract`, `export-web`, `verify`), which is
+how CI keeps the examples runnable.
+
+## The web player (`rico8-web`)
+
+Stage 10 reuses everything above: the runtime crate itself is compiled
+to `wasm32-unknown-unknown` (wasmi runs fine inside wasm) and wrapped
+in a C-like export surface mirroring the desktop frontend's needs —
+load cart, tick, framebuffer pointer, audio samples, buttons. The
+exported HTML page embeds that player and the cart PNG as base64 and
+adds ~100 lines of JavaScript: canvas blit, key mapping, WebAudio
+buffer queue. One runtime, two frontends. See WEB_EXPORT.md.

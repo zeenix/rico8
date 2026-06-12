@@ -1,0 +1,18 @@
+[package]
+name = "rico8-web"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RICO-8 browser player: the console runtime compiled to wasm, wrapped in a tiny C-like export surface"
+
+# cdylib for the browser, rlib so the player logic is unit-testable on
+# the host like everything else.
+[lib]
+crate-type = ["cdylib", "rlib"]
+
+[dependencies]
+rico8-runtime.workspace = true
+
+[dev-dependencies]
+wat = "1"

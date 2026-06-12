@@ -538,7 +538,7 @@ impl Shell {
             ("load <dir|cart.png>", "load a cart"),
             ("save", "save project to disk"),
             ("run", "build + run (esc stops)"),
-            ("export <f.png> [-nosrc]", "export png cart"),
+            ("export <f.png|f.html>", "export cart (png or web)"),
             ("import <f.png> <dir>", "cart -> project"),
             ("info", "cart metadata"),
             ("title/author <text>", "set metadata"),
@@ -692,8 +692,16 @@ impl Shell {
             .map(|f| f.to_string())
             .unwrap_or_else(|| format!("{}.png", self.cart_name()));
         let out = self.cwd.join(&file);
-        let cart = self.make_cart(include_source)?;
-        cart::save_png(&cart, &out)?;
+        if file.ends_with(".html") {
+            // Web export: one self-contained playable page.
+            let cart = self.make_cart(false)?;
+            self.say("exporting for web...", col::LIGHT_GREY);
+            let web_dir = crate::webexport::web_crate_dir(&self.sdk_path);
+            crate::webexport::export_html(&cart, &out, &web_dir)?;
+        } else {
+            let cart = self.make_cart(include_source)?;
+            cart::save_png(&cart, &out)?;
+        }
         self.say(&format!("exported {file}"), col::GREEN);
         Ok(())
     }

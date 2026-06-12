@@ -3,6 +3,7 @@ resolver = "2"
 members = [
     "rico8",
     "rico8-console",
+    "rico8-web",
     "rico8-runtime",
 ]
 # Example carts are standalone crates built for wasm32-unknown-unknown,
@@ -30,3 +31,12 @@ pollster = "0.4"
 
 [profile.release]
 opt-level = 3
+
+# Size-optimized profile for the browser player (`export-web`).
+[profile.web-release]
+inherits = "release"
+opt-level = "s"
+lto = true
+codegen-units = 1
+strip = true
+panic = "abort"
