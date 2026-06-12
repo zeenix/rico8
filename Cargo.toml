@@ -1,0 +1,32 @@
+[workspace]
+resolver = "2"
+members = [
+    "crates/rico8",
+    "crates/rico8-runtime",
+    "crates/rico8-cli",
+]
+# Example carts are standalone crates built for wasm32-unknown-unknown,
+# either from inside RICO-8 or with `cargo build --target wasm32-unknown-unknown`.
+exclude = ["examples"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/zeenix/rico8"
+
+[workspace.dependencies]
+rico8-runtime = { path = "crates/rico8-runtime", default-features = false }
+anyhow = "1"
+serde = { version = "1", features = ["derive"] }
+postcard = { version = "1", features = ["use-std"] }
+wasmi = "0.51"
+winit = "0.30"
+wgpu = "29"
+cpal = "0.18"
+crc32fast = "1"
+miniz_oxide = "0.9"
+pollster = "0.4"
+
+[profile.release]
+opt-level = 3

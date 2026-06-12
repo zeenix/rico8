@@ -1,0 +1,9 @@
+[package]
+name = "rico8"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RICO-8 fantasy console SDK: write carts in Rust, compile to wasm32-unknown-unknown"
+
+[dependencies]
