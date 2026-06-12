@@ -27,12 +27,13 @@ use winit::window::{Window, WindowId};
 const FRAME: Duration = Duration::from_nanos(1_000_000_000 / 30);
 
 /// Where the `rico8` SDK crate lives, for generated project manifests.
-/// Defaults to this source tree; override with RICO8_SDK for installs.
+/// The SDK is this very package, so default to our own source directory;
+/// override with RICO8_SDK for installed binaries.
 fn sdk_path() -> PathBuf {
     if let Ok(p) = std::env::var("RICO8_SDK") {
         return PathBuf::from(p);
     }
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../rico8")
+    PathBuf::from(env!("CARGO_MANIFEST_DIR"))
 }
 
 fn main() -> Result<()> {

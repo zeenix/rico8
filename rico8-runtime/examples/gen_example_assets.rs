@@ -254,7 +254,7 @@ fn base_assets() -> Assets {
 }
 
 fn main() {
-    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../examples");
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples");
     for (dir, author) in [
         ("sprite_move", "rico-8"),
         ("platformer", "rico-8"),

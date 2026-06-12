@@ -42,7 +42,7 @@ rico8::game!(Game { x: 64, y: 64 });
 ## The console
 
 ```text
-cargo run --release -p rico8-cli
+cargo console        # alias for: cargo run --release -p rico8 --features console
 ```
 
 You land at the boot console. Type `help`. The workflow is PICO-8's:
@@ -112,10 +112,10 @@ infinite loops into a friendly error screen instead of a hung console.
 ## Workspace
 
 ```text
-crates/
-  rico8/          the SDK carts depend on (safe wrappers over the ABI)
-  rico8-runtime/  framebuffer, font, palette, VM, synth, assets, carts
-  rico8-cli/      the console: winit + wgpu shell, editors, prompt
+rico8/            one crate, two faces: the `rico8` SDK library carts
+                  depend on (zero dependencies), and the `rico8` console
+                  binary behind the `console` cargo feature
+rico8-runtime/    framebuffer, font, palette, VM, synth, assets, carts
 examples/
   hello/          the canonical first cart
   sprite_move/    sprite drawing, flipping, animation
@@ -138,17 +138,21 @@ carts) and, on Linux, ALSA headers for audio:
 rustup target add wasm32-unknown-unknown
 sudo apt install libasound2-dev        # debian/ubuntu
 sudo dnf install alsa-lib-devel        # fedora
-# (or skip audio entirely with --no-default-features)
-cargo run --release -p rico8-cli
+# (or build silent with `--features console-core` instead)
+cargo console
 ```
 
 Try a bundled cart:
 
 ```text
-cargo run --release -p rico8-cli -- examples/platformer
+cargo console -- examples/platformer
 ```
 
 then type `run`.
+
+The console hides behind the `console` feature so that carts depending
+on the `rico8` SDK library pull in zero dependencies — the same package
+is a featherweight library to games and a whole console to you.
 
 ## Status
 
