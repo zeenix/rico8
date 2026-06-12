@@ -20,10 +20,22 @@ repository = "https://github.com/zeenix/rico8"
 rico8-runtime = { path = "rico8-runtime", default-features = false }
 anyhow = "1"
 serde = { version = "1", features = ["derive"] }
-postcard = { version = "1", features = ["use-std"] }
-wasmi = "0.51"
+# Only the std serializer; the default heapless integration goes unused.
+postcard = { version = "1", default-features = false, features = ["use-std"] }
+# No `wat`: carts are always binary wasm (text format is test-only).
+wasmi = { version = "0.51", default-features = false, features = ["std"] }
 winit = "0.30"
-wgpu = "29"
+# Default minus `webgpu`: that backend only exists for wasm targets,
+# and the console never compiles to wasm (the web player uses no GPU).
+wgpu = { version = "29", default-features = false, features = [
+    "std",
+    "parking_lot",
+    "wgsl",
+    "vulkan",
+    "gles",
+    "dx12",
+    "metal",
+] }
 cpal = "0.18"
 crc32fast = "1"
 miniz_oxide = "0.9"
