@@ -1,0 +1,23 @@
+[package]
+name = "rico8-runtime"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RICO-8 fantasy console runtime: VM, framebuffer, input, audio, assets, carts"
+
+[features]
+default = ["audio"]
+audio = ["dep:cpal"]
+
+[dependencies]
+anyhow.workspace = true
+serde.workspace = true
+postcard.workspace = true
+wasmi.workspace = true
+crc32fast.workspace = true
+miniz_oxide.workspace = true
+cpal = { workspace = true, optional = true }
+
+[dev-dependencies]
+wat = "1"

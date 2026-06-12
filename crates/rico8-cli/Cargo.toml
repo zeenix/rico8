@@ -1,0 +1,22 @@
+[package]
+name = "rico8-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "RICO-8: a PICO-8-like fantasy console for Rust games"
+
+[[bin]]
+name = "rico8"
+path = "src/main.rs"
+
+[features]
+default = ["audio"]
+audio = ["rico8-runtime/audio"]
+
+[dependencies]
+rico8-runtime = { workspace = true, default-features = false }
+anyhow.workspace = true
+winit.workspace = true
+wgpu.workspace = true
+pollster.workspace = true

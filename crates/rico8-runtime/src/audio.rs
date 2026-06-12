@@ -1,0 +1,520 @@
+//! Audio runtime: a 4-channel chip-tune synthesizer.
+//!
+//! The synth core is pure (samples in, samples out) so it can be tested
+//! headless; `AudioOutput` hooks it to a real device via cpal when the
+//! `audio` feature is enabled and an output device exists. On machines
+//! with no audio device RICO-8 stays silent but fully functional.
+
+use crate::assets::{MusicPattern, Sfx, SfxEffect, Waveform, CHANNELS, SFX_LEN};
+use std::sync::{Arc, Mutex};
+
+/// Steps are timed in 1/128ths of a second, like the SFX `speed` field.
+const TICKS_PER_SECOND: f32 = 128.0;
+
+fn pitch_to_freq(pitch: f32) -> f32 {
+    // Pitch 33 = A-4 = 440 Hz, 12 steps per octave.
+    440.0 * ((pitch - 33.0) / 12.0).exp2()
+}
+
+/// One playing voice on a channel.
+struct Voice {
+    sfx_index: usize,
+    sfx: Sfx,
+    /// Current step in `0..SFX_LEN`.
+    step: usize,
+    /// Seconds elapsed within the current step.
+    t_in_step: f32,
+    /// Oscillator phase in `[0, 1)`.
+    phase: f32,
+    /// Pitch of the previous step, for slides.
+    prev_pitch: f32,
+    /// True when this voice was started by the music sequencer.
+    from_music: bool,
+    /// Noise generator state.
+    noise: u32,
+    noise_level: f32,
+}
+
+impl Voice {
+    fn new(sfx_index: usize, sfx: Sfx, from_music: bool) -> Self {
+        let first_pitch = sfx.notes[0].pitch as f32;
+        Self {
+            sfx_index,
+            sfx,
+            step: 0,
+            t_in_step: 0.0,
+            phase: 0.0,
+            prev_pitch: first_pitch,
+            from_music,
+            noise: 0x1234_5678,
+            noise_level: 0.0,
+        }
+    }
+
+    fn step_duration(&self) -> f32 {
+        self.sfx.speed.max(1) as f32 / TICKS_PER_SECOND
+    }
+
+    /// Render one sample; returns `None` when the voice has finished.
+    fn sample(&mut self, dt: f32, total_t: f32) -> Option<f32> {
+        if self.step >= SFX_LEN {
+            return None;
+        }
+        let note = self.sfx.notes[self.step];
+        let frac = self.t_in_step / self.step_duration();
+
+        // Resolve effect-modified pitch and volume.
+        let base_pitch = note.pitch as f32;
+        let mut pitch = base_pitch;
+        let mut vol = note.volume as f32 / 7.0;
+        match SfxEffect::from_u8(note.effect) {
+            SfxEffect::None => {}
+            SfxEffect::Slide => pitch = self.prev_pitch + (base_pitch - self.prev_pitch) * frac,
+            SfxEffect::Vibrato => {
+                pitch += 0.25 * (total_t * 2.0 * std::f32::consts::PI * 8.0).sin()
+            }
+            SfxEffect::Drop => pitch = base_pitch * (1.0 - frac),
+            SfxEffect::FadeIn => vol *= frac,
+            SfxEffect::FadeOut => vol *= 1.0 - frac,
+            SfxEffect::ArpFast | SfxEffect::ArpSlow => {
+                let rate = if note.effect == 6 { 32.0 } else { 16.0 };
+                let group = self.step / 4 * 4;
+                let idx = (total_t * rate) as usize % 4;
+                pitch = self.sfx.notes[(group + idx).min(SFX_LEN - 1)].pitch as f32;
+            }
+        }
+
+        let freq = pitch_to_freq(pitch);
+        let wave = Waveform::from_u8(note.wave);
+
+        // Advance oscillator.
+        self.phase = (self.phase + freq * dt).fract();
+        let raw = match wave {
+            Waveform::Triangle => 4.0 * (self.phase - 0.5).abs() - 1.0,
+            Waveform::TiltedSaw => {
+                let p = self.phase;
+                if p < 0.875 {
+                    p / 0.875 * 2.0 - 1.0
+                } else {
+                    (1.0 - p) / 0.125 * 2.0 - 1.0
+                }
+            }
+            Waveform::Saw => 2.0 * self.phase - 1.0,
+            Waveform::Square => {
+                if self.phase < 0.5 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+            Waveform::Pulse => {
+                if self.phase < 0.3125 {
+                    1.0
+                } else {
+                    -1.0
+                }
+            }
+            Waveform::Organ => {
+                let t1 = 4.0 * (self.phase - 0.5).abs() - 1.0;
+                let p2 = (self.phase * 0.5).fract();
+                let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
+                (t1 + t2) * 0.5
+            }
+            Waveform::Noise => {
+                // Resample an LFSR at the note frequency for pitched noise.
+                if self.phase < freq * dt {
+                    self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
+                    self.noise_level = (self.noise >> 16) as f32 / 32768.0 - 1.0;
+                }
+                self.noise_level
+            }
+            Waveform::Phaser => {
+                let t1 = 4.0 * (self.phase - 0.5).abs() - 1.0;
+                let p2 = (self.phase * 1.01).fract();
+                let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
+                (t1 + t2) * 0.5
+            }
+        };
+
+        let out = raw * vol * 0.25;
+
+        // Advance step clock.
+        self.t_in_step += dt;
+        if self.t_in_step >= self.step_duration() {
+            self.t_in_step = 0.0;
+            self.prev_pitch = base_pitch;
+            self.step += 1;
+            let (ls, le) = (self.sfx.loop_start as usize, self.sfx.loop_end as usize);
+            if le > ls && self.step >= le && !self.from_music {
+                self.step = ls;
+            }
+        }
+        Some(out)
+    }
+}
+
+/// Music sequencer state.
+struct MusicState {
+    pattern: usize,
+    /// Seconds remaining in the current pattern.
+    remaining: f32,
+}
+
+/// The synthesizer: voices, sequencer and a copy of the cart's audio data.
+pub struct Synth {
+    sample_rate: f32,
+    t: f32,
+    sfx: Vec<Sfx>,
+    music: Vec<MusicPattern>,
+    voices: [Option<Voice>; CHANNELS],
+    music_state: Option<MusicState>,
+}
+
+impl Synth {
+    pub fn new(sample_rate: f32) -> Self {
+        Self {
+            sample_rate,
+            t: 0.0,
+            sfx: Vec::new(),
+            music: Vec::new(),
+            voices: [None, None, None, None],
+            music_state: None,
+        }
+    }
+
+    /// Replace the audio data (called when a cart starts or assets change).
+    pub fn load(&mut self, sfx: Vec<Sfx>, music: Vec<MusicPattern>) {
+        self.sfx = sfx;
+        self.music = music;
+    }
+
+    /// Stop all voices and the sequencer.
+    pub fn stop_all(&mut self) {
+        self.voices = [None, None, None, None];
+        self.music_state = None;
+    }
+
+    /// Play SFX `n`. `channel < 0` picks a free channel (preferring ones not
+    /// used by music); `n < 0` with a valid channel stops that channel.
+    pub fn play_sfx(&mut self, n: i32, channel: i32) {
+        if n < 0 {
+            if (0..CHANNELS as i32).contains(&channel) {
+                self.voices[channel as usize] = None;
+            }
+            return;
+        }
+        let Some(sfx) = self.sfx.get(n as usize).cloned() else {
+            return;
+        };
+        let ch = if (0..CHANNELS as i32).contains(&channel) {
+            channel as usize
+        } else {
+            // Prefer an idle channel, then one playing a one-shot SFX;
+            // steal a music channel only as a last resort.
+            let idle = (0..CHANNELS).find(|&i| self.voices[i].is_none());
+            let non_music =
+                (0..CHANNELS).find(|&i| self.voices[i].as_ref().is_some_and(|v| !v.from_music));
+            match idle.or(non_music) {
+                Some(i) => i,
+                None => CHANNELS - 1,
+            }
+        };
+        self.voices[ch] = Some(Voice::new(n as usize, sfx, false));
+    }
+
+    /// Start music at pattern `n`, or stop when `n < 0`.
+    pub fn play_music(&mut self, n: i32) {
+        if n < 0 {
+            self.stop_music();
+            return;
+        }
+        self.start_pattern(n as usize);
+    }
+
+    pub fn stop_music(&mut self) {
+        for v in &mut self.voices {
+            if v.as_ref().is_some_and(|v| v.from_music) {
+                *v = None;
+            }
+        }
+        self.music_state = None;
+    }
+
+    /// Index of the playing music pattern, if any.
+    pub fn playing_pattern(&self) -> Option<usize> {
+        self.music_state.as_ref().map(|m| m.pattern)
+    }
+
+    fn start_pattern(&mut self, n: usize) {
+        let Some(pat) = self.music.get(n).copied() else {
+            self.music_state = None;
+            return;
+        };
+        let mut longest = 0.0f32;
+        for (ch, slot) in pat.channels.iter().enumerate() {
+            // Music takes ownership of its channels; others keep playing SFX.
+            if let Some(sfx_idx) = slot {
+                if let Some(sfx) = self.sfx.get(*sfx_idx as usize).cloned() {
+                    let dur = sfx.speed.max(1) as f32 / TICKS_PER_SECOND * SFX_LEN as f32;
+                    longest = longest.max(dur);
+                    self.voices[ch] = Some(Voice::new(*sfx_idx as usize, sfx, true));
+                }
+            } else if self.voices[ch].as_ref().is_some_and(|v| v.from_music) {
+                self.voices[ch] = None;
+            }
+        }
+        if longest == 0.0 {
+            self.music_state = None;
+            return;
+        }
+        self.music_state = Some(MusicState {
+            pattern: n,
+            remaining: longest,
+        });
+    }
+
+    fn advance_music(&mut self) {
+        let Some(state) = &self.music_state else {
+            return;
+        };
+        let cur = state.pattern;
+        let pat = self.music.get(cur).copied().unwrap_or_default();
+        if pat.stop_at_end {
+            self.stop_music();
+            return;
+        }
+        if pat.loop_back {
+            // Jump back to the nearest loop_start at or before this pattern.
+            let target = (0..=cur)
+                .rev()
+                .find(|&i| self.music.get(i).is_some_and(|p| p.loop_start))
+                .unwrap_or(0);
+            self.start_pattern(target);
+            return;
+        }
+        let next = cur + 1;
+        if self.music.get(next).is_some_and(|p| !p.is_empty()) {
+            self.start_pattern(next);
+        } else {
+            self.stop_music();
+        }
+    }
+
+    /// Render one mono sample.
+    pub fn next_sample(&mut self) -> f32 {
+        let dt = 1.0 / self.sample_rate;
+        self.t += dt;
+
+        if let Some(state) = &mut self.music_state {
+            state.remaining -= dt;
+            if state.remaining <= 0.0 {
+                self.advance_music();
+            }
+        }
+
+        let mut mix = 0.0;
+        for v in &mut self.voices {
+            if let Some(voice) = v {
+                match voice.sample(dt, self.t) {
+                    Some(s) => mix += s,
+                    None => *v = None,
+                }
+            }
+        }
+        mix.clamp(-1.0, 1.0)
+    }
+
+    /// Which SFX index is playing on each channel (for editor UI).
+    pub fn channel_sfx(&self) -> [Option<usize>; CHANNELS] {
+        let mut out = [None; CHANNELS];
+        for (i, v) in self.voices.iter().enumerate() {
+            out[i] = v.as_ref().map(|v| v.sfx_index);
+        }
+        out
+    }
+}
+
+/// Clonable handle the VM and editors use to poke the synth.
+#[derive(Clone)]
+pub struct AudioHandle {
+    synth: Arc<Mutex<Synth>>,
+}
+
+impl AudioHandle {
+    pub fn new(synth: Arc<Mutex<Synth>>) -> Self {
+        Self { synth }
+    }
+
+    /// A handle with no device attached — still fully functional for logic.
+    pub fn dummy() -> Self {
+        Self {
+            synth: Arc::new(Mutex::new(Synth::new(44100.0))),
+        }
+    }
+
+    pub fn with_synth<R>(&self, f: impl FnOnce(&mut Synth) -> R) -> R {
+        f(&mut self.synth.lock().unwrap())
+    }
+
+    pub fn play_sfx(&self, n: i32, channel: i32) {
+        self.with_synth(|s| s.play_sfx(n, channel));
+    }
+
+    pub fn play_music(&self, n: i32) {
+        self.with_synth(|s| s.play_music(n));
+    }
+
+    pub fn stop_all(&self) {
+        self.with_synth(|s| s.stop_all());
+    }
+
+    pub fn load(&self, sfx: Vec<Sfx>, music: Vec<MusicPattern>) {
+        self.with_synth(|s| s.load(sfx, music));
+    }
+}
+
+/// Real audio output via cpal. Owns the stream; dropping it stops audio.
+#[cfg(feature = "audio")]
+pub struct AudioOutput {
+    _stream: cpal::Stream,
+    handle: AudioHandle,
+}
+
+#[cfg(feature = "audio")]
+impl AudioOutput {
+    /// Try to open the default output device. Returns `None` (silently)
+    /// when no device is available, e.g. on headless machines.
+    pub fn start() -> Option<Self> {
+        use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
+        let host = cpal::default_host();
+        let device = host.default_output_device()?;
+        let config = device.default_output_config().ok()?;
+        let sample_rate = config.sample_rate() as f32;
+        let channels = config.channels() as usize;
+        let synth = Arc::new(Mutex::new(Synth::new(sample_rate)));
+        let cb_synth = synth.clone();
+        let stream = device
+            .build_output_stream(
+                config.into(),
+                move |data: &mut [f32], _| {
+                    let mut synth = cb_synth.lock().unwrap();
+                    for frame in data.chunks_mut(channels) {
+                        let s = synth.next_sample();
+                        for out in frame {
+                            *out = s;
+                        }
+                    }
+                },
+                |err| eprintln!("rico8 audio error: {err}"),
+                None,
+            )
+            .ok()?;
+        stream.play().ok()?;
+        Some(Self {
+            _stream: stream,
+            handle: AudioHandle::new(synth),
+        })
+    }
+
+    pub fn handle(&self) -> AudioHandle {
+        self.handle.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assets::{Note, SFX_COUNT};
+
+    fn test_sfx() -> Vec<Sfx> {
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        for note in sfx[0].notes.iter_mut() {
+            *note = Note {
+                pitch: 33,
+                wave: 0,
+                volume: 5,
+                effect: 0,
+            };
+        }
+        sfx
+    }
+
+    #[test]
+    fn pitch_33_is_a440() {
+        assert!((pitch_to_freq(33.0) - 440.0).abs() < 0.01);
+        assert!((pitch_to_freq(45.0) - 880.0).abs() < 0.01);
+    }
+
+    #[test]
+    fn sfx_produces_sound_then_ends() {
+        let mut synth = Synth::new(44100.0);
+        synth.load(test_sfx(), vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+        let mut peak = 0.0f32;
+        for _ in 0..1000 {
+            peak = peak.max(synth.next_sample().abs());
+        }
+        assert!(peak > 0.01, "voice should be audible");
+        // Default speed 16 -> 32 steps * 0.125 s = 4 s; play 5 s.
+        for _ in 0..(44100 * 5) {
+            synth.next_sample();
+        }
+        assert_eq!(synth.channel_sfx()[0], None, "voice should end");
+    }
+
+    #[test]
+    fn empty_sfx_slot_is_ignored() {
+        let mut synth = Synth::new(44100.0);
+        synth.load(test_sfx(), vec![]);
+        synth.play_sfx(63, -1);
+        for _ in 0..100 {
+            assert_eq!(synth.next_sample(), 0.0);
+        }
+    }
+
+    #[test]
+    fn music_plays_and_stops() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[0].stop_at_end = true;
+        synth.load(test_sfx(), music);
+        synth.play_music(0);
+        assert_eq!(synth.playing_pattern(), Some(0));
+        for _ in 0..(44100 * 5) {
+            synth.next_sample();
+        }
+        assert_eq!(synth.playing_pattern(), None);
+    }
+
+    #[test]
+    fn music_loops_back() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[0].loop_start = true;
+        music[1].channels[0] = Some(0);
+        music[1].loop_back = true;
+        synth.load(test_sfx(), music);
+        synth.play_music(1);
+        for _ in 0..(44100 * 5) {
+            synth.next_sample();
+        }
+        assert_eq!(synth.playing_pattern(), Some(0), "should loop to start");
+    }
+
+    #[test]
+    fn auto_channel_avoids_music() {
+        let mut synth = Synth::new(44100.0);
+        let mut sfx = test_sfx();
+        sfx[1] = sfx[0].clone();
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        synth.load(sfx, music);
+        synth.play_music(0);
+        synth.play_sfx(1, -1);
+        let chans = synth.channel_sfx();
+        assert_eq!(chans[0], Some(0), "music keeps channel 0");
+        assert!(chans[1..].contains(&Some(1)), "sfx lands elsewhere");
+    }
+}
