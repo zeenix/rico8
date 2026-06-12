@@ -136,8 +136,9 @@ carts) and, on Linux, ALSA headers for audio:
 
 ```text
 rustup target add wasm32-unknown-unknown
-sudo apt install libasound2-dev        # linux only; or build with
-                                       #   --no-default-features
+sudo apt install libasound2-dev        # debian/ubuntu
+sudo dnf install alsa-lib-devel        # fedora
+# (or skip audio entirely with --no-default-features)
 cargo run --release -p rico8-cli
 ```
 
