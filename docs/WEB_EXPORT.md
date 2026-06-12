@@ -53,8 +53,8 @@ button.
 
 - **Play only.** No console, no editors, no `Esc` to the prompt. Web
   pages are players, not consoles.
-- **File size.** The embedded player weighs ~1.8 MB (wasmi and the
-  runtime), so every export is ~2.4 MB regardless of cart size.
+- **File size.** The embedded player weighs ~1.2 MB (wasmi and the
+  runtime), so every export is ~1.7 MB regardless of cart size.
 - **Audio latency.** The scheduled-buffer queue adds ~100 ms; fine for
   jingles and blips, noticeable for rhythm games.
 - **Source is not included.** Web exports embed a playable cart only;
