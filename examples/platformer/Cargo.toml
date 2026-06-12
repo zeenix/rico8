@@ -7,7 +7,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-rico8 = { path = "../../crates/rico8" }
+rico8 = { path = "../../rico8" }
 
 # Standalone workspace: example carts build independently of the
 # rico8 workspace, exactly like projects created with `new`.

@@ -7,7 +7,7 @@
 //! storage, and the PNG cartridge format.
 //!
 //! This crate is windowing- and GPU-agnostic: it renders into a byte
-//! buffer and is fully testable headless. `rico8-cli` puts it on screen
+//! buffer and is fully testable headless. The `rico8` console binary puts it on screen
 //! with winit + wgpu; carts talk to it through the `rico8` SDK crate.
 
 pub mod assets;

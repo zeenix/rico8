@@ -1,0 +1,4 @@
+# `cargo console` boots RICO-8. The console lives behind a feature so
+# that game carts depending on the `rico8` SDK pull in zero dependencies.
+[alias]
+console = "run --release -p rico8 --features console"
