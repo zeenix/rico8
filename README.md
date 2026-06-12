@@ -92,6 +92,11 @@ the cart and the whole console runtime (compiled to wasm) embedded in
 one file you can double-click or host anywhere, PICO-8-web style. See
 [docs/WEB_EXPORT.md](docs/WEB_EXPORT.md).
 
+Carts also run on retro handhelds (PowKiddy RGB10S, Anbernic RG351/353
+and friends on ArkOS/ROCKNIX) via `rico8-player`, a tiny SDL2 player
+with a console-style cart picker — copy it into the ports folder, drop
+`.png` carts next to it, play. See [docs/HANDHELD.md](docs/HANDHELD.md).
+
 ## Projects are real crates
 
 A RICO-8 project is an ordinary Cargo crate that builds a `cdylib` for
@@ -125,6 +130,7 @@ rico8-console/    the console: winit + wgpu shell, editors, prompt
                   (the binary it builds is called `rico8`)
 rico8-runtime/    framebuffer, font, palette, VM, synth, assets, carts
 rico8-web/        the browser player: the runtime compiled to wasm
+rico8-player/     SDL2 cart player for handhelds (and desktops)
 examples/
   hello/          the canonical first cart
   sprite_move/    sprite drawing, flipping, animation

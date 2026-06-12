@@ -4,6 +4,7 @@ members = [
     "rico8",
     "rico8-console",
     "rico8-web",
+    "rico8-player",
     "rico8-runtime",
 ]
 # Example carts are standalone crates built for wasm32-unknown-unknown,

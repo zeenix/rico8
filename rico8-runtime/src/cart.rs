@@ -89,6 +89,28 @@ pub fn encode(cart: &Cart) -> Result<Vec<u8>> {
     Ok(png)
 }
 
+/// Cheap check: is this PNG a RICO-8 cart? Scans chunk headers for
+/// `rcRt` without decompressing anything — used by cart pickers to
+/// filter directories quickly.
+pub fn is_cart(bytes: &[u8]) -> bool {
+    if !bytes.starts_with(&PNG_SIG) {
+        return false;
+    }
+    let mut rest = &bytes[8..];
+    while rest.len() >= 12 {
+        let len = u32::from_be_bytes(rest[0..4].try_into().unwrap()) as usize;
+        let ctype: [u8; 4] = rest[4..8].try_into().unwrap();
+        if ctype == CHUNK_TYPE {
+            return true;
+        }
+        if &ctype == b"IEND" || rest.len() < 12 + len {
+            return false;
+        }
+        rest = &rest[12 + len..];
+    }
+    false
+}
+
 /// Decode and validate a cart from PNG bytes.
 pub fn decode(bytes: &[u8]) -> Result<Cart> {
     if !bytes.starts_with(&PNG_SIG) {

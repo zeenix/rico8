@@ -1,3 +1,8 @@
 # `cargo console` boots RICO-8.
 [alias]
 console = "run --release -p rico8-console"
+
+# Cross-compiling the handheld player (see docs/HANDHELD.md):
+#   cargo build --release -p rico8-player --target aarch64-unknown-linux-gnu
+[target.aarch64-unknown-linux-gnu]
+linker = "aarch64-linux-gnu-gcc"

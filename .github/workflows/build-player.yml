@@ -1,0 +1,54 @@
+# Build the handheld cart player for aarch64 devices (PowKiddy RGB10S,
+# Anbernic RG351/353, ... running ArkOS/ROCKNIX) on every push to main,
+# smoke-test the same code on the host, and upload a ready-to-copy
+# ports bundle as an artifact.
+
+name: build handheld player
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  handheld:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-unknown-linux-gnu,wasm32-unknown-unknown
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Install host SDL2 and the aarch64 cross toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev gcc-aarch64-linux-gnu zstd
+
+      - name: Host smoke test (SDL dummy drivers)
+        run: |
+          cargo test -p rico8-player
+          cargo build --release -p rico8-player
+          cargo build --release -p rico8-console --no-default-features
+          ./target/release/rico8 export examples/platformer /tmp/platformer.png
+          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
+            ./target/release/rico8-player --smoke 60 /tmp/platformer.png
+
+      - name: Cross-build the ports bundle
+        run: ./.github/build-handheld.sh dist/handheld
+
+      - name: Add the example carts to the bundle
+        run: |
+          for ex in hello sprite_move platformer map_demo sfx_demo music_demo; do
+            ./target/release/rico8 export examples/$ex dist/handheld/rico8/carts/$ex.png
+          done
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: rico8-handheld
+          path: dist/handheld

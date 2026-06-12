@@ -124,27 +124,9 @@ impl Player {
     }
 }
 
-/// The console's friendly error screen, web edition.
+/// The shared error screen plus a web-specific footer hint.
 fn error_screen(message: &str) -> Framebuffer {
-    let mut fb = Framebuffer::new();
-    fb.cls(col::BLACK);
-    fb.rectfill(0, 0, WIDTH - 1, 7, col::RED);
-    fb.print("rico-8", 2, 1, col::WHITE);
-    fb.print("** runtime error **", 2, 14, col::RED);
-    let mut y = 24;
-    for line in message.lines().take(12) {
-        let mut rest = line;
-        while !rest.is_empty() && y < HEIGHT - 8 {
-            let take = rest
-                .char_indices()
-                .nth(31)
-                .map(|(i, _)| i)
-                .unwrap_or(rest.len());
-            fb.print(&rest[..take], 2, y, col::ORANGE);
-            rest = &rest[take..];
-            y += 6;
-        }
-    }
+    let mut fb = rico8_runtime::ui::error_screen(message);
     fb.print("press f5 to restart", 2, HEIGHT - 7, col::LIGHT_GREY);
     fb
 }
