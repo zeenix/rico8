@@ -121,6 +121,9 @@ pub struct Shell {
     // Build state.
     build: Option<BuildJob>,
     run_after_build: bool,
+    /// Transient feedback shown in the editor bottom bar:
+    /// (text, color, frame it expires at).
+    toast: Option<(String, u8, u64)>,
 
     // Hot reload.
     wasm_mtime: Option<SystemTime>,
@@ -162,6 +165,7 @@ impl Shell {
             scroll_back: 0,
             build: None,
             run_after_build: false,
+            toast: None,
             wasm_mtime: None,
             mouse: Mouse::default(),
             code_ed: CodeEditor::new(),
@@ -207,6 +211,11 @@ impl Shell {
                 }
             }
         }
+    }
+
+    /// Flash a message in the editor bottom bar for `secs` seconds.
+    fn toast(&mut self, text: &str, color: u8, secs: f32) {
+        self.toast = Some((text.to_string(), color, self.frame + (secs * 30.0) as u64));
     }
 
     fn push_line(&mut self, text: String, color: u8) {
@@ -556,7 +565,7 @@ impl Shell {
         for (k, d) in [
             ("esc", "console <-> editor / stop"),
             ("ctrl+r", "run cart"),
-            ("ctrl+s", "save"),
+            ("ctrl+s", "save + build check"),
             ("alt+left/right", "switch editor"),
             ("arrows + z/x", "game buttons"),
             ("f6", "capture label (running)"),
@@ -628,9 +637,23 @@ impl Shell {
         Ok(())
     }
 
+    /// Ctrl+S: save, flash feedback where the user is looking, and (for
+    /// projects) start a background build so compile errors show up
+    /// while editing instead of at `run` time.
     fn cmd_save_quiet(&mut self) {
         if let Err(e) = self.cmd_save(&[]) {
-            self.say(&e.to_string(), col::RED);
+            let msg = e.to_string();
+            self.say(&msg, col::RED);
+            self.toast(&msg, col::RED, 3.0);
+            return;
+        }
+        self.toast("saved", col::GREEN, 1.5);
+        if self.build.is_none() {
+            if let Loaded::Project(p) = &self.loaded {
+                let dir = p.dir.clone();
+                self.build = Some(spawn_build(&dir));
+                self.run_after_build = false;
+            }
         }
     }
 
@@ -647,6 +670,7 @@ impl Shell {
                 let dir = p.dir.clone();
                 if self.build.is_some() {
                     self.say("already compiling...", col::ORANGE);
+                    self.toast("already building...", col::ORANGE, 1.5);
                     return;
                 }
                 if let Loaded::Project(p) = &mut self.loaded {
@@ -861,10 +885,9 @@ impl Shell {
             if let Some(result) = job.poll() {
                 self.build = None;
                 if result.success {
-                    self.say(
-                        &format!("ok ({:.1}s)", result.duration.as_secs_f32()),
-                        col::GREEN,
-                    );
+                    let msg = format!("build ok ({:.1}s)", result.duration.as_secs_f32());
+                    self.say(&msg, col::GREEN);
+                    self.toast(&msg, col::GREEN, 2.0);
                     if self.run_after_build {
                         self.run_after_build = false;
                         if let Err(e) = self.start_vm_from_loaded() {
@@ -873,6 +896,16 @@ impl Shell {
                     }
                 } else {
                     self.run_after_build = false;
+                    let n = result
+                        .errors
+                        .iter()
+                        .filter(|l| l.starts_with("error"))
+                        .count();
+                    self.toast(
+                        &format!("build failed ({n} errors) - press esc"),
+                        col::RED,
+                        5.0,
+                    );
                     for line in &result.errors {
                         let color = if line.starts_with("error") {
                             col::RED
@@ -1020,9 +1053,33 @@ impl Shell {
                     _ => {}
                 }
                 ui::draw_tab_bar(&mut self.fb, self.mode);
+                self.draw_toast();
                 ui::draw_cursor(&mut self.fb, &mouse);
                 &self.fb
             }
+        }
+    }
+
+    /// Bottom-bar feedback in editor modes: a live "building..." while a
+    /// build runs, otherwise the most recent toast until it expires.
+    fn draw_toast(&mut self) {
+        let msg = if self.build.is_some() {
+            let dots = ".".repeat(1 + (self.frame as usize / 10) % 3);
+            Some((format!("building{dots}"), col::ORANGE))
+        } else {
+            match &self.toast {
+                Some((text, color, expires)) if self.frame < *expires => {
+                    Some((text.clone(), *color))
+                }
+                _ => {
+                    self.toast = None;
+                    None
+                }
+            }
+        };
+        if let Some((text, color)) = msg {
+            self.fb.rectfill(0, 120, 127, 127, col::BLACK);
+            self.fb.print(&text, 2, 121, color);
         }
     }
 
@@ -1064,5 +1121,109 @@ impl Shell {
             let cx = 2 + (2 + self.cursor as i32) * 4;
             self.fb.rectfill(cx, y, cx + 3, y + 4, col::RED);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::path::Path;
+
+    fn test_shell() -> Shell {
+        let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rico8");
+        Shell::new(AudioHandle::dummy(), sdk)
+    }
+
+    /// Ctrl+S in an editor saves, flashes feedback, kicks off a real
+    /// background build, and reports the result in the bottom bar.
+    #[test]
+    fn ctrl_s_saves_and_builds_with_feedback() {
+        let dir = std::env::temp_dir().join(format!("rico8_shell_test_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load project");
+        shell.switch_editor(Mode::Code);
+
+        // Add a comment line at the top (keeping the code valid), then Ctrl+S.
+        for c in "//x".chars() {
+            shell.key(Key::Char(c), Mods::default());
+        }
+        shell.key(Key::Enter, Mods::default());
+        shell.key(
+            Key::Char('s'),
+            Mods {
+                ctrl: true,
+                ..Default::default()
+            },
+        );
+
+        // Saved to disk, toast shown, build started.
+        let code = std::fs::read_to_string(project_dir.join("src/lib.rs")).unwrap();
+        assert!(code.starts_with("//x\n"), "edit was saved");
+        assert_eq!(shell.toast.as_ref().unwrap().0, "saved");
+        assert!(shell.build.is_some(), "background build spawned");
+
+        // While building, the editor bottom bar shows progress.
+        shell.draw();
+        assert_eq!(shell.fb.pget(0, 120), col::BLACK, "toast bar drawn");
+
+        // Wait for the real cargo build (template code must compile).
+        for _ in 0..(120 * 30) {
+            shell.tick();
+            if shell.build.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+        assert!(shell.build.is_none(), "build finished in time");
+        let (text, color, _) = shell.toast.as_ref().unwrap();
+        assert!(text.starts_with("build ok"), "got: {text}");
+        assert_eq!(*color, col::GREEN);
+        assert!(
+            shell.mode == Mode::Code,
+            "stays in the editor; no mode switch"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A broken cart reports a failing build without leaving the editor.
+    #[test]
+    fn save_build_failure_is_reported() {
+        let dir = std::env::temp_dir().join(format!("rico8_shell_fail_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        let mut project = Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        project.code = "fn broken( {".into();
+        project.save().unwrap();
+
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load project");
+        shell.switch_editor(Mode::Code);
+        shell.key(
+            Key::Char('s'),
+            Mods {
+                ctrl: true,
+                ..Default::default()
+            },
+        );
+        assert!(shell.build.is_some());
+        for _ in 0..(120 * 30) {
+            shell.tick();
+            if shell.build.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+        let (text, color, _) = shell.toast.as_ref().unwrap();
+        assert!(text.starts_with("build failed"), "got: {text}");
+        assert_eq!(*color, col::RED);
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 }

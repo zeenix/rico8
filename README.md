@@ -61,9 +61,11 @@ You land at the boot console. Type `help`. The workflow is PICO-8's:
 128x128 screen the games use — there are no native widgets anywhere.
 
 Games are played with the arrow keys plus `Z`/`X` (also `C`/`V`,
-`N`/`M`). `Ctrl+R` rebuilds and runs from anywhere. `F6` while a game
-runs captures the screen as the cartridge label. Type `keys` in the
-console for the full list.
+`N`/`M`). `Ctrl+R` rebuilds and runs from anywhere; `Ctrl+S` saves and
+kicks off a background build, flashing `saved` / `building...` /
+`build ok` in the editor's bottom bar (compile errors land in the
+console). `F6` while a game runs captures the screen as the cartridge
+label. Type `keys` in the console for the full list.
 
 ### Constraints (they are the point)
 
