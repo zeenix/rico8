@@ -42,10 +42,19 @@ at one); unmapped sticks also get a raw hat/button fallback.
    ```
 
 2. Copy `RICO-8.sh` and the `rico8/` folder into the ports directory
-   on the SD card (`/roms/ports` on ArkOS; ROCKNIX picks ports up from
-   `/roms/ports` too).
+   on the SD card. Reading the card on a PC, this is the `ports` folder
+   at the root of the games partition — **`EASYROMS`** on ArkOS (it
+   mounts as `/roms`, so its `ports` folder is `/roms/ports` in-game),
+   or `/roms/ports` on ROCKNIX. (The empty `roms` folder on the Linux
+   system/root partition is just a mount point — not the place.)
 3. Drop cart `.png`s into `rico8/carts/`.
 4. Refresh the games list (or reboot); launch **RICO-8** from Ports.
+
+The launcher restores the binary's executable bit on each run, since
+FAT/exFAT game partitions don't preserve it. If a launch fails, the
+log at `rico8/log.txt` (next to the binary) says why — a glibc version
+mismatch there means the device's runtime is older than the build
+host's, so rebuild on / against an older system.
 
 You boot into the cart shelf: a console-style list of every cart on
 the card. Pick one with A; Select brings you back; runtime errors show

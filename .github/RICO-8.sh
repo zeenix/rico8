@@ -12,6 +12,13 @@
 DIR="$(cd "$(dirname "$0")" && pwd)/rico8"
 cd "$DIR" || exit 1
 
+mkdir -p "$DIR/carts"
+
+# Ports live on a FAT/exFAT partition that doesn't keep the Unix
+# executable bit, so restore it before launching (ignored if the bit
+# is already set, e.g. on ext4).
+chmod +x "$DIR/rico8-player" 2>/dev/null || true
+
 # Extra controller mappings can be dropped next to the binary.
 export RICO8_GCDB="$DIR/gamecontrollerdb.txt"
 
