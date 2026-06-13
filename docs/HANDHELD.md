@@ -44,10 +44,13 @@ at one); unmapped sticks also get a raw hat/button fallback.
 
    These chips are 64-bit, but many firmwares (ArkOS on the RGB10S)
    run a **32-bit armhf userland**, while others (some ROCKNIX builds)
-   are aarch64. The bundle ships both; `RICO-8.sh` picks by which
-   dynamic loader the device has. (Give a 32-bit device an aarch64
-   binary and its `binfmt_misc` routes it through `qemu-aarch64-static`,
-   which then fails to find an aarch64 loader — that's the tell.)
+   are aarch64. The bundle ships both; `RICO-8.sh` picks by the ELF class of
+   `/bin/sh` (the userland's own arch) rather than `uname -m` or the
+   kernel's loaders, which mislead on a 64-bit kernel running a 32-bit
+   rootfs. Force it with `RICO8_ARCH=armhf` or `aarch64`. (Give a 32-bit
+   device an aarch64 binary and its `binfmt_misc` routes it through
+   `qemu-aarch64-static`, which then fails to find an aarch64 loader —
+   that's the tell.)
 
 2. Copy `RICO-8.sh` and the `rico8/` folder into the ports directory
    on the SD card. Reading the card on a PC, this is the `ports` folder

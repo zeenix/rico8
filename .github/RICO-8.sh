@@ -15,17 +15,24 @@ cd "$DIR" || exit 1
 mkdir -p "$DIR/carts"
 
 # These chips are 64-bit but many firmwares (ArkOS on the RGB10S) run a
-# 32-bit armhf userland, while others are aarch64. Pick the binary that
-# matches the device's dynamic loader. Prefer aarch64 when present: a
-# 64-bit kernel may not run 32-bit code at all, whereas a 32-bit
-# userland simply has no aarch64 loader (and routes aarch64 ELFs through
-# qemu, which then fails to find that loader).
-if [ -e /lib/ld-linux-aarch64.so.1 ] || [ -e /lib64/ld-linux-aarch64.so.1 ] \
-   || [ -e /usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1 ]; then
-  PLAYER="$DIR/rico8-player.aarch64"
-else
-  PLAYER="$DIR/rico8-player.armhf"
-fi
+# 32-bit armhf userland on a 64-bit kernel, while others are fully
+# aarch64. `uname -m` and the presence of an aarch64 loader both report
+# the *kernel*, not the userland, so they're unreliable (a 64-bit
+# kernel with a 32-bit rootfs routes aarch64 ELFs through qemu, which
+# then fails). Instead match the architecture of an actual userland
+# binary: our player shares libc with /bin/sh, so use its ELF class
+# (byte 4: 1 = 32-bit, 2 = 64-bit). Override with RICO8_ARCH=armhf|aarch64.
+detect_arch() {
+  if command -v od >/dev/null 2>&1; then
+    od -An -t u1 -j4 -N1 /bin/sh 2>/dev/null | tr -d ' \n'
+  elif command -v hexdump >/dev/null 2>&1; then
+    hexdump -s4 -n1 -e '1/1 "%d"' /bin/sh 2>/dev/null
+  fi
+}
+case "${RICO8_ARCH:-$([ "$(detect_arch)" = 2 ] && echo aarch64 || echo armhf)}" in
+  aarch64) PLAYER="$DIR/rico8-player.aarch64" ;;
+  *)       PLAYER="$DIR/rico8-player.armhf" ;;
+esac
 
 # Ports live on a FAT/exFAT partition that doesn't keep the Unix
 # executable bit, so restore it before launching (ignored if the bit
