@@ -52,5 +52,8 @@ export RICO8_GCDB="$DIR/gamecontrollerdb.txt"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
 
-# To rule out audio entirely while debugging, set RICO8_NOAUDIO=1 here.
+# Full backtraces if the player panics. To rule out audio entirely while
+# debugging, set RICO8_NOAUDIO=1 here.
+export RUST_BACKTRACE=full
 "$PLAYER" "$DIR/carts" >>"$DIR/log.txt" 2>&1
+echo "rico8: player exited with code $? (>128 means killed by signal N-128)" >>"$DIR/log.txt"

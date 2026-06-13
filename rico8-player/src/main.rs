@@ -459,12 +459,16 @@ impl App {
                     Event::ControllerButtonDown { button, .. } => match button {
                         CButton::DPadUp => sel = sel.saturating_sub(1),
                         CButton::DPadDown => sel = (sel + 1).min(carts.len().saturating_sub(1)),
-                        CButton::A => {
+                        // Only Select leaves the picker. Any face button or
+                        // Start launches -- which physical button reports as
+                        // A vs B varies wildly across these handhelds, so
+                        // accept them all rather than guess wrong.
+                        CButton::Back => return Ok(None),
+                        CButton::A | CButton::B | CButton::X | CButton::Y | CButton::Start => {
                             if let Some(p) = carts.get(sel) {
                                 return Ok(Some(p.clone()));
                             }
                         }
-                        CButton::B | CButton::Back => return Ok(None),
                         _ => {}
                     },
                     Event::JoyHatMotion { which, state, .. } if !self.gc_ids.contains(&which) => {
@@ -478,27 +482,28 @@ impl App {
                     }
                     Event::JoyButtonDown {
                         which, button_idx, ..
-                    } if !self.gc_ids.contains(&which) => match Self::joy_button(button_idx) {
-                        Some(4) => {
+                    } if !self.gc_ids.contains(&which) => {
+                        // Raw pad with no SDL mapping: the four face buttons
+                        // are indices 0-3. Any of them launches; there's no
+                        // reliable Select, so use the firmware's exit hotkey
+                        // to leave the picker.
+                        if button_idx <= 3 {
                             if let Some(p) = carts.get(sel) {
                                 return Ok(Some(p.clone()));
                             }
                         }
-                        Some(5) => return Ok(None),
-                        _ => {}
-                    },
+                    }
                     Event::KeyDown {
                         keycode: Some(k), ..
                     } => match k {
                         Keycode::Up => sel = sel.saturating_sub(1),
                         Keycode::Down => sel = (sel + 1).min(carts.len().saturating_sub(1)),
-                        Keycode::Return | Keycode::Z => {
+                        Keycode::Escape => return Ok(None),
+                        _ => {
                             if let Some(p) = carts.get(sel) {
                                 return Ok(Some(p.clone()));
                             }
                         }
-                        Keycode::Escape => return Ok(None),
-                        _ => {}
                     },
                     _ => {}
                 }
@@ -599,7 +604,7 @@ fn draw_picker(dir: &Path, carts: &[PathBuf], sel: usize, frame: u32) -> Framebu
             fb.print(&name, 8, y, col::LIGHT_GREY);
         }
     }
-    fb.print("a: play  b: quit", 2, 121, col::DARK_GREY);
+    fb.print("press a button  sel:quit", 2, 121, col::DARK_GREY);
     fb
 }
 
