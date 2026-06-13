@@ -353,7 +353,11 @@ impl AudioHandle {
     }
 
     pub fn with_synth<R>(&self, f: impl FnOnce(&mut Synth) -> R) -> R {
-        f(&mut self.synth.lock().unwrap())
+        // Recover from a poisoned lock instead of cascading the panic:
+        // a one-off hiccup in the audio callback shouldn't permanently
+        // silence the synth or take down the next caller.
+        let mut guard = self.synth.lock().unwrap_or_else(|e| e.into_inner());
+        f(&mut guard)
     }
 
     pub fn play_sfx(&self, n: i32, channel: i32) {

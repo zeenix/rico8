@@ -68,11 +68,23 @@ struct SynthCallback(AudioHandle);
 impl sdl2::audio::AudioCallback for SynthCallback {
     type Channel = f32;
     fn callback(&mut self, out: &mut [f32]) {
-        self.0.with_synth(|s| {
+        // SDL calls this from a C thread; a panic unwinding across that
+        // FFI boundary is undefined behavior and would abort the whole
+        // process (looking like "the game failed to launch"). Contain
+        // it and emit silence for this buffer instead.
+        let handle = &self.0;
+        let result = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            handle.with_synth(|s| {
+                for sample in out.iter_mut() {
+                    *sample = s.next_sample();
+                }
+            });
+        }));
+        if result.is_err() {
             for sample in out.iter_mut() {
-                *sample = s.next_sample();
+                *sample = 0.0;
             }
-        });
+        }
     }
 }
 
@@ -148,25 +160,32 @@ impl App {
             }
         }
 
+        // Audio is best-effort: a device that won't open (or RICO8_NOAUDIO
+        // set, as a diagnostic lever) just means a silent but fully
+        // playable console. A larger buffer keeps these low-power devices
+        // from underrunning.
         let audio = AudioHandle::dummy();
-        let audio_dev = sdl
-            .audio()
-            .ok()
-            .and_then(|a| {
-                a.open_playback(
-                    None,
-                    &sdl2::audio::AudioSpecDesired {
-                        freq: Some(SAMPLE_RATE),
-                        channels: Some(1),
-                        samples: Some(1024),
-                    },
-                    |_| SynthCallback(audio.clone()),
-                )
+        let audio_dev = if std::env::var_os("RICO8_NOAUDIO").is_some() {
+            None
+        } else {
+            sdl.audio()
                 .ok()
-            })
-            .inspect(|dev| {
-                dev.resume();
-            });
+                .and_then(|a| {
+                    a.open_playback(
+                        None,
+                        &sdl2::audio::AudioSpecDesired {
+                            freq: Some(SAMPLE_RATE),
+                            channels: Some(1),
+                            samples: Some(2048),
+                        },
+                        |_| SynthCallback(audio.clone()),
+                    )
+                    .ok()
+                })
+                .inspect(|dev| {
+                    dev.resume();
+                })
+        };
 
         Ok(App {
             canvas,
@@ -232,14 +251,60 @@ impl App {
         Ok(())
     }
 
+    /// Show a RICO-8 error screen until the player presses back. Used
+    /// for load/boot/runtime failures so the device itself reports why,
+    /// instead of silently bouncing to the picker.
+    fn show_error(&mut self, message: &str) -> Result<Flow> {
+        eprintln!("rico8-player: {}", message.replace('\n', ": "));
+        let mut fb = ui::error_screen(message);
+        fb.print("select/b: back", 2, HEIGHT - 7, col::LIGHT_GREY);
+        let mut rgba = vec![0u8; WIDTH as usize * HEIGHT as usize * 4];
+        self.audio.stop_all();
+        let mut next = Instant::now();
+        let mut shown = 0u32;
+        loop {
+            for event in self.events.poll_iter() {
+                match event {
+                    Event::Quit { .. } => return Ok(Flow::Quit),
+                    Event::ControllerButtonDown {
+                        button: CButton::Back | CButton::B | CButton::A | CButton::Start,
+                        ..
+                    } => return Ok(Flow::BackToPicker),
+                    Event::JoyButtonDown { which, .. } if !self.gc_ids.contains(&which) => {
+                        return Ok(Flow::BackToPicker)
+                    }
+                    Event::KeyDown { .. } => return Ok(Flow::BackToPicker),
+                    _ => {}
+                }
+            }
+            self.present(&fb, &mut rgba)?;
+            shown += 1;
+            if self.smoke.is_some_and(|n| shown >= n) {
+                return Ok(Flow::Quit);
+            }
+            next += FRAME;
+            let now = Instant::now();
+            if next > now {
+                std::thread::sleep(next - now);
+            } else {
+                next = now;
+            }
+        }
+    }
+
     /// Run one cart until the player backs out or quits.
     fn play(&mut self, path: &Path) -> Result<Flow> {
-        let cart = cart::load_png(path).with_context(|| format!("loading {}", path.display()))?;
+        eprintln!("rico8-player: loading {}", path.display());
+        let cart = match cart::load_png(path) {
+            Ok(c) => c,
+            Err(e) => return self.show_error(&format!("load failed\n{e}")),
+        };
         self.audio.stop_all();
-        let mut vm = Some(
-            GameVm::load(&cart.wasm, &cart.assets, self.audio.clone())
-                .with_context(|| format!("booting {}", path.display()))?,
-        );
+        let mut vm = match GameVm::load(&cart.wasm, &cart.assets, self.audio.clone()) {
+            Ok(vm) => Some(vm),
+            Err(e) => return self.show_error(&format!("boot failed\n{e}")),
+        };
+        eprintln!("rico8-player: running {}", path.display());
         let mut error_fb: Option<Framebuffer> = None;
         let mut rgba = vec![0u8; WIDTH as usize * HEIGHT as usize * 4];
         let mut next = Instant::now();
@@ -322,6 +387,7 @@ impl App {
 
             if let Some(v) = vm.as_mut() {
                 if let Err(e) = v.call_update().and_then(|()| v.call_draw()) {
+                    eprintln!("rico8-player: runtime error: {e}");
                     let mut fb = ui::error_screen(&e.to_string());
                     fb.print("select: back", 2, HEIGHT - 7, col::LIGHT_GREY);
                     error_fb = Some(fb);

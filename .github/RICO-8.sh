@@ -22,4 +22,12 @@ chmod +x "$DIR/rico8-player" 2>/dev/null || true
 # Extra controller mappings can be dropped next to the binary.
 export RICO8_GCDB="$DIR/gamecontrollerdb.txt"
 
+# These handhelds have no PulseAudio session, so SDL's default pulse
+# probe just spews "failed to create secure directory" before falling
+# back. Go straight to ALSA, and give anything that still wants an
+# XDG runtime dir a writable one.
+export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
+export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
+
+# To rule out audio entirely while debugging, set RICO8_NOAUDIO=1 here.
 ./rico8-player "$DIR/carts" >"$DIR/log.txt" 2>&1
