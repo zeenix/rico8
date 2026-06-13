@@ -14,10 +14,23 @@ cd "$DIR" || exit 1
 
 mkdir -p "$DIR/carts"
 
+# These chips are 64-bit but many firmwares (ArkOS on the RGB10S) run a
+# 32-bit armhf userland, while others are aarch64. Pick the binary that
+# matches the device's dynamic loader. Prefer aarch64 when present: a
+# 64-bit kernel may not run 32-bit code at all, whereas a 32-bit
+# userland simply has no aarch64 loader (and routes aarch64 ELFs through
+# qemu, which then fails to find that loader).
+if [ -e /lib/ld-linux-aarch64.so.1 ] || [ -e /lib64/ld-linux-aarch64.so.1 ] \
+   || [ -e /usr/lib/aarch64-linux-gnu/ld-linux-aarch64.so.1 ]; then
+  PLAYER="$DIR/rico8-player.aarch64"
+else
+  PLAYER="$DIR/rico8-player.armhf"
+fi
+
 # Ports live on a FAT/exFAT partition that doesn't keep the Unix
 # executable bit, so restore it before launching (ignored if the bit
 # is already set, e.g. on ext4).
-chmod +x "$DIR/rico8-player" 2>/dev/null || true
+chmod +x "$DIR/"rico8-player.* 2>/dev/null || true
 
 # Extra controller mappings can be dropped next to the binary.
 export RICO8_GCDB="$DIR/gamecontrollerdb.txt"
@@ -30,4 +43,5 @@ export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
 
 # To rule out audio entirely while debugging, set RICO8_NOAUDIO=1 here.
-./rico8-player "$DIR/carts" >"$DIR/log.txt" 2>&1
+echo "rico8: launching $PLAYER on $(uname -m)" >"$DIR/log.txt"
+"$PLAYER" "$DIR/carts" >>"$DIR/log.txt" 2>&1

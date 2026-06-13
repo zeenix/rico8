@@ -35,11 +35,19 @@ at one); unmapped sticks also get a raw hat/button fallback.
    from CI. It contains:
 
    ```text
-   RICO-8.sh          launcher
+   RICO-8.sh                 launcher (picks the right binary)
    rico8/
-     rico8-player     aarch64 binary
-     carts/           put your .png carts here
+     rico8-player.armhf      32-bit ARM build
+     rico8-player.aarch64    64-bit ARM build
+     carts/                  put your .png carts here
    ```
+
+   These chips are 64-bit, but many firmwares (ArkOS on the RGB10S)
+   run a **32-bit armhf userland**, while others (some ROCKNIX builds)
+   are aarch64. The bundle ships both; `RICO-8.sh` picks by which
+   dynamic loader the device has. (Give a 32-bit device an aarch64
+   binary and its `binfmt_misc` routes it through `qemu-aarch64-static`,
+   which then fails to find an aarch64 loader — that's the tell.)
 
 2. Copy `RICO-8.sh` and the `rico8/` folder into the ports directory
    on the SD card. Reading the card on a PC, this is the `ports` folder
@@ -65,11 +73,13 @@ the same friendly RICO-8 error screen as everywhere else.
 On any Linux x86_64 machine with Rust:
 
 ```text
-rustup target add aarch64-unknown-linux-gnu
-sudo apt install gcc-aarch64-linux-gnu zstd   # binutils + extractor
+rustup target add aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf
+sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zstd
 cargo install cargo-zigbuild                  # (script auto-fetches zig)
 ./.github/build-handheld.sh                   # writes dist/handheld/
 ```
+
+It builds both the armhf and aarch64 binaries.
 
 The script downloads an aarch64 `libSDL2.so` (from Debian) purely to
 link against — at runtime the player uses the SDL2 the firmware ships,

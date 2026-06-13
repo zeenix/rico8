@@ -21,14 +21,15 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-gnu,wasm32-unknown-unknown
+          targets: aarch64-unknown-linux-gnu,armv7-unknown-linux-gnueabihf,wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install host SDL2 and the aarch64 cross toolchain
+      - name: Install host SDL2 and the arm cross toolchains
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev gcc-aarch64-linux-gnu zstd
+          sudo apt-get install -y libsdl2-dev gcc-aarch64-linux-gnu \
+            gcc-arm-linux-gnueabihf zstd
 
       # cargo-zigbuild + zig let us cross-link against an old glibc
       # baseline so the binary runs on the devices' ~2.31 glibc.
