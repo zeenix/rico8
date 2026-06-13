@@ -37,6 +37,18 @@ const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FPS as u64);
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
+
+    // `--probe` runs the binary just far enough to prove it executes in
+    // this environment (right CPU arch, loader and glibc all resolve)
+    // without opening SDL. The launcher uses it to pick the binary that
+    // actually runs, instead of guessing the arch from uname/loaders —
+    // on a 64-bit kernel with a 32-bit ports runtime, an aarch64 binary
+    // gets routed to qemu and fails, and this is how we find that out.
+    if args.first().map(String::as_str) == Some("--probe") {
+        println!("rico8-player ok arch={}", std::env::consts::ARCH);
+        return Ok(());
+    }
+
     // Hidden smoke-test mode for CI: run N frames headless and exit.
     // (SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy rico8-player --smoke 60 cart.png)
     let (smoke, args) = match args.split_first() {
