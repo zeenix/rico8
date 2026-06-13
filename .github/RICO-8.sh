@@ -68,6 +68,14 @@ echo "rico8: gcdb=${RICO8_GCDB:-none}" >>"$DIR/log.txt"
 export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
 
+# On pads SDL doesn't recognize as GameControllers, Select/Start have no
+# names -- only raw button indices. To use them, launch once, press the
+# buttons in a game, and read the "joy button index N" lines from the log
+# below; then set these to those indices and Select = back to picker,
+# Start+Select = quit. (Hold both action buttons always works regardless.)
+# export RICO8_SELECT=8
+# export RICO8_START=9
+
 # Full backtraces if the player panics. To rule out audio entirely while
 # debugging, set RICO8_NOAUDIO=1 here.
 export RUST_BACKTRACE=full

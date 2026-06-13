@@ -120,6 +120,14 @@ struct App {
     /// Instance ids covered by the GameController API, whose duplicate
     /// raw joystick events we must ignore.
     gc_ids: HashSet<u32>,
+    /// Raw-joystick button indices to treat as Select / Start, for pads
+    /// SDL doesn't recognize as GameControllers (so it can't name them).
+    /// Set via RICO8_SELECT / RICO8_START. None = unmapped.
+    joy_select: Option<u8>,
+    joy_start: Option<u8>,
+    /// Raw button indices already logged, so discovery output is one
+    /// line per distinct button rather than per press.
+    seen_buttons: HashSet<u8>,
     /// Run only this many frames, then exit (CI smoke mode).
     smoke: Option<u32>,
 }
@@ -217,6 +225,9 @@ impl App {
             _controllers: controllers,
             _joysticks: joysticks,
             gc_ids,
+            joy_select: env_button("RICO8_SELECT"),
+            joy_start: env_button("RICO8_START"),
+            seen_buttons: HashSet::new(),
             smoke,
         })
     }
@@ -377,7 +388,22 @@ impl App {
                     Event::JoyButtonDown {
                         which, button_idx, ..
                     } if !self.gc_ids.contains(&which) => {
-                        if let Some(b) = Self::joy_button(button_idx) {
+                        // Log each distinct raw button once, so Select/Start
+                        // indices can be discovered and bound via env.
+                        if self.seen_buttons.insert(button_idx) {
+                            eprintln!("rico8-player: joy button index {button_idx}");
+                        }
+                        if Some(button_idx) == self.joy_select {
+                            select_held = true;
+                            if start_held {
+                                return Ok(Flow::Quit);
+                            }
+                        } else if Some(button_idx) == self.joy_start {
+                            start_held = true;
+                            if select_held {
+                                return Ok(Flow::Quit);
+                            }
+                        } else if let Some(b) = Self::joy_button(button_idx) {
                             held[b] = true;
                             if let Some(vm) = vm.as_mut() {
                                 vm.state_mut().input.set_button(b, true);
@@ -387,7 +413,13 @@ impl App {
                     Event::JoyButtonUp {
                         which, button_idx, ..
                     } if !self.gc_ids.contains(&which) => {
-                        if let Some(b) = Self::joy_button(button_idx) {
+                        if Some(button_idx) == self.joy_select {
+                            if select_held {
+                                return Ok(Flow::BackToPicker);
+                            }
+                        } else if Some(button_idx) == self.joy_start {
+                            start_held = false;
+                        } else if let Some(b) = Self::joy_button(button_idx) {
                             held[b] = false;
                             if let Some(vm) = vm.as_mut() {
                                 vm.state_mut().input.set_button(b, false);
@@ -580,6 +612,11 @@ impl App {
 }
 
 /// Decompose an SDL hat state into (left, right, up, down).
+/// Parse a raw-joystick button index from an environment variable.
+fn env_button(var: &str) -> Option<u8> {
+    std::env::var(var).ok()?.trim().parse().ok()
+}
+
 fn hat_dirs(state: HatState) -> (bool, bool, bool, bool) {
     use HatState::*;
     let l = matches!(state, Left | LeftUp | LeftDown);
