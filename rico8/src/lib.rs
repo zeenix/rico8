@@ -29,8 +29,9 @@
 //! Carts are built for `wasm32-unknown-unknown` as a `cdylib` and run in
 //! a strict sandbox: the host functions wrapped by [`Context`] and
 //! [`Graphics`] are the only doors out. The screen is 128x128, the
-//! palette has 16 fixed colors, `update`/`draw` run at 30 fps. The
-//! constraints are the point.
+//! palette has 16 fixed colors, `update`/`draw` run at 30 fps (or 60,
+//! if the game overrides [`Rico8Game::frame_rate`]). The constraints
+//! are the point.
 
 pub mod ffi;
 mod glue;
@@ -40,8 +41,31 @@ pub use glue::__internal;
 /// The screen is 128x128 pixels.
 pub const SCREEN_W: i32 = 128;
 pub const SCREEN_H: i32 = 128;
-/// Logical frames per second.
+/// Default logical frames per second.
 pub const FPS: u32 = 30;
+
+/// How many times per second a cart's `update` and `draw` run.
+///
+/// The default is [`FrameRate::Fps30`]; override [`Rico8Game::frame_rate`]
+/// to return [`FrameRate::Fps60`] for a 60 fps game, where both `update`
+/// and `draw` are called twice as often.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FrameRate {
+    /// 30 frames per second (the default).
+    Fps30,
+    /// 60 frames per second.
+    Fps60,
+}
+
+impl FrameRate {
+    /// The rate as a plain frames-per-second number.
+    pub const fn fps(self) -> u32 {
+        match self {
+            FrameRate::Fps30 => 30,
+            FrameRate::Fps60 => 60,
+        }
+    }
+}
 
 /// A color in the fixed 16-color palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -314,10 +338,16 @@ impl Graphics {
 
 /// Implement this for your game state, then hand it to [`game!`].
 pub trait Rico8Game {
-    /// Called 30 times per second. Read input, move the world.
+    /// Called [`frame_rate`](Rico8Game::frame_rate) times per second. Read
+    /// input, move the world.
     fn update(&mut self, ctx: &mut Context);
     /// Called after `update`. Draw the world.
     fn draw(&self, gfx: &mut Graphics);
+    /// The logical frame rate. Override to return [`FrameRate::Fps60`] to
+    /// run `update` and `draw` at 60 fps instead of the default 30.
+    fn frame_rate(&self) -> FrameRate {
+        FrameRate::Fps30
+    }
 }
 
 /// Declare your game's entry point.
@@ -333,6 +363,11 @@ macro_rules! game {
         #[no_mangle]
         pub extern "C" fn rico8_init() {
             $crate::__internal::init(|| ::std::boxed::Box::new($init));
+        }
+
+        #[no_mangle]
+        pub extern "C" fn rico8_fps() -> u32 {
+            $crate::__internal::fps()
         }
 
         #[no_mangle]

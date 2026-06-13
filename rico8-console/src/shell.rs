@@ -14,7 +14,7 @@ use rico8_runtime::cart::{self, Cart};
 use rico8_runtime::fb::Framebuffer;
 use rico8_runtime::palette::col;
 use rico8_runtime::project::Project;
-use rico8_runtime::vm::{GameVm, RuntimeError};
+use rico8_runtime::vm::{GameVm, RuntimeError, FPS};
 use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::time::SystemTime;
@@ -876,6 +876,16 @@ impl Shell {
     // -----------------------------------------------------------------
     // Per-frame logic
     // -----------------------------------------------------------------
+
+    /// The rate the host should tick at: a running cart's frame rate (30 or
+    /// 60), else 30. Running the whole Run-mode tick at the cart's rate is
+    /// what gets the display to refresh at 60 too.
+    pub fn tick_fps(&self) -> u32 {
+        match (self.mode, &self.vm) {
+            (Mode::Run, Some(vm)) => vm.fps(),
+            _ => FPS,
+        }
+    }
 
     pub fn tick(&mut self) {
         self.frame += 1;

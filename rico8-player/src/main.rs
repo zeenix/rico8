@@ -37,6 +37,11 @@ use std::time::{Duration, Instant};
 const SAMPLE_RATE: i32 = 44100;
 const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FPS as u64);
 
+/// One frame's wall-clock budget at a given logical frame rate.
+fn frame_duration(fps: u32) -> Duration {
+    Duration::from_nanos(1_000_000_000 / fps.max(1) as u64)
+}
+
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
@@ -333,6 +338,12 @@ impl App {
             Ok(vm) => Some(vm),
             Err(e) => return self.show_error(&format!("boot failed\n{e}")),
         };
+        // Carts run at their selected rate (30 or 60); the picker and error
+        // screens stay at 30.
+        let frame = vm
+            .as_ref()
+            .map(|v| frame_duration(v.fps()))
+            .unwrap_or(FRAME);
         eprintln!("rico8-player: running {}", path.display());
         let mut error_fb: Option<Framebuffer> = None;
         let mut rgba = vec![0u8; WIDTH as usize * HEIGHT as usize * 4];
@@ -494,7 +505,7 @@ impl App {
                     return Ok(Flow::Quit);
                 }
             }
-            next += FRAME;
+            next += frame;
             let now = Instant::now();
             if next > now {
                 std::thread::sleep(next - now);

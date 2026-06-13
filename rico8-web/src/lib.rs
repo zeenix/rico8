@@ -17,9 +17,10 @@
 //! ```text
 //! rico8_web_upload_begin(len) -> ptr   stage a cart.png upload
 //! rico8_web_load() -> 0|1              parse + boot the staged cart
+//! rico8_web_fps() -> 30|60             the cart's logical frame rate
 //! rico8_web_error_ptr/len()            UTF-8 error text after a failure
 //! rico8_web_set_button(b, down)        buttons 0..6, like the ABI
-//! rico8_web_tick() -> 0|1              one 30 fps frame; 1 = cart error
+//! rico8_web_tick() -> 0|1              one logical frame; 1 = cart error
 //! rico8_web_fb_ptr() -> ptr            128*128*4 RGBA, valid after tick
 //! rico8_web_audio_render(n) -> n       render mono f32 samples @ 44100
 //! rico8_web_audio_ptr() -> ptr         the rendered samples
@@ -29,7 +30,7 @@ use rico8_runtime::audio::AudioHandle;
 use rico8_runtime::cart;
 use rico8_runtime::fb::{Framebuffer, HEIGHT, WIDTH};
 use rico8_runtime::palette::col;
-use rico8_runtime::vm::GameVm;
+use rico8_runtime::vm::{GameVm, FPS};
 use std::cell::UnsafeCell;
 
 /// Sample rate the synth renders at; the page's AudioContext resamples.
@@ -66,6 +67,11 @@ impl Player {
             }
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    /// The cart's logical frame rate (30 or 60); 30 if no cart is loaded.
+    pub fn fps(&self) -> u32 {
+        self.vm.as_ref().map(GameVm::fps).unwrap_or(FPS)
     }
 
     pub fn set_button(&mut self, b: usize, down: bool) {
@@ -184,6 +190,16 @@ pub extern "C" fn rico8_web_error_ptr() -> *const u8 {
 #[no_mangle]
 pub extern "C" fn rico8_web_error_len() -> u32 {
     get(&ERROR).len() as u32
+}
+
+/// The loaded cart's logical frame rate (30 or 60). The page reads this
+/// after a successful `rico8_web_load` to set its fixed timestep.
+#[no_mangle]
+pub extern "C" fn rico8_web_fps() -> u32 {
+    match get(&PLAYER) {
+        Some(p) => p.fps(),
+        None => FPS,
+    }
 }
 
 #[no_mangle]

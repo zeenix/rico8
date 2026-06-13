@@ -183,7 +183,8 @@ const TEMPLATE: &str = r#"<!doctype html>
 "use strict";
 const PLAYER_B64 = "{{PLAYER_B64}}";
 const CART_B64 = "{{CART_B64}}";
-const FPS = 30, SCREEN = 128, SAMPLE_RATE = 44100;
+const SCREEN = 128, SAMPLE_RATE = 44100;
+let fps = 30; // logical frame rate; the cart may ask for 60 at load time
 
 function b64bytes(b64) {
   const s = atob(b64);
@@ -226,6 +227,7 @@ async function boot() {
     document.getElementById("title").textContent = "cart error: " + msg;
     return;
   }
+  fps = wasm.rico8_web_fps();
 
   addEventListener("keydown", (e) => key(e, 1));
   addEventListener("keyup", (e) => key(e, 0));
@@ -309,10 +311,10 @@ function pumpAudio() {
 }
 
 function frame(now) {
-  // Fixed 30 fps logic under a variable display rate.
+  // Fixed-rate logic (30 or 60) under a variable display rate.
   acc = Math.min(acc + (now - last), 200);
   last = now;
-  const step = 1000 / FPS;
+  const step = 1000 / fps;
   while (acc >= step) {
     wasm.rico8_web_tick();
     acc -= step;

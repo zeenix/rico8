@@ -25,7 +25,11 @@ use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
 use winit::keyboard::{KeyCode, NamedKey, PhysicalKey};
 use winit::window::{Window, WindowId};
 
-const FRAME: Duration = Duration::from_nanos(1_000_000_000 / 30);
+/// One tick's wall-clock budget at a given rate (30 normally, 60 while a
+/// 60 fps cart runs).
+fn frame_duration(fps: u32) -> Duration {
+    Duration::from_nanos(1_000_000_000 / fps.max(1) as u64)
+}
 
 /// Where the `rico8` SDK crate lives, for generated project manifests.
 /// Defaults to this source tree; override with RICO8_SDK for installs.
@@ -414,13 +418,14 @@ impl ApplicationHandler for App {
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
         let now = Instant::now();
         let mut ticked = false;
+        let frame = frame_duration(self.shell.tick_fps());
         while Instant::now() >= self.next_tick {
             self.shell.tick();
-            self.next_tick += FRAME;
+            self.next_tick += frame;
             ticked = true;
             // Don't death-spiral after a long stall.
-            if now > self.next_tick + FRAME * 10 {
-                self.next_tick = now + FRAME;
+            if now > self.next_tick + frame * 10 {
+                self.next_tick = now + frame;
             }
         }
         if self.shell.want_exit {
