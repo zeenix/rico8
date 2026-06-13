@@ -14,20 +14,25 @@ rico8-player               picker over the current directory
 
 ## Controls
 
-| input            | action                          |
-| ---------------- | ------------------------------- |
-| d-pad            | directions                      |
-| A (or Y)         | O button / pick cart            |
-| B (or X)         | X button / quit picker          |
-| Select           | back to the cart picker         |
-| Start + Select   | quit                            |
-| keyboard         | arrows + Z/X, Esc = back        |
+| input                  | action                           |
+| ---------------------- | -------------------------------- |
+| d-pad                  | directions / move in picker      |
+| any face button        | O / X in game, launch in picker  |
+| **hold both O + X (~1s)** | **return to the cart picker** (works on any pad) |
+| Select                 | back to picker (recognized pads) |
+| Start + Select         | quit (recognized pads)           |
+| keyboard               | arrows + Z/X, Esc = back         |
 
-Input uses SDL's GameController API, which the handheld firmwares
-preconfigure for their built-in pads. For exotic pads, drop a
+The picker shows the key controls along its bottom edge. Input prefers
+SDL's GameController API, which most firmwares preconfigure for their
+built-in pads; named buttons like Select/Start only work when the pad
+is recognized that way. Because that varies wildly across devices, the
+**hold-O+X** combo is the universal, always-available way back to the
+picker. For unrecognized pads you can bind raw button indices for
+Select/Start via `RICO8_SELECT` / `RICO8_START`, and dropping a
 [SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB)
-format `gamecontrollerdb.txt` next to the binary (or point `RICO8_GCDB`
-at one); unmapped sticks also get a raw hat/button fallback.
+`gamecontrollerdb.txt` next to the binary (or `RICO8_GCDB`) can promote
+a pad to a recognized GameController.
 
 ## Installing on the device (ArkOS / ROCKNIX style)
 

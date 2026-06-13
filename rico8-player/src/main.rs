@@ -125,9 +125,6 @@ struct App {
     /// Set via RICO8_SELECT / RICO8_START. None = unmapped.
     joy_select: Option<u8>,
     joy_start: Option<u8>,
-    /// Raw button indices already logged, so discovery output is one
-    /// line per distinct button rather than per press.
-    seen_buttons: HashSet<u8>,
     /// Run only this many frames, then exit (CI smoke mode).
     smoke: Option<u32>,
 }
@@ -227,7 +224,6 @@ impl App {
             gc_ids,
             joy_select: env_button("RICO8_SELECT"),
             joy_start: env_button("RICO8_START"),
-            seen_buttons: HashSet::new(),
             smoke,
         })
     }
@@ -357,7 +353,7 @@ impl App {
                     Event::Quit { .. } => return Ok(Flow::Quit),
                     Event::ControllerButtonDown { button, .. } => {
                         match button {
-                            CButton::Back => select_held = true,
+                            CButton::Back | CButton::Guide => select_held = true,
                             CButton::Start => start_held = true,
                             _ => {}
                         }
@@ -373,8 +369,10 @@ impl App {
                     }
                     Event::ControllerButtonUp { button, .. } => {
                         match button {
-                            CButton::Back if select_held => return Ok(Flow::BackToPicker),
-                            CButton::Back => select_held = false,
+                            CButton::Back | CButton::Guide if select_held => {
+                                return Ok(Flow::BackToPicker)
+                            }
+                            CButton::Back | CButton::Guide => select_held = false,
                             CButton::Start => start_held = false,
                             _ => {}
                         }
@@ -388,11 +386,6 @@ impl App {
                     Event::JoyButtonDown {
                         which, button_idx, ..
                     } if !self.gc_ids.contains(&which) => {
-                        // Log each distinct raw button once, so Select/Start
-                        // indices can be discovered and bound via env.
-                        if self.seen_buttons.insert(button_idx) {
-                            eprintln!("rico8-player: joy button index {button_idx}");
-                        }
                         if Some(button_idx) == self.joy_select {
                             select_held = true;
                             if start_held {
@@ -668,8 +661,9 @@ fn draw_picker(dir: &Path, carts: &[PathBuf], sel: usize, frame: u32) -> Framebu
         return fb;
     }
 
-    // A window of up to 14 entries around the selection.
-    let rows = 14usize;
+    // A window of entries around the selection (leaving room for the
+    // controls footer).
+    let rows = 13usize;
     let top = sel
         .saturating_sub(rows / 2)
         .min(carts.len().saturating_sub(rows));
@@ -691,7 +685,9 @@ fn draw_picker(dir: &Path, carts: &[PathBuf], sel: usize, frame: u32) -> Framebu
             fb.print(&name, 8, y, col::LIGHT_GREY);
         }
     }
-    fb.print("press a button  sel:quit", 2, 121, col::DARK_GREY);
+    // Controls, along the bottom of the shelf.
+    fb.print("up/dn:pick   any btn:play", 2, 114, col::DARK_GREY);
+    fb.print("in game: hold o+x to exit", 2, 121, col::DARK_GREY);
     fb
 }
 
