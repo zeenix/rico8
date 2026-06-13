@@ -12,9 +12,11 @@
 //! rico8-player                   picker over the current directory
 //! ```
 //!
-//! Controls: d-pad moves, A/Y = O, B/X = X, Select = back to the
-//! picker, Start+Select = quit. Keyboard works too (arrows + Z/X,
-//! Esc = back) so the same binary doubles as a desktop cart player.
+//! Controls: d-pad moves, the two action buttons = O / X. On pads SDL
+//! recognizes as GameControllers, Select returns to the picker and
+//! Start+Select quits; on any pad, holding both action buttons for ~1s
+//! returns to the picker. Keyboard works too (arrows + Z/X, Esc = back)
+//! so the same binary doubles as a desktop cart player.
 
 use anyhow::{anyhow, Context, Result};
 use rico8_runtime::audio::AudioHandle;
@@ -171,6 +173,14 @@ impl App {
                 joysticks.push(j);
             }
         }
+        // Tells us, in the log, which input path is active: recognized
+        // GameControllers get named buttons (Select/Start); raw joysticks
+        // only get the d-pad + face buttons plus the hold-to-exit combo.
+        eprintln!(
+            "rico8-player: {} controller(s), {} raw joystick(s)",
+            controllers.len(),
+            joysticks.len()
+        );
 
         // Audio is best-effort: a device that won't open (or RICO8_NOAUDIO
         // set, as a diagnostic lever) just means a silent but fully
@@ -323,6 +333,12 @@ impl App {
         let mut frames = 0u32;
         let mut select_held = false;
         let mut start_held = false;
+        // Mirror of the six console buttons, kept regardless of whether
+        // input arrives as GameController or raw-joystick events, so a
+        // universal "hold both action buttons to exit" works even when
+        // the pad isn't a recognized GameController (no Select/Start).
+        let mut held = [false; 6];
+        let mut combo_frames = 0u32;
 
         loop {
             for event in self.events.poll_iter() {
@@ -337,8 +353,11 @@ impl App {
                         if select_held && start_held {
                             return Ok(Flow::Quit);
                         }
-                        if let (Some(b), Some(vm)) = (Self::pad_button(button), vm.as_mut()) {
-                            vm.state_mut().input.set_button(b, true);
+                        if let Some(b) = Self::pad_button(button) {
+                            held[b] = true;
+                            if let Some(vm) = vm.as_mut() {
+                                vm.state_mut().input.set_button(b, true);
+                            }
                         }
                     }
                     Event::ControllerButtonUp { button, .. } => {
@@ -348,28 +367,41 @@ impl App {
                             CButton::Start => start_held = false,
                             _ => {}
                         }
-                        if let (Some(b), Some(vm)) = (Self::pad_button(button), vm.as_mut()) {
-                            vm.state_mut().input.set_button(b, false);
+                        if let Some(b) = Self::pad_button(button) {
+                            held[b] = false;
+                            if let Some(vm) = vm.as_mut() {
+                                vm.state_mut().input.set_button(b, false);
+                            }
                         }
                     }
                     Event::JoyButtonDown {
                         which, button_idx, ..
                     } if !self.gc_ids.contains(&which) => {
-                        if let (Some(b), Some(vm)) = (Self::joy_button(button_idx), vm.as_mut()) {
-                            vm.state_mut().input.set_button(b, true);
+                        if let Some(b) = Self::joy_button(button_idx) {
+                            held[b] = true;
+                            if let Some(vm) = vm.as_mut() {
+                                vm.state_mut().input.set_button(b, true);
+                            }
                         }
                     }
                     Event::JoyButtonUp {
                         which, button_idx, ..
                     } if !self.gc_ids.contains(&which) => {
-                        if let (Some(b), Some(vm)) = (Self::joy_button(button_idx), vm.as_mut()) {
-                            vm.state_mut().input.set_button(b, false);
+                        if let Some(b) = Self::joy_button(button_idx) {
+                            held[b] = false;
+                            if let Some(vm) = vm.as_mut() {
+                                vm.state_mut().input.set_button(b, false);
+                            }
                         }
                     }
                     Event::JoyHatMotion { which, state, .. } if !self.gc_ids.contains(&which) => {
+                        let (l, r, u, d) = hat_dirs(state);
+                        held[0] = l;
+                        held[1] = r;
+                        held[2] = u;
+                        held[3] = d;
                         if let Some(vm) = vm.as_mut() {
                             let input = &mut vm.state_mut().input;
-                            let (l, r, u, d) = hat_dirs(state);
                             input.set_button(0, l);
                             input.set_button(1, r);
                             input.set_button(2, u);
@@ -382,26 +414,44 @@ impl App {
                         if k == Keycode::Escape {
                             return Ok(Flow::BackToPicker);
                         }
-                        if let (Some(b), Some(vm)) = (Self::key_button(k), vm.as_mut()) {
-                            vm.state_mut().input.set_button(b, true);
+                        if let Some(b) = Self::key_button(k) {
+                            held[b] = true;
+                            if let Some(vm) = vm.as_mut() {
+                                vm.state_mut().input.set_button(b, true);
+                            }
                         }
                     }
                     Event::KeyUp {
                         keycode: Some(k), ..
                     } => {
-                        if let (Some(b), Some(vm)) = (Self::key_button(k), vm.as_mut()) {
-                            vm.state_mut().input.set_button(b, false);
+                        if let Some(b) = Self::key_button(k) {
+                            held[b] = false;
+                            if let Some(vm) = vm.as_mut() {
+                                vm.state_mut().input.set_button(b, false);
+                            }
                         }
                     }
                     _ => {}
                 }
             }
 
+            // Universal escape: hold both action buttons (~1s) to return
+            // to the picker. The named Select/Start route above only
+            // works on recognized GameControllers; this works on any pad.
+            if held[4] && held[5] {
+                combo_frames += 1;
+                if combo_frames >= FPS {
+                    return Ok(Flow::BackToPicker);
+                }
+            } else {
+                combo_frames = 0;
+            }
+
             if let Some(v) = vm.as_mut() {
                 if let Err(e) = v.call_update().and_then(|()| v.call_draw()) {
                     eprintln!("rico8-player: runtime error: {e}");
                     let mut fb = ui::error_screen(&e.to_string());
-                    fb.print("select: back", 2, HEIGHT - 7, col::LIGHT_GREY);
+                    fb.print("hold o+x to exit", 2, HEIGHT - 7, col::LIGHT_GREY);
                     error_fb = Some(fb);
                     self.audio.stop_all();
                     vm = None;

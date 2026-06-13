@@ -6,8 +6,10 @@
 #   /roms/ports/rico8/           <- rico8-player binary
 #   /roms/ports/rico8/carts/     <- put your .png carts here
 #
-# Controls: d-pad moves, A = O, B = X, Select = back to the cart
-# picker, Start+Select = quit.
+# Controls: d-pad moves, the two action buttons = O / X. Select returns
+# to the cart picker and Start+Select quits (on pads SDL recognizes as
+# GameControllers); on any pad, holding both action buttons for ~1s
+# returns to the picker.
 
 DIR="$(cd "$(dirname "$0")" && pwd)/rico8"
 cd "$DIR" || exit 1
@@ -42,8 +44,22 @@ if [ -z "$PLAYER" ]; then
 fi
 echo "rico8: using $PLAYER" >>"$DIR/log.txt"
 
-# Extra controller mappings can be dropped next to the binary.
-export RICO8_GCDB="$DIR/gamecontrollerdb.txt"
+# Help SDL recognize the device's gamepad as a GameController (so named
+# buttons like Select/Start work) by pointing it at a controller
+# database if the firmware ships one. Harmless if none is found -- the
+# raw-joystick fallback (d-pad + face buttons + hold-O+X-to-exit) still
+# works.
+if [ -z "${RICO8_GCDB:-}" ] || [ ! -f "${RICO8_GCDB:-}" ]; then
+  for db in \
+    "$DIR/gamecontrollerdb.txt" \
+    /roms/ports/PortMaster/gamecontrollerdb.txt \
+    /opt/system/gamecontrollerdb.txt \
+    /usr/local/share/gamecontrollerdb.txt \
+    /usr/share/gamecontrollerdb.txt; do
+    if [ -f "$db" ]; then export RICO8_GCDB="$db"; break; fi
+  done
+fi
+echo "rico8: gcdb=${RICO8_GCDB:-none}" >>"$DIR/log.txt"
 
 # These handhelds have no PulseAudio session, so SDL's default pulse
 # probe just spews "failed to create secure directory" before falling
