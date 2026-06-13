@@ -66,7 +66,8 @@ On any Linux x86_64 machine with Rust:
 
 ```text
 rustup target add aarch64-unknown-linux-gnu
-sudo apt install gcc-aarch64-linux-gnu zstd   # cross toolchain
+sudo apt install gcc-aarch64-linux-gnu zstd   # binutils + extractor
+cargo install cargo-zigbuild                  # (script auto-fetches zig)
 ./.github/build-handheld.sh                   # writes dist/handheld/
 ```
 
@@ -74,7 +75,16 @@ The script downloads an aarch64 `libSDL2.so` (from Debian) purely to
 link against — at runtime the player uses the SDL2 the firmware ships,
 which is what knows about the device's KMS/DRM display, gamepad and
 audio path. The binary's only dynamic dependencies are `libSDL2-2.0`,
-libc and libm.
+libc, libm, libpthread and libdl.
+
+It builds with [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild)
+against an **old glibc baseline** (`RICO8_GLIBC`, default 2.28) because
+these firmwares ship glibc ~2.31, while a stock cross toolchain emits
+`GLIBC_2.34+` references that fail to load with
+`version 'GLIBC_2.34' not found`. musl is not an option here: the
+player dynamically loads the device's glibc-linked `libSDL2.so`, which
+a musl-static process can't host. If a device turns out older still,
+lower the baseline, e.g. `RICO8_GLIBC=2.27 ./.github/build-handheld.sh`.
 
 A desktop build is just `cargo build --release -p rico8-player`
 (needs `libsdl2-dev` / `SDL2-devel`).
