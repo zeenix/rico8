@@ -22,10 +22,12 @@ pub const DEFAULT_FPS: u32 = 60;
 /// of the cart rate, which the cart chooses via `rico8_fps`.
 pub const UI_FPS: u32 = 30;
 
-/// Fuel budget for a single `update` or `draw` call. Roughly one fuel per
-/// instruction; this is far more than a frame should need, so hitting it
-/// means the cart is stuck in a loop.
-const FUEL_PER_CALL: u64 = 100_000_000;
+/// Fuel budget for a single lifecycle call. wasmi charges ~1 fuel per
+/// instruction, so this is a hard cap of 131,072 (128 K) wasm instructions
+/// per call — one number shared with the memory and cart-size limits. A real
+/// frame uses a few thousand; exceeding this means the cart is stuck or doing
+/// far too much, and surfaces as a friendly error screen.
+const FUEL_PER_CALL: u64 = 131_072;
 
 /// Everything the host exposes to a running cart.
 pub struct HostState {
@@ -432,6 +434,32 @@ mod tests {
           (func (export "rico8_draw")))
     "#;
 
+    /// Update loops ~10k times — well under the 131,072-fuel budget.
+    const BUDGET_OK_CART: &str = r#"
+        (module
+          (func (export "rico8_init"))
+          (func (export "rico8_update")
+            (local $i i32)
+            (local.set $i (i32.const 10000))
+            (loop $l
+              (local.set $i (i32.add (local.get $i) (i32.const -1)))
+              (br_if $l (local.get $i))))
+          (func (export "rico8_draw")))
+    "#;
+
+    /// Update loops ~100k times — comfortably over the 131,072-fuel budget.
+    const BUDGET_OVER_CART: &str = r#"
+        (module
+          (func (export "rico8_init"))
+          (func (export "rico8_update")
+            (local $i i32)
+            (local.set $i (i32.const 100000))
+            (loop $l
+              (local.set $i (i32.add (local.get $i) (i32.const -1)))
+              (br_if $l (local.get $i))))
+          (func (export "rico8_draw")))
+    "#;
+
     fn load_test_vm(wat_src: &str) -> Result<GameVm> {
         let wasm = wat::parse_str(wat_src).unwrap();
         GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy())
@@ -496,5 +524,21 @@ mod tests {
         )
         .unwrap();
         assert!(GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy()).is_err());
+    }
+
+    #[test]
+    fn fuel_budget_allows_modest_work() {
+        let mut vm = load_test_vm(BUDGET_OK_CART).unwrap();
+        assert!(
+            vm.call_update().is_ok(),
+            "10k-iteration frame must fit the 128K-fuel budget"
+        );
+    }
+
+    #[test]
+    fn fuel_budget_traps_runaway_work() {
+        let mut vm = load_test_vm(BUDGET_OVER_CART).unwrap();
+        let err = vm.call_update().unwrap_err();
+        assert!(err.message.contains("ran too long"), "got: {}", err.message);
     }
 }
