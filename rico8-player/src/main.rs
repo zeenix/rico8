@@ -19,20 +19,26 @@
 //! so the same binary doubles as a desktop cart player.
 
 use anyhow::{anyhow, Context, Result};
-use rico8_runtime::audio::AudioHandle;
-use rico8_runtime::cart;
-use rico8_runtime::fb::{Framebuffer, HEIGHT, WIDTH};
-use rico8_runtime::palette::col;
-use rico8_runtime::ui;
-use rico8_runtime::vm::{GameVm, UI_FPS};
-use sdl2::controller::{Button as CButton, GameController};
-use sdl2::event::Event;
-use sdl2::joystick::{HatState, Joystick};
-use sdl2::keyboard::Keycode;
-use sdl2::pixels::PixelFormatEnum;
-use std::collections::HashSet;
-use std::path::{Path, PathBuf};
-use std::time::{Duration, Instant};
+use rico8_runtime::{
+    audio::AudioHandle,
+    cart,
+    fb::{Framebuffer, HEIGHT, WIDTH},
+    palette::col,
+    ui,
+    vm::{GameVm, UI_FPS},
+};
+use sdl2::{
+    controller::{Button as CButton, GameController},
+    event::Event,
+    joystick::{HatState, Joystick},
+    keyboard::Keycode,
+    pixels::PixelFormatEnum,
+};
+use std::{
+    collections::HashSet,
+    path::{Path, PathBuf},
+    time::{Duration, Instant},
+};
 
 const SAMPLE_RATE: i32 = 44100;
 const FRAME: Duration = Duration::from_nanos(1_000_000_000 / UI_FPS as u64);
@@ -736,8 +742,7 @@ fn draw_picker(dir: &Path, carts: &[PathBuf], sel: usize, frame: u32) -> Framebu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rico8_runtime::assets::Assets;
-    use rico8_runtime::cart::Cart;
+    use rico8_runtime::{assets::Assets, cart::Cart};
 
     #[test]
     fn scan_finds_only_carts_sorted() {

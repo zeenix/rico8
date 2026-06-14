@@ -1,11 +1,15 @@
 //! The sprite editor: zoomed 8x8 canvas, palette grid, tools, flags, and
 //! a sheet strip for picking sprites — the classic layout.
 
-use crate::shell::{Key, Mods};
-use crate::ui::{self, Mouse};
-use rico8_runtime::assets::{Assets, SPRITES_PER_ROW};
-use rico8_runtime::fb::Framebuffer;
-use rico8_runtime::palette::col;
+use crate::{
+    shell::{Key, Mods},
+    ui::{self, Mouse},
+};
+use rico8_runtime::{
+    assets::{Assets, SPRITES_PER_ROW},
+    fb::Framebuffer,
+    palette::col,
+};
 
 // Layout.
 const CANVAS: (i32, i32) = (3, 20); // 64x64, 8x zoom

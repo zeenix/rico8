@@ -1,11 +1,15 @@
 //! The map editor: a scrollable tile viewport painted from the sprite
 //! sheet, with a picker strip along the bottom.
 
-use crate::shell::{Key, Mods};
-use crate::ui::{self, Mouse};
-use rico8_runtime::assets::{Assets, MAP_H, MAP_W, SPRITES_PER_ROW};
-use rico8_runtime::fb::Framebuffer;
-use rico8_runtime::palette::col;
+use crate::{
+    shell::{Key, Mods},
+    ui::{self, Mouse},
+};
+use rico8_runtime::{
+    assets::{Assets, MAP_H, MAP_W, SPRITES_PER_ROW},
+    fb::Framebuffer,
+    palette::col,
+};
 
 /// Viewport: 16x12 tiles starting under the tab bar.
 const VIEW_Y: i32 = 8;

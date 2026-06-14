@@ -16,8 +16,10 @@
 
 use crate::assets::Assets;
 use anyhow::{anyhow, bail, Context, Result};
-use std::fs;
-use std::path::{Path, PathBuf};
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 /// Magic + version header for the assets file.
 const ASSETS_MAGIC: &[u8; 7] = b"RICO8A\x01";

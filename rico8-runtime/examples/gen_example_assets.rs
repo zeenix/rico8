@@ -9,8 +9,10 @@
 //! The generated files are committed: they are game data, like any pixel
 //! art, just born from code instead of the sprite editor.
 
-use rico8_runtime::assets::{Assets, MusicPattern, Note};
-use rico8_runtime::project::encode_assets;
+use rico8_runtime::{
+    assets::{Assets, MusicPattern, Note},
+    project::encode_assets,
+};
 use std::path::Path;
 
 /// Paint an 8x8 sprite from 8 strings; chars index the palette in hex,

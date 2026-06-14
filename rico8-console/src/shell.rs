@@ -2,22 +2,28 @@
 //! run loop, build orchestration and error screens. If RICO-8 has a
 //! personality, it lives here.
 
-use crate::builder::{spawn_build, BuildJob};
-use crate::editor::{
-    code::CodeEditor, map::MapEditor, music::MusicEditor, sfx::SfxEditor, sprite::SpriteEditor,
+use crate::{
+    builder::{spawn_build, BuildJob},
+    editor::{
+        code::CodeEditor, map::MapEditor, music::MusicEditor, sfx::SfxEditor, sprite::SpriteEditor,
+    },
+    ui::{self, Mouse},
 };
-use crate::ui::{self, Mouse};
 use anyhow::{anyhow, bail, Result};
-use rico8_runtime::assets::Assets;
-use rico8_runtime::audio::AudioHandle;
-use rico8_runtime::cart::{self, Cart};
-use rico8_runtime::fb::Framebuffer;
-use rico8_runtime::palette::col;
-use rico8_runtime::project::Project;
-use rico8_runtime::vm::{GameVm, RuntimeError, UI_FPS};
-use std::collections::VecDeque;
-use std::path::PathBuf;
-use std::time::{Duration, Instant, SystemTime};
+use rico8_runtime::{
+    assets::Assets,
+    audio::AudioHandle,
+    cart::{self, Cart},
+    fb::Framebuffer,
+    palette::col,
+    project::Project,
+    vm::{GameVm, RuntimeError, UI_FPS},
+};
+use std::{
+    collections::VecDeque,
+    path::PathBuf,
+    time::{Duration, Instant, SystemTime},
+};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 

@@ -5,10 +5,12 @@
 //! plain Cargo crates, so the external-editor workflow is just "run cargo
 //! yourself" (or `rico8 build <dir>`).
 
-use std::path::Path;
-use std::process::Command;
-use std::sync::mpsc::{channel, Receiver};
-use std::time::{Duration, Instant};
+use std::{
+    path::Path,
+    process::Command,
+    sync::mpsc::{channel, Receiver},
+    time::{Duration, Instant},
+};
 
 pub struct BuildResult {
     pub success: bool,
