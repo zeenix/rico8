@@ -14,14 +14,14 @@ rico8-player               picker over the current directory
 
 ## Controls
 
-| input                  | action                           |
-| ---------------------- | -------------------------------- |
-| d-pad                  | directions / move in picker      |
-| any face button        | O / X in game, launch in picker  |
+| input                     | action                                           |
+| --------------------------| -------------------------------------------------|
+| d-pad                     | directions / move in picker                      |
+| any face button           | O / X in game, launch in picker                  |
 | **hold both O + X (~1s)** | **return to the cart picker** (works on any pad) |
-| Select                 | back to picker (recognized pads) |
-| Start + Select         | quit (recognized pads)           |
-| keyboard               | arrows + Z/X, Esc = back, F1 = fps meter |
+| Select                    | back to picker (recognized pads)                 |
+| Start + Select            | quit (recognized pads)                           |
+| keyboard                  | arrows + Z/X, Esc = back, F1 = fps meter         |
 
 The picker shows the key controls along its bottom edge. Input prefers
 SDL's GameController API, which most firmwares preconfigure for their
