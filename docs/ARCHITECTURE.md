@@ -66,8 +66,9 @@ directly: runs as-is). `run` saves the project, spawns
 `cargo build --release --target wasm32-unknown-unknown` on a thread,
 streams trimmed errors to the console on failure, and boots the VM on
 success. While running, the wasm file's mtime is polled once a second;
-external rebuilds hot-reload the cart. The fixed 30 fps tick lives in
-`main.rs` (`ControlFlow::WaitUntil` + an accumulator).
+external rebuilds hot-reload the cart. The tick lives in `main.rs`
+(`ControlFlow::WaitUntil` + an accumulator); it runs at 30 fps for the
+console and editors, or the cart's rate (60 by default) while a game runs.
 
 ## Assets (`rico8-runtime/src/assets.rs`)
 
@@ -94,7 +95,7 @@ through a shared `AudioHandle`.
 new      ->  Cargo crate (cdylib) + template + empty assets.rico8
 edit     ->  code editor writes src/lib.rs; asset editors write assets.rico8
 run      ->  cargo build --target wasm32-unknown-unknown
-         ->  GameVm::load(wasm, assets)  ->  30 fps update/draw
+         ->  GameVm::load(wasm, assets)  ->  update/draw (60 fps, or the cart's rate)
 export   ->  Cart { wasm, assets, source? }  ->  postcard -> deflate
          ->  rcRt chunk inside the label PNG
 load     ->  validate + decode  ->  run, or extract back to a project

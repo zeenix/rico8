@@ -16,13 +16,24 @@ everywhere: draws clip, reads return 0.
 | export         | signature | called                                  |
 | -------------- | --------- | --------------------------------------- |
 | `rico8_init`   | `() -> ()`| once, after the module is instantiated  |
-| `rico8_update` | `() -> ()`| 30 times per second                     |
+| `rico8_update` | `() -> ()`| `rico8_fps` times per second            |
 | `rico8_draw`   | `() -> ()`| after each update                       |
 | `memory`       | memory    | read by `print`/`log`/`panic`           |
 
 Each call runs under a fuel budget (~100M instructions). Exhausting it
 traps with a "ran too long" error screen — infinite loops cannot hang
 the console.
+
+## Guest exports (optional)
+
+| export      | signature   | called                                |
+| ----------- | ----------- | ------------------------------------- |
+| `rico8_fps` | `() -> u32` | once, after `rico8_init`              |
+
+`rico8_fps` reports the cart's logical frame rate. The SDK emits it from
+every cart; `30` and `60` are honored, and `60` is the default. A missing
+export, or any other value, also means 60, so a hand-written cart that
+omits it still runs.
 
 ## Host imports
 
@@ -71,7 +82,7 @@ the console.
 
 | function | signature | notes |
 | --- | --- | --- |
-| `time` | `() -> f32` | seconds since init, in 1/30 steps |
+| `time` | `() -> f32` | seconds since init, in `1/fps` steps (see `rico8_fps`) |
 | `rnd` | `() -> f32` | uniform in `[0, 1)` (host RNG) |
 | `log` | `(ptr: u32, len: u32)` | line to the RICO-8 console |
 | `panic` | `(ptr: u32, len: u32)` | record a panic message; the SDK's panic hook calls this right before the trap so the error screen shows the real message |

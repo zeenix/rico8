@@ -21,7 +21,7 @@ rico8-player               picker over the current directory
 | **hold both O + X (~1s)** | **return to the cart picker** (works on any pad) |
 | Select                 | back to picker (recognized pads) |
 | Start + Select         | quit (recognized pads)           |
-| keyboard               | arrows + Z/X, Esc = back         |
+| keyboard               | arrows + Z/X, Esc = back, F1 = fps meter |
 
 The picker shows the key controls along its bottom edge. Input prefers
 SDL's GameController API, which most firmwares preconfigure for their
@@ -113,8 +113,8 @@ A desktop build is just `cargo build --release -p rico8-player`
   console. Make carts on a PC, copy the `.png`s over.
 - The screen is letterboxed to square (640x480 -> 480x480 on the
   RGB10S) with nearest-neighbor scaling.
-- 30 fps logic with its own timer; vsync is used when the device
-  renderer provides it.
+- Cart-rate logic (30 or 60 fps) with its own timer; vsync is used when
+  the device renderer provides it.
 - Audio is the same 4-channel synth at 44.1 kHz through SDL/ALSA.
 - Tested in CI headless (SDL dummy drivers) and cross-built
   automatically; on-device testing reports are very welcome.

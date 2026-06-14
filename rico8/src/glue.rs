@@ -1,6 +1,6 @@
 //! Lifecycle glue between the `game!` macro exports and the game trait.
 
-use crate::{Context, Graphics, Rico8Game};
+use crate::{Context, FrameRate, Graphics, Rico8Game};
 
 /// Implementation details of the [`game!`](crate::game) macro. Not part
 /// of the public API; do not call directly.
@@ -29,6 +29,15 @@ pub mod __internal {
             unsafe { crate::ffi::panic(msg.as_ptr(), msg.len() as u32) };
         }));
         *slot() = Some(make());
+    }
+
+    /// The cart's selected frame rate, as a frames-per-second number. The
+    /// host queries this once after `init` to set its update/draw cadence.
+    pub fn fps() -> u32 {
+        slot()
+            .as_ref()
+            .map(|game| game.frame_rate().fps())
+            .unwrap_or(FrameRate::Fps60.fps())
     }
 
     pub fn update() {

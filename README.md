@@ -7,7 +7,8 @@ RICO-8 is a tiny, self-contained game console that never existed: a
 256 sprites, a 128x64 tile map — and a Rust compiler where the Lua
 interpreter would be. You write a little Rust, it compiles to
 WebAssembly, and it runs inside the console's sandbox at a steady
-30 fps. Carts are shareable PNG images with the game embedded inside.
+60 fps (or 30, the cart's choice). Carts are shareable PNG images with
+the game embedded inside.
 
 The programming language is the point: everything else tries to stay as
 close to the feel of [PICO-8](https://www.lexaloffle.com/pico-8.php) as
@@ -76,7 +77,7 @@ label. Type `keys` in the console for the full list.
 | map        | 128 x 64 tiles                        |
 | sfx        | 64 slots, 32 steps, 8 waveforms       |
 | music      | 64 patterns, 4 channels               |
-| framerate  | 30 fps, fixed                         |
+| framerate  | 60 fps (or 30, the cart's choice)     |
 | cart       | one PNG file                          |
 
 ## PNG cartridges

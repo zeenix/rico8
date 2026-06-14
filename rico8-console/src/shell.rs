@@ -14,10 +14,10 @@ use rico8_runtime::cart::{self, Cart};
 use rico8_runtime::fb::Framebuffer;
 use rico8_runtime::palette::col;
 use rico8_runtime::project::Project;
-use rico8_runtime::vm::{GameVm, RuntimeError};
+use rico8_runtime::vm::{GameVm, RuntimeError, UI_FPS};
 use std::collections::VecDeque;
 use std::path::PathBuf;
-use std::time::SystemTime;
+use std::time::{Duration, Instant, SystemTime};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -40,6 +40,8 @@ pub enum Key {
     PageDown,
     /// F6: capture the screen as the cart label while running.
     CaptureLabel,
+    /// F1: toggle the wall-clock fps meter.
+    ToggleFps,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -92,6 +94,15 @@ fn assets_ref(loaded: &Loaded) -> Option<&Assets> {
     }
 }
 
+/// Draw the fps meter in the top-left: measured frames per second over the
+/// cart's target rate, e.g. `60/60`.
+fn fps_overlay(fb: &mut Framebuffer, measured: f32, target: u32) {
+    let text = format!("{}/{}", measured.round() as u32, target);
+    let w = text.len() as i32 * 4 + 1;
+    fb.rectfill(0, 0, w, 6, col::BLACK);
+    fb.print(&text, 1, 1, col::YELLOW);
+}
+
 enum ConsoleLine {
     Text {
         text: String,
@@ -142,6 +153,12 @@ pub struct Shell {
     /// Where `new` creates projects and `ls` looks: the host working dir.
     cwd: PathBuf,
     sdk_path: PathBuf,
+
+    // Wall-clock fps meter (F1 toggles it), measured over a moving window.
+    show_fps: bool,
+    fps_frames: u32,
+    fps_t0: Instant,
+    fps_val: f32,
 }
 
 const TEXT_COLS: usize = 31;
@@ -176,6 +193,10 @@ impl Shell {
             want_exit: false,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             sdk_path,
+            show_fps: false,
+            fps_frames: 0,
+            fps_t0: Instant::now(),
+            fps_val: 0.0,
         };
         shell.boot();
         shell
@@ -281,6 +302,10 @@ impl Shell {
 
     pub fn key(&mut self, key: Key, mods: Mods) {
         // Global shortcuts.
+        if key == Key::ToggleFps {
+            self.show_fps = !self.show_fps;
+            return;
+        }
         if mods.ctrl {
             match key {
                 Key::Char('r') => {
@@ -449,7 +474,7 @@ impl Shell {
                     self.switch_editor(self.last_editor);
                 }
             }
-            Key::Tab | Key::CaptureLabel => {}
+            Key::Tab | Key::CaptureLabel | Key::ToggleFps => {}
         }
     }
 
@@ -568,6 +593,7 @@ impl Shell {
             ("ctrl+s", "save + build check"),
             ("alt+left/right", "switch editor"),
             ("arrows + z/x", "game buttons"),
+            ("f1", "toggle fps meter"),
             ("f6", "capture label (running)"),
         ] {
             self.say(&format!("{k:14} {d}"), col::LIGHT_GREY);
@@ -877,6 +903,16 @@ impl Shell {
     // Per-frame logic
     // -----------------------------------------------------------------
 
+    /// The rate the host should tick at: a running cart's frame rate (30 or
+    /// 60), else 30. Running the whole Run-mode tick at the cart's rate is
+    /// what gets the display to refresh at 60 too.
+    pub fn tick_fps(&self) -> u32 {
+        match (self.mode, &self.vm) {
+            (Mode::Run, Some(vm)) => vm.fps(),
+            _ => UI_FPS,
+        }
+    }
+
     pub fn tick(&mut self) {
         self.frame += 1;
 
@@ -1009,9 +1045,29 @@ impl Shell {
     // -----------------------------------------------------------------
 
     /// Draw the current mode and return the framebuffer to present.
+    /// Count presented frames over ~0.5 s windows for the fps meter. The
+    /// cart can't measure this itself — `time()` is a logical clock — so the
+    /// host counts real draws against the wall clock.
+    fn meter_fps(&mut self) {
+        self.fps_frames += 1;
+        let elapsed = self.fps_t0.elapsed();
+        if elapsed >= Duration::from_millis(500) {
+            self.fps_val = self.fps_frames as f32 / elapsed.as_secs_f32();
+            self.fps_frames = 0;
+            self.fps_t0 = Instant::now();
+        }
+    }
+
     pub fn draw(&mut self) -> &Framebuffer {
+        self.meter_fps();
         match self.mode {
             Mode::Run => {
+                if self.show_fps {
+                    if let Some(vm) = self.vm.as_mut() {
+                        let target = vm.fps();
+                        fps_overlay(&mut vm.state_mut().fb, self.fps_val, target);
+                    }
+                }
                 if let Some(vm) = &self.vm {
                     return &vm.state().fb;
                 }
