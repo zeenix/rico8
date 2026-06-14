@@ -355,32 +355,48 @@ pub trait Rico8Game {
 
 /// Declare your game's entry point.
 ///
-/// Takes an expression that builds the initial game state:
+/// The common form takes a struct literal that builds the initial state:
 ///
 /// ```ignore
 /// rico8::game!(Game { x: 64, y: 64 });
 /// ```
+///
+/// Any other constructor works with the `Type = expr` form, and a type
+/// implementing [`Default`] needs no initializer:
+///
+/// ```ignore
+/// rico8::game!(Game = Game::new());
+/// rico8::game!(Game);
+/// ```
 #[macro_export]
 macro_rules! game {
-    ($init:expr) => {
+    ($game:ty = $init:expr) => {
+        static GAME: $crate::__internal::Slot<$game> = $crate::__internal::Slot::new();
+
         #[no_mangle]
         pub extern "C" fn rico8_init() {
-            $crate::__internal::init(|| ::std::boxed::Box::new($init));
+            GAME.init(|| $init);
         }
 
         #[no_mangle]
         pub extern "C" fn rico8_fps() -> u32 {
-            $crate::__internal::fps()
+            GAME.fps()
         }
 
         #[no_mangle]
         pub extern "C" fn rico8_update() {
-            $crate::__internal::update();
+            GAME.update();
         }
 
         #[no_mangle]
         pub extern "C" fn rico8_draw() {
-            $crate::__internal::draw();
+            GAME.draw();
         }
+    };
+    ($game:ident { $($field:tt)* }) => {
+        $crate::game!($game = $game { $($field)* });
+    };
+    ($game:ident) => {
+        $crate::game!($game = <$game as ::core::default::Default>::default());
     };
 }
