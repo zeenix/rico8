@@ -2,12 +2,16 @@
 //! plus flow flags (loop start / loop back / stop). Songs are chains of
 //! patterns, walked by the sequencer at runtime.
 
-use crate::shell::{Key, Mods};
-use crate::ui::{self, Mouse};
-use rico8_runtime::assets::{Assets, CHANNELS, MUSIC_COUNT};
-use rico8_runtime::audio::AudioHandle;
-use rico8_runtime::fb::Framebuffer;
-use rico8_runtime::palette::col;
+use crate::{
+    shell::{Key, Mods},
+    ui::{self, Mouse},
+};
+use rico8_runtime::{
+    assets::{Assets, CHANNELS, MUSIC_COUNT},
+    audio::AudioHandle,
+    fb::Framebuffer,
+    palette::col,
+};
 
 const ROW_Y: i32 = 34;
 const ROW_H: i32 = 12;

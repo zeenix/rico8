@@ -19,9 +19,10 @@
 //! `CartPayload` always carries the compiled `game.wasm` and the full
 //! asset bundle; carts exported as *editable* also carry the Rust source.
 
-use crate::assets::{Assets, MUSIC_COUNT, SFX_COUNT, SHEET_H, SHEET_W, SPRITE_COUNT};
-use crate::font;
-use crate::palette;
+use crate::{
+    assets::{Assets, MUSIC_COUNT, SFX_COUNT, SHEET_H, SHEET_W, SPRITE_COUNT},
+    font, palette,
+};
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 

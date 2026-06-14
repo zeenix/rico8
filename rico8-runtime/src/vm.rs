@@ -6,10 +6,12 @@
 //! no network. Fuel metering keeps runaway loops from hanging the
 //! console; they surface as a friendly error screen instead.
 
-use crate::assets::{Assets, MapData, SpriteSheet};
-use crate::audio::AudioHandle;
-use crate::fb::Framebuffer;
-use crate::input::InputState;
+use crate::{
+    assets::{Assets, MapData, SpriteSheet},
+    audio::AudioHandle,
+    fb::Framebuffer,
+    input::InputState,
+};
 use anyhow::{anyhow, Context as _, Result};
 use wasmi::{Caller, Config, Engine, Instance, Linker, Module, Store, TypedFunc};
 

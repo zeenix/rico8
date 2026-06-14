@@ -1,10 +1,11 @@
 //! The code editor: 31 columns of Rust in a 4x6 pixel font, with the
 //! classic immediate cursor feel. Not an IDE — a place to type games.
 
-use crate::shell::{Key, Mods};
-use crate::ui::{self, Mouse};
-use rico8_runtime::fb::Framebuffer;
-use rico8_runtime::palette::col;
+use crate::{
+    shell::{Key, Mods},
+    ui::{self, Mouse},
+};
+use rico8_runtime::{fb::Framebuffer, palette::col};
 
 /// Visible text geometry.
 const AREA_X: i32 = 1;

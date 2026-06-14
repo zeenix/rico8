@@ -12,18 +12,24 @@ mod ui;
 mod webexport;
 
 use anyhow::{anyhow, bail, Context, Result};
-use rico8_runtime::cart::{self, Cart};
-use rico8_runtime::project::Project;
+use rico8_runtime::{
+    cart::{self, Cart},
+    project::Project,
+};
 use shell::{Key, Mods, Shell};
-use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
-use winit::application::ApplicationHandler;
-use winit::dpi::LogicalSize;
-use winit::event::{ElementState, MouseButton, WindowEvent};
-use winit::event_loop::{ActiveEventLoop, ControlFlow, EventLoop};
-use winit::keyboard::{KeyCode, NamedKey, PhysicalKey};
-use winit::window::{Window, WindowId};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::{Duration, Instant},
+};
+use winit::{
+    application::ApplicationHandler,
+    dpi::LogicalSize,
+    event::{ElementState, MouseButton, WindowEvent},
+    event_loop::{ActiveEventLoop, ControlFlow, EventLoop},
+    keyboard::{KeyCode, NamedKey, PhysicalKey},
+    window::{Window, WindowId},
+};
 
 /// One tick's wall-clock budget at a given rate (30 normally, 60 while a
 /// 60 fps cart runs).
@@ -181,8 +187,7 @@ fn headless_export_web(input: &Path, out: &Path) -> Result<()> {
 /// Load a cart and run a second of frames without a window — a smoke
 /// test for carts and for the console itself (used by CI).
 fn headless_verify(png: &Path) -> Result<()> {
-    use rico8_runtime::audio::AudioHandle;
-    use rico8_runtime::vm::GameVm;
+    use rico8_runtime::{audio::AudioHandle, vm::GameVm};
     let cart = cart::load_png(png)?;
     let mut vm = GameVm::load(&cart.wasm, &cart.assets, AudioHandle::dummy())
         .context("loading cart into the vm")?;
@@ -207,8 +212,7 @@ fn headless_verify(png: &Path) -> Result<()> {
 /// Render the console and each editor headless and save screenshots.
 /// Undocumented helper for docs and visual checks.
 fn headless_snap(project: &Path, outdir: &Path) -> Result<()> {
-    use rico8_runtime::audio::AudioHandle;
-    use rico8_runtime::cart::encode_screen_png;
+    use rico8_runtime::{audio::AudioHandle, cart::encode_screen_png};
     std::fs::create_dir_all(outdir)?;
     let mut shell = Shell::new(AudioHandle::dummy(), sdk_path());
     shell.startup_load(&project.to_string_lossy());

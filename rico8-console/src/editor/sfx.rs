@@ -2,12 +2,16 @@
 //! holding note, waveform, volume and effect. Piano keys on the keyboard
 //! enter notes; space previews.
 
-use crate::shell::{Key, Mods};
-use crate::ui::{self, Mouse};
-use rico8_runtime::assets::{Assets, SFX_LEN};
-use rico8_runtime::audio::AudioHandle;
-use rico8_runtime::fb::Framebuffer;
-use rico8_runtime::palette::col;
+use crate::{
+    shell::{Key, Mods},
+    ui::{self, Mouse},
+};
+use rico8_runtime::{
+    assets::{Assets, SFX_LEN},
+    audio::AudioHandle,
+    fb::Framebuffer,
+    palette::col,
+};
 
 const STEP_Y: i32 = 20;
 const COL_X: [i32; 2] = [4, 68];

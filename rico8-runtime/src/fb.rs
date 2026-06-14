@@ -5,9 +5,10 @@
 //! palette indices. The GPU's only job is to scale the result up with
 //! nearest-neighbor filtering.
 
-use crate::assets::{MapData, SpriteSheet, SPRITE_SIZE};
-use crate::font;
-use crate::palette;
+use crate::{
+    assets::{MapData, SpriteSheet, SPRITE_SIZE},
+    font, palette,
+};
 
 /// Virtual screen width in pixels.
 pub const WIDTH: i32 = 128;

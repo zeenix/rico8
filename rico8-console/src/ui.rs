@@ -3,9 +3,11 @@
 //! fantasy-console primitives — no native widgets anywhere.
 
 use crate::shell::Mode;
-use rico8_runtime::fb::{Framebuffer, HEIGHT, WIDTH};
-use rico8_runtime::palette::col;
-use rico8_runtime::ui as rui;
+use rico8_runtime::{
+    fb::{Framebuffer, HEIGHT, WIDTH},
+    palette::col,
+    ui as rui,
+};
 
 /// Mouse state in virtual-screen coordinates.
 #[derive(Debug, Clone, Copy)]

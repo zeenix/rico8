@@ -8,8 +8,10 @@
 
 use anyhow::{anyhow, Context, Result};
 use rico8_runtime::cart::{self, Cart};
-use std::path::{Path, PathBuf};
-use std::process::Command;
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 /// Export `cart` as a playable single-file HTML page.
 pub fn export_html(cart: &Cart, out: &Path, web_crate_dir: &Path) -> Result<()> {

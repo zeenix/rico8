@@ -5,8 +5,7 @@
 //! framebuffer carts use. There are deliberately no native-looking
 //! widgets here: this is console chrome, not a GUI toolkit.
 
-use crate::fb::Framebuffer;
-use crate::palette::col;
+use crate::{fb::Framebuffer, palette::col};
 
 /// Filled panel with a 1px border, inclusive corners.
 pub fn panel(fb: &mut Framebuffer, x0: i32, y0: i32, x1: i32, y1: i32, bg: u8, border: u8) {

@@ -26,11 +26,13 @@
 //! rico8_web_audio_ptr() -> ptr         the rendered samples
 //! ```
 
-use rico8_runtime::audio::AudioHandle;
-use rico8_runtime::cart;
-use rico8_runtime::fb::{Framebuffer, HEIGHT, WIDTH};
-use rico8_runtime::palette::col;
-use rico8_runtime::vm::{GameVm, DEFAULT_FPS};
+use rico8_runtime::{
+    audio::AudioHandle,
+    cart,
+    fb::{Framebuffer, HEIGHT, WIDTH},
+    palette::col,
+    vm::{GameVm, DEFAULT_FPS},
+};
 use std::cell::UnsafeCell;
 
 /// Sample rate the synth renders at; the page's AudioContext resamples.
@@ -246,8 +248,7 @@ pub extern "C" fn rico8_web_audio_ptr() -> *const f32 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rico8_runtime::assets::Assets;
-    use rico8_runtime::cart::Cart;
+    use rico8_runtime::{assets::Assets, cart::Cart};
 
     /// A real cart, end to end: WAT -> wasm -> PNG -> player.
     fn test_cart_png(wat_src: &str) -> Vec<u8> {
