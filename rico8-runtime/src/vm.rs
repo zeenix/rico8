@@ -13,7 +13,10 @@ use crate::{
     input::InputState,
 };
 use anyhow::{anyhow, Context as _, Result};
-use wasmi::{Caller, Config, Engine, Instance, Linker, Module, Store, TypedFunc};
+use wasmi::{
+    Caller, Config, Engine, Instance, Linker, Module, Store, StoreLimits, StoreLimitsBuilder,
+    TypedFunc,
+};
 
 /// A cart's logical frames per second when it doesn't say otherwise.
 pub const DEFAULT_FPS: u32 = 60;
@@ -28,6 +31,12 @@ pub const UI_FPS: u32 = 30;
 /// frame uses a few thousand; exceeding this means the cart is stuck or doing
 /// far too much, and surfaces as a friendly error screen.
 const FUEL_PER_CALL: u64 = 131_072;
+
+/// Hard cap on a cart's total linear memory: 128 K, the same number as the
+/// fuel and cart-size limits. Covers static data, the shadow stack and the
+/// heap together (wasm cannot separate them). Carts build with a 32 KiB stack
+/// reserve, leaving up to ~96 KiB for static data and heap above it.
+const MAX_MEMORY: usize = 131_072;
 
 /// Everything the host exposes to a running cart.
 pub struct HostState {
@@ -45,6 +54,9 @@ pub struct HostState {
     /// export. Drives `time()` and the host's update/draw cadence.
     pub fps: u32,
     rng: u64,
+    /// Enforces `MAX_MEMORY` on linear-memory growth, including the initial
+    /// allocation at instantiation.
+    limits: StoreLimits,
 }
 
 impl HostState {
@@ -60,6 +72,10 @@ impl HostState {
             frame: 0,
             fps: DEFAULT_FPS,
             rng: 0x2545_f491_4f6c_dd1d,
+            limits: StoreLimitsBuilder::new()
+                .memory_size(MAX_MEMORY)
+                .trap_on_grow_failure(true)
+                .build(),
         }
     }
 
@@ -131,6 +147,7 @@ impl GameVm {
 
         audio.load(assets.sfx.clone(), assets.music.clone());
         let mut store = Store::new(&engine, HostState::new(assets, audio));
+        store.limiter(|state| &mut state.limits);
         let mut linker = <Linker<HostState>>::new(&engine);
 
         link!(linker, "cls", |mut c: Caller<'_, HostState>, col: i32| {
@@ -300,7 +317,14 @@ impl GameVm {
             .map_err(|e| anyhow!("fuel setup: {e}"))?;
         let instance = linker
             .instantiate_and_start(&mut store, &module)
-            .map_err(|e| anyhow!("cart does not match the RICO-8 ABI: {e}"))?;
+            .map_err(|e| {
+                let s = e.to_string();
+                if s.contains("resource limiter denied") {
+                    anyhow!("cart needs more than 128K of memory to start")
+                } else {
+                    anyhow!("cart does not match the RICO-8 ABI: {e}")
+                }
+            })?;
 
         let init = instance
             .get_typed_func::<(), ()>(&store, "rico8_init")
@@ -354,6 +378,8 @@ impl GameVm {
                     let s = err.to_string();
                     if s.contains("fuel") {
                         format!("{phase}() ran too long\n(infinite loop?)")
+                    } else if s.contains("growth operation limited") {
+                        format!("{phase}() ran out of memory\n(128K limit)")
                     } else {
                         s
                     }
@@ -460,6 +486,34 @@ mod tests {
           (func (export "rico8_draw")))
     "#;
 
+    /// 1-page initial + grow by 1 page = 2 pages = exactly the 128 K cap (allowed).
+    const GROW_TO_CAP_CART: &str = r#"
+        (module
+          (memory (export "memory") 1)
+          (func (export "rico8_init"))
+          (func (export "rico8_update") (drop (memory.grow (i32.const 1))))
+          (func (export "rico8_draw")))
+    "#;
+
+    /// Update grows linear memory far past the 128 K cap (denied -> trap).
+    const GROW_PAST_CAP_CART: &str = r#"
+        (module
+          (memory (export "memory") 1)
+          (func (export "rico8_init"))
+          (func (export "rico8_update") (drop (memory.grow (i32.const 10))))
+          (func (export "rico8_draw")))
+    "#;
+
+    /// Declares 3 pages (192 KiB) of initial memory — over the 128 K cap, so it
+    /// is denied at instantiation before the cart ever runs.
+    const HUGE_INITIAL_MEMORY_CART: &str = r#"
+        (module
+          (memory (export "memory") 3)
+          (func (export "rico8_init"))
+          (func (export "rico8_update"))
+          (func (export "rico8_draw")))
+    "#;
+
     fn load_test_vm(wat_src: &str) -> Result<GameVm> {
         let wasm = wat::parse_str(wat_src).unwrap();
         GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy())
@@ -540,5 +594,35 @@ mod tests {
         let mut vm = load_test_vm(BUDGET_OVER_CART).unwrap();
         let err = vm.call_update().unwrap_err();
         assert!(err.message.contains("ran too long"), "got: {}", err.message);
+    }
+
+    #[test]
+    fn memory_growth_up_to_cap_is_allowed() {
+        let mut vm = load_test_vm(GROW_TO_CAP_CART).unwrap();
+        assert!(
+            vm.call_update().is_ok(),
+            "growing to exactly 128 K must succeed"
+        );
+    }
+
+    #[test]
+    fn memory_growth_past_cap_is_a_friendly_error() {
+        let mut vm = load_test_vm(GROW_PAST_CAP_CART).unwrap();
+        let err = vm.call_update().unwrap_err();
+        assert!(
+            err.message.contains("out of memory"),
+            "got: {}",
+            err.message
+        );
+    }
+
+    #[test]
+    fn oversized_initial_memory_is_rejected_at_load() {
+        let wasm = wat::parse_str(HUGE_INITIAL_MEMORY_CART).unwrap();
+        let err = match GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy()) {
+            Err(e) => e,
+            Ok(_) => panic!("oversized cart should not load"),
+        };
+        assert!(err.to_string().contains("128K of memory"), "got: {err}");
     }
 }
