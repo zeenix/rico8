@@ -17,8 +17,11 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # .rustfmt.toml uses nightly-only options (wrap_comments,
+      # imports_granularity), so formatting runs on nightly.
+      - uses: dtolnay/rust-toolchain@master
         with:
+          toolchain: nightly
           components: rustfmt
       - run: cargo fmt --all -- --check
 
