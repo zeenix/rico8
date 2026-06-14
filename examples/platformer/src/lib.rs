@@ -1,6 +1,10 @@
 //! A tiny platformer: run, jump, collect coins. Solid tiles carry sprite
 //! flag 0; coins are tile 3 and are collected by rewriting the map.
 
+#![no_std]
+
+use heapless::format;
+
 use rico8::*;
 
 struct Platformer {
@@ -88,9 +92,22 @@ impl Game for Platformer {
         } else {
             1
         };
-        gfx.spr_ext(SpriteId(frame), self.x / 16, self.y / 16, 1, 1, self.flip, false);
+        gfx.spr_ext(
+            SpriteId(frame),
+            self.x / 16,
+            self.y / 16,
+            1,
+            1,
+            self.flip,
+            false,
+        );
         gfx.camera(0, 0);
-        gfx.print(&format!("coins {}", self.coins), 2, 2, Color::YELLOW);
+        gfx.print(
+            &format!(16; "coins {}", self.coins).unwrap(),
+            2,
+            2,
+            Color::YELLOW,
+        );
     }
 }
 

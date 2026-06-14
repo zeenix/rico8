@@ -1,5 +1,7 @@
 //! Music playback: O starts the song, X stops it. The bars dance.
 
+#![no_std]
+
 use rico8::*;
 
 struct MusicDemo {
@@ -28,7 +30,9 @@ impl Game for MusicDemo {
         for i in 0..16 {
             let phase = (self.t as f32 / 4.0 + i as f32) % 8.0;
             let h = if self.playing {
-                8 + ((phase - 4.0).abs() * 8.0) as i32
+                let d = phase - 4.0;
+                let d = if d < 0.0 { -d } else { d };
+                8 + (d * 8.0) as i32
             } else {
                 4
             };

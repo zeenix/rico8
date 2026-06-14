@@ -1,5 +1,7 @@
 //! A sprite walking around with button-driven animation and flipping.
 
+#![no_std]
+
 use rico8::*;
 
 struct SpriteMove {

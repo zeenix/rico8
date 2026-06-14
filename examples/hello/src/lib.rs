@@ -1,5 +1,7 @@
 //! Hello, RICO-8: the canonical first cart. Arrows move the square.
 
+#![no_std]
+
 use rico8::*;
 
 struct Hello {

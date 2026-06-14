@@ -1,6 +1,8 @@
 //! Scroll around a tile map with the arrow keys; X toggles layer
 //! filtering to show how sprite flags select what `map` draws.
 
+#![no_std]
+
 use rico8::*;
 
 struct MapDemo {

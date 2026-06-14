@@ -1,5 +1,7 @@
 //! A tiny soundboard: each button plays a different sound effect.
 
+#![no_std]
+
 use rico8::*;
 
 struct SfxDemo {
