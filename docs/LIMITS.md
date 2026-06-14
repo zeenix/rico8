@@ -50,17 +50,17 @@ not carefully written games.
 
 ## Staying small — `#![no_std]` + `heapless`
 
-Default carts just work: the `rico8` dependency brings in `std` and a heap
-allocator, and you write ordinary Rust. No special effort needed.
+This is the normal way RICO-8 carts are written. `rico8 new` scaffolds a
+`#![no_std]` cart, and every game example ships this way. There is no heap and no
+allocator overhead — memory is fully static — which keeps carts tiny: the
+examples weigh in at roughly 1–5 KiB.
 
-If you want the absolute smallest, most predictable cart — no heap, no
-allocator overhead, fully static memory — you can go `no_std`:
+A `no_std` cart looks like this:
 
 ```toml
 # Cargo.toml
 [dependencies]
 rico8 = { path = "../../rico8", default-features = false }
-heapless = "0.8"
 
 [profile.release]
 opt-level = "s"
@@ -71,12 +71,9 @@ panic = "abort"
 ```rust
 // src/lib.rs
 #![no_std]
-use heapless::Vec as HVec;
 use rico8::*;
 
 struct MyGame {
-    // Fixed-capacity, stack-backed — no heap allocation.
-    trail: HVec<(i32, i32), 16>,
     x: i32,
     y: i32,
 }
@@ -90,12 +87,38 @@ impl Game for MyGame {
     }
 }
 
-rico8::game!(MyGame { trail: HVec::new(), x: 64, y: 64 });
+rico8::game!(MyGame { x: 64, y: 64 });
 ```
 
-`heapless` collections are bounded at compile time (`Vec<T, N>`,
-`String<N>`, `FnvIndexMap<K, V, N>`, …), so there is nothing to allocate and
-nothing to fail at runtime due to memory pressure.
+See [`examples/hello`](../examples/hello) for the minimal, runnable starting
+point.
 
-See [`examples/hello_nostd`](../examples/hello_nostd) for a complete, runnable
-cart using this approach.
+### Fixed-size collections with `heapless`
+
+When you need a vector, string, or map, reach for [`heapless`]. Its
+collections are bounded at compile time (`Vec<T, N>`, `String<N>`,
+`FnvIndexMap<K, V, N>`, …), so there is nothing to allocate and nothing to
+fail at runtime due to memory pressure. Add it alongside `rico8`:
+
+```toml
+heapless = "0.9"
+```
+
+See [`examples/platformer`](../examples/platformer) for a worked example: it
+builds its HUD text with `heapless::format!`.
+
+[`heapless`]: https://docs.rs/heapless
+
+### When you really need a heap
+
+A cart that genuinely needs a growable heap can opt into `std` by depending on
+`rico8` with its default features — just drop `default-features = false`:
+
+```toml
+[dependencies]
+rico8 = { path = "../../rico8" }
+```
+
+This brings in a heap allocator and lets you use ordinary `Vec`, `String`, and
+the rest of `std`. [`examples/stress`](../examples/stress) is the one cart that
+takes this path, deliberately allocating to probe the RAM cap.
