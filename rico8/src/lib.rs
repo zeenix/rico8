@@ -30,7 +30,7 @@
 //! a strict sandbox: the host functions wrapped by [`Context`] and
 //! [`Graphics`] are the only doors out. The screen is 128x128, the
 //! palette has 16 fixed colors, `update`/`draw` run at 60 fps (or 30,
-//! if the game overrides [`Rico8Game::frame_rate`]). The constraints
+//! if the game sets [`Rico8Game::FRAME_RATE`]). The constraints
 //! are the point.
 
 pub mod ffi;
@@ -46,9 +46,9 @@ pub const FPS: u32 = 60;
 
 /// How many times per second a cart's `update` and `draw` run.
 ///
-/// The default is [`FrameRate::Fps60`]; override [`Rico8Game::frame_rate`]
-/// to return [`FrameRate::Fps30`] for a 30 fps game, where both `update`
-/// and `draw` are called half as often.
+/// The default is [`FrameRate::Fps60`]; set [`Rico8Game::FRAME_RATE`] to
+/// [`FrameRate::Fps30`] for a 30 fps game, where both `update` and `draw`
+/// are called half as often.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum FrameRate {
     /// 30 frames per second.
@@ -197,10 +197,10 @@ impl Context {
         unsafe { ffi::music(-1) }
     }
 
-    /// Seconds since the cart started, in `1/`[`frame_rate`] steps (1/60 s
+    /// Seconds since the cart started, in `1/`[`FRAME_RATE`] steps (1/60 s
     /// by default).
     ///
-    /// [`frame_rate`]: Rico8Game::frame_rate
+    /// [`FRAME_RATE`]: Rico8Game::FRAME_RATE
     pub fn time(&self) -> f32 {
         unsafe { ffi::time() }
     }
@@ -341,16 +341,14 @@ impl Graphics {
 
 /// Implement this for your game state, then hand it to [`game!`].
 pub trait Rico8Game {
-    /// Called [`frame_rate`](Rico8Game::frame_rate) times per second. Read
+    /// The logical frame rate. Set this to [`FrameRate::Fps30`] to run
+    /// `update` and `draw` at 30 fps instead of the default 60.
+    const FRAME_RATE: FrameRate = FrameRate::Fps60;
+    /// Called [`FRAME_RATE`](Rico8Game::FRAME_RATE) times per second. Read
     /// input, move the world.
     fn update(&mut self, ctx: &mut Context);
     /// Called after `update`. Draw the world.
     fn draw(&self, gfx: &mut Graphics);
-    /// The logical frame rate. Override to return [`FrameRate::Fps30`] to
-    /// run `update` and `draw` at 30 fps instead of the default 60.
-    fn frame_rate(&self) -> FrameRate {
-        FrameRate::Fps60
-    }
 }
 
 /// Declare your game's entry point.

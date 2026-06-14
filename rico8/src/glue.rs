@@ -1,6 +1,6 @@
 //! Lifecycle glue between the `game!` macro exports and the game trait.
 
-use crate::{Context, FrameRate, Graphics, Rico8Game};
+use crate::{Context, Graphics, Rico8Game};
 
 /// Implementation details of the [`game!`](crate::game) macro. Not part
 /// of the public API; do not call directly.
@@ -45,12 +45,9 @@ pub mod __internal {
 
         /// The cart's selected frame rate, as a frames-per-second number.
         /// The host queries this once after `init` to set its update/draw
-        /// cadence.
+        /// cadence. It depends only on the type, not the instance.
         pub fn fps(&self) -> u32 {
-            self.get()
-                .as_ref()
-                .map(|game| game.frame_rate().fps())
-                .unwrap_or(FrameRate::Fps60.fps())
+            G::FRAME_RATE.fps()
         }
 
         /// Advance the world one frame.
