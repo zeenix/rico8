@@ -5,12 +5,12 @@
 //! ```no_run
 //! use rico8::*;
 //!
-//! struct Game {
+//! struct MyGame {
 //!     x: i32,
 //!     y: i32,
 //! }
 //!
-//! impl Rico8Game for Game {
+//! impl Game for MyGame {
 //!     fn update(&mut self, ctx: &mut Context) {
 //!         if ctx.btn(Button::Right) {
 //!             self.x += 1;
@@ -23,14 +23,14 @@
 //!     }
 //! }
 //!
-//! rico8::game!(Game { x: 64, y: 64 });
+//! rico8::game!(MyGame { x: 64, y: 64 });
 //! ```
 //!
 //! Carts are built for `wasm32-unknown-unknown` as a `cdylib` and run in
 //! a strict sandbox: the host functions wrapped by [`Context`] and
 //! [`Graphics`] are the only doors out. The screen is 128x128, the
 //! palette has 16 fixed colors, `update`/`draw` run at 60 fps (or 30,
-//! if the game sets [`Rico8Game::FRAME_RATE`]). The constraints
+//! if the game sets [`Game::FRAME_RATE`]). The constraints
 //! are the point.
 
 pub mod ffi;
@@ -46,7 +46,7 @@ pub const FPS: u32 = 60;
 
 /// How many times per second a cart's `update` and `draw` run.
 ///
-/// The default is [`FrameRate::Fps60`]; set [`Rico8Game::FRAME_RATE`] to
+/// The default is [`FrameRate::Fps60`]; set [`Game::FRAME_RATE`] to
 /// [`FrameRate::Fps30`] for a 30 fps game, where both `update` and `draw`
 /// are called half as often.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -200,7 +200,7 @@ impl Context {
     /// Seconds since the cart started, in `1/`[`FRAME_RATE`] steps (1/60 s
     /// by default).
     ///
-    /// [`FRAME_RATE`]: Rico8Game::FRAME_RATE
+    /// [`FRAME_RATE`]: Game::FRAME_RATE
     pub fn time(&self) -> f32 {
         unsafe { ffi::time() }
     }
@@ -340,11 +340,11 @@ impl Graphics {
 }
 
 /// Implement this for your game state, then hand it to [`game!`].
-pub trait Rico8Game {
+pub trait Game {
     /// The logical frame rate. Set this to [`FrameRate::Fps30`] to run
     /// `update` and `draw` at 30 fps instead of the default 60.
     const FRAME_RATE: FrameRate = FrameRate::Fps60;
-    /// Called [`FRAME_RATE`](Rico8Game::FRAME_RATE) times per second. Read
+    /// Called [`FRAME_RATE`](Game::FRAME_RATE) times per second. Read
     /// input, move the world.
     fn update(&mut self, ctx: &mut Context);
     /// Called after `update`. Draw the world.
@@ -356,15 +356,15 @@ pub trait Rico8Game {
 /// The common form takes a struct literal that builds the initial state:
 ///
 /// ```ignore
-/// rico8::game!(Game { x: 64, y: 64 });
+/// rico8::game!(MyGame { x: 64, y: 64 });
 /// ```
 ///
 /// Any other constructor works with the `Type = expr` form, and a type
 /// implementing [`Default`] needs no initializer:
 ///
 /// ```ignore
-/// rico8::game!(Game = Game::new());
-/// rico8::game!(Game);
+/// rico8::game!(MyGame = MyGame::new());
+/// rico8::game!(MyGame);
 /// ```
 #[macro_export]
 macro_rules! game {

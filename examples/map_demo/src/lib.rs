@@ -3,13 +3,13 @@
 
 use rico8::*;
 
-struct Game {
+struct MapDemo {
     cam_x: i32,
     cam_y: i32,
     solid_only: bool,
 }
 
-impl Rico8Game for Game {
+impl Game for MapDemo {
     fn update(&mut self, ctx: &mut Context) {
         if ctx.btn(Button::Left) {
             self.cam_x -= 2;
@@ -44,7 +44,7 @@ impl Rico8Game for Game {
     }
 }
 
-rico8::game!(Game {
+rico8::game!(MapDemo {
     cam_x: 0,
     cam_y: 0,
     solid_only: false,

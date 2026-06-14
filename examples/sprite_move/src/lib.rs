@@ -2,7 +2,7 @@
 
 use rico8::*;
 
-struct Game {
+struct SpriteMove {
     x: i32,
     y: i32,
     flip: bool,
@@ -10,7 +10,7 @@ struct Game {
     frame: u32,
 }
 
-impl Rico8Game for Game {
+impl Game for SpriteMove {
     fn update(&mut self, ctx: &mut Context) {
         self.walking = false;
         if ctx.btn(Button::Left) {
@@ -49,7 +49,7 @@ impl Rico8Game for Game {
     }
 }
 
-rico8::game!(Game {
+rico8::game!(SpriteMove {
     x: 60,
     y: 64,
     flip: false,

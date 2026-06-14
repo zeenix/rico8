@@ -27,12 +27,12 @@ const ASSETS_MAGIC: &[u8; 7] = b"RICO8A\x01";
 /// Default game source created by `new`.
 pub const TEMPLATE_CODE: &str = r#"use rico8::*;
 
-struct Game {
+struct MyGame {
     x: i32,
     y: i32,
 }
 
-impl Rico8Game for Game {
+impl Game for MyGame {
     fn update(&mut self, ctx: &mut Context) {
         if ctx.btn(Button::Left) { self.x -= 1; }
         if ctx.btn(Button::Right) { self.x += 1; }
@@ -47,7 +47,7 @@ impl Rico8Game for Game {
     }
 }
 
-rico8::game!(Game { x: 60, y: 70 });
+rico8::game!(MyGame { x: 60, y: 70 });
 "#;
 
 /// A loaded project: code + assets + where they live.

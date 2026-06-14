@@ -2,12 +2,12 @@
 
 use rico8::*;
 
-struct Game {
+struct Hello {
     x: i32,
     y: i32,
 }
 
-impl Rico8Game for Game {
+impl Game for Hello {
     fn update(&mut self, ctx: &mut Context) {
         if ctx.btn(Button::Left) {
             self.x -= 1;
@@ -30,4 +30,4 @@ impl Rico8Game for Game {
     }
 }
 
-rico8::game!(Game { x: 60, y: 64 });
+rico8::game!(Hello { x: 60, y: 64 });
