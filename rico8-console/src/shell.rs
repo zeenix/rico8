@@ -103,6 +103,17 @@ fn fps_overlay(fb: &mut Framebuffer, measured: f32, target: u32) {
     fb.print(&text, 1, 1, col::YELLOW);
 }
 
+/// How long the F6 camera-flash overlay lasts, in frames (~0.1s at 60fps).
+const CAPTURE_FLASH_FRAMES: u32 = 6;
+
+/// Paint the camera-flash feedback over the running cart's screen: a bright
+/// full-screen white pop, like a camera shutter. `cls` is used deliberately —
+/// it ignores any camera offset or clip the cart left active, so the flash
+/// always covers the whole screen and touches no cart-visible state.
+fn capture_flash_overlay(fb: &mut Framebuffer) {
+    fb.cls(col::WHITE);
+}
+
 enum ConsoleLine {
     Text {
         text: String,
@@ -159,6 +170,9 @@ pub struct Shell {
     fps_frames: u32,
     fps_t0: Instant,
     fps_val: f32,
+
+    /// Frames remaining of the camera-flash overlay shown after an F6 capture.
+    capture_flash: u32,
 }
 
 const TEXT_COLS: usize = 31;
@@ -197,6 +211,7 @@ impl Shell {
             fps_frames: 0,
             fps_t0: Instant::now(),
             fps_val: 0.0,
+            capture_flash: 0,
         };
         shell.boot();
         shell
@@ -871,10 +886,9 @@ impl Shell {
         if let Some(a) = self.assets_mut() {
             a.label = Some(pixels);
         }
-        if let Some(vm) = &mut self.vm {
-            // Quick flash as feedback.
-            vm.state_mut().logs.push("label captured".into());
-        }
+        // A brief on-screen camera flash, plus a console line for the record.
+        self.capture_flash = CAPTURE_FLASH_FRAMES;
+        self.say("label captured", col::GREEN);
     }
 
     fn stop_run(&mut self, message: &str) {
@@ -1067,6 +1081,12 @@ impl Shell {
                         let target = vm.fps();
                         fps_overlay(&mut vm.state_mut().fb, self.fps_val, target);
                     }
+                }
+                if self.capture_flash > 0 {
+                    if let Some(vm) = self.vm.as_mut() {
+                        capture_flash_overlay(&mut vm.state_mut().fb);
+                    }
+                    self.capture_flash -= 1;
                 }
                 if let Some(vm) = &self.vm {
                     return &vm.state().fb;
