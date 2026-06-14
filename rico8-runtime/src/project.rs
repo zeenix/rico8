@@ -25,7 +25,8 @@ use std::{
 const ASSETS_MAGIC: &[u8; 7] = b"RICO8A\x01";
 
 /// Default game source created by `new`.
-pub const TEMPLATE_CODE: &str = r#"use rico8::*;
+pub const TEMPLATE_CODE: &str = r#"#![no_std]
+use rico8::*;
 
 struct MyGame {
     x: i32,
@@ -88,7 +89,7 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-rico8 = {{ path = "{sdk}" }}
+rico8 = {{ path = "{sdk}", default-features = false }}
 
 # Standalone workspace so the project builds the same inside and outside
 # the RICO-8 source tree.
@@ -248,6 +249,21 @@ mod tests {
         assert!(decode_assets(b"NOTRICO8").is_err());
         let bytes = encode_assets(&Assets::default()).unwrap();
         assert!(decode_assets(&bytes).is_ok());
+    }
+
+    #[test]
+    fn create_scaffolds_a_no_std_project() {
+        let dir = std::env::temp_dir().join(format!("rico8_nostd_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        Project::create(&dir.join("g"), "g", Path::new("/tmp/sdk")).unwrap();
+        let lib = fs::read_to_string(dir.join("g/src/lib.rs")).unwrap();
+        let manifest = fs::read_to_string(dir.join("g/Cargo.toml")).unwrap();
+        assert!(lib.contains("#![no_std]"), "lib.rs:\n{lib}");
+        assert!(
+            manifest.contains("default-features = false"),
+            "Cargo.toml:\n{manifest}"
+        );
+        fs::remove_dir_all(&dir).unwrap();
     }
 
     #[test]
