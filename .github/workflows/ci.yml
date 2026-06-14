@@ -1,0 +1,65 @@
+# Run the test suite, rustfmt, and clippy on every push to main and on
+# pull requests, so formatting and lints stay green before merge.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
+      - run: cargo fmt --all -- --check
+
+  clippy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+
+      # SDL2 for the player, ALSA for the console's audio feature.
+      - name: Install SDL2 and ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libasound2-dev
+
+      - run: cargo clippy --workspace --all-targets -- -D warnings
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      # The cart-build tests run `cargo build --target
+      # wasm32-unknown-unknown`, so that target's std must be present.
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+      - uses: Swatinem/rust-cache@v2
+
+      # SDL2 for the player, ALSA for the console's audio feature.
+      - name: Install SDL2 and ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libsdl2-dev libasound2-dev
+
+      # SDL has no display or audio device on the runner; the dummy
+      # drivers let the player tests initialize headlessly.
+      - name: Run the test suite
+        run: cargo test --workspace
+        env:
+          SDL_VIDEODRIVER: dummy
+          SDL_AUDIODRIVER: dummy
