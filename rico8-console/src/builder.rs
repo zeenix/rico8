@@ -5,6 +5,7 @@
 //! plain Cargo crates, so the external-editor workflow is just "run cargo
 //! yourself" (or `rico8 build <dir>`).
 
+use rico8_runtime::{cart, project::Project};
 use std::{
     path::Path,
     process::Command,
@@ -16,6 +17,8 @@ pub struct BuildResult {
     pub success: bool,
     /// Console-ready error/diagnostic lines (already trimmed down).
     pub errors: Vec<String>,
+    /// Non-fatal diagnostics, e.g. the cart exceeding the 128 K size limit.
+    pub warnings: Vec<String>,
     pub duration: Duration,
 }
 
@@ -63,16 +66,19 @@ pub fn run_build(dir: &Path, started: Instant) -> BuildResult {
         Ok(out) if out.status.success() => BuildResult {
             success: true,
             errors: Vec::new(),
+            warnings: wasm_size_warnings(dir),
             duration: started.elapsed(),
         },
         Ok(out) => BuildResult {
             success: false,
             errors: extract_errors(&String::from_utf8_lossy(&out.stderr)),
+            warnings: Vec::new(),
             duration: started.elapsed(),
         },
         Err(e) => BuildResult {
             success: false,
             errors: vec![format!("could not run cargo: {e}")],
+            warnings: Vec::new(),
             duration: started.elapsed(),
         },
     }
@@ -104,9 +110,107 @@ fn extract_errors(stderr: &str) -> Vec<String> {
     out
 }
 
+/// Warn when a freshly built cart exceeds the 128 K export size limit. The
+/// build still succeeds — the hard gate is at export — but the author should
+/// know now rather than at pack time.
+fn wasm_size_warnings(dir: &Path) -> Vec<String> {
+    let Ok(project) = Project::load(dir) else {
+        return Vec::new();
+    };
+    let Ok(meta) = std::fs::metadata(project.wasm_path()) else {
+        return Vec::new();
+    };
+    let size = meta.len() as usize;
+    if size > cart::MAX_WASM_SIZE {
+        vec![format!(
+            "warning: cart wasm is {size} bytes; over the 128K limit ({})",
+            cart::MAX_WASM_SIZE
+        )]
+    } else {
+        Vec::new()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::{fs, path::PathBuf};
+
+    /// A temporary directory that removes itself on drop.
+    struct TempDir(PathBuf);
+
+    impl TempDir {
+        fn new(suffix: &str) -> Self {
+            let dir = std::env::temp_dir().join(format!(
+                "rico8-builder-test-{suffix}-{}",
+                std::process::id()
+            ));
+            fs::create_dir_all(&dir).unwrap();
+            Self(dir)
+        }
+
+        fn path(&self) -> &Path {
+            &self.0
+        }
+    }
+
+    impl Drop for TempDir {
+        fn drop(&mut self) {
+            let _ = fs::remove_dir_all(&self.0);
+        }
+    }
+
+    /// Create a minimal project dir loadable by `Project::load` and return it
+    /// together with the wasm output path so the caller can populate it.
+    fn temp_project(suffix: &str) -> (TempDir, PathBuf) {
+        let tmp = TempDir::new(suffix);
+        let dir = tmp.path();
+        // Minimal Cargo.toml that `Project::load` (= parse_crate_name) can read.
+        fs::write(
+            dir.join("Cargo.toml"),
+            "[package]\nname = \"testcart\"\nversion = \"0.1.0\"\n",
+        )
+        .unwrap();
+        // Project::wasm_path() = target/wasm32-unknown-unknown/release/<name>.wasm
+        let wasm_dir = dir.join("target/wasm32-unknown-unknown/release");
+        fs::create_dir_all(&wasm_dir).unwrap();
+        let wasm_path = wasm_dir.join("testcart.wasm");
+        (tmp, wasm_path)
+    }
+
+    #[test]
+    fn wasm_size_warnings_absent_when_wasm_missing() {
+        let (tmp, _wasm_path) = temp_project("missing");
+        // No wasm file — should return an empty vec, not panic.
+        assert!(wasm_size_warnings(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn wasm_size_warnings_absent_for_small_wasm() {
+        let (tmp, wasm_path) = temp_project("small");
+        fs::write(&wasm_path, vec![0u8; 100]).unwrap();
+        assert!(wasm_size_warnings(tmp.path()).is_empty());
+    }
+
+    #[test]
+    fn wasm_size_warnings_fires_for_oversized_wasm() {
+        let (tmp, wasm_path) = temp_project("oversized");
+        fs::write(
+            &wasm_path,
+            vec![0u8; rico8_runtime::cart::MAX_WASM_SIZE + 1],
+        )
+        .unwrap();
+        let warnings = wasm_size_warnings(tmp.path());
+        assert!(
+            !warnings.is_empty(),
+            "expected a warning for oversized wasm"
+        );
+        assert!(
+            warnings[0].contains("128K"),
+            "warning should mention 128K: {}",
+            warnings[0]
+        );
+    }
 
     #[test]
     fn extracts_error_lines() {

@@ -122,6 +122,9 @@ fn headless_build(dir: &Path) -> Result<()> {
         project.wasm_path().display(),
         result.duration.as_secs_f32()
     );
+    for line in &result.warnings {
+        eprintln!("{line}");
+    }
     Ok(())
 }
 
