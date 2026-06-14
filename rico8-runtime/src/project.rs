@@ -103,6 +103,16 @@ panic = "abort"
         )?;
         fs::write(dir.join("src/lib.rs"), TEMPLATE_CODE)?;
         fs::write(dir.join(".gitignore"), "/target\n")?;
+        fs::create_dir_all(dir.join(".cargo"))?;
+        fs::write(
+            dir.join(".cargo/config.toml"),
+            // Shrink LLVM's 1 MiB shadow-stack reserve to 32 KiB so the cart's
+            // initial linear memory fits the 128 K runtime cap. Target-scoped so
+            // host tooling is unaffected. The console injects the same flag via
+            // RUSTFLAGS when it builds; this keeps plain `cargo build` consistent.
+            "[target.wasm32-unknown-unknown]\n\
+             rustflags = [\"-C\", \"link-arg=-z\", \"-C\", \"link-arg=stack-size=32768\"]\n",
+        )?;
         let mut assets = Assets::default();
         assets.meta.name = name.clone();
         let project = Self {
@@ -238,5 +248,16 @@ mod tests {
         assert!(decode_assets(b"NOTRICO8").is_err());
         let bytes = encode_assets(&Assets::default()).unwrap();
         assert!(decode_assets(&bytes).is_ok());
+    }
+
+    #[test]
+    fn create_writes_cargo_config_with_stack_size() {
+        let dir = std::env::temp_dir().join(format!("rico8_cfg_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        Project::create(&dir.join("g"), "g", Path::new("/tmp/sdk")).unwrap();
+        let cfg = fs::read_to_string(dir.join("g/.cargo/config.toml")).unwrap();
+        assert!(cfg.contains("wasm32-unknown-unknown"), "config: {cfg}");
+        assert!(cfg.contains("stack-size=32768"), "config: {cfg}");
+        fs::remove_dir_all(&dir).unwrap();
     }
 }

@@ -45,10 +45,19 @@ pub fn spawn_build(project_dir: &Path) -> BuildJob {
 
 /// Run the build synchronously (used by headless `rico8 build`).
 pub fn run_build(dir: &Path, started: Instant) -> BuildResult {
+    // Shrink the shadow-stack reserve (see project template) so the cart fits
+    // the 128 K memory cap. Appended after any inherited RUSTFLAGS so ours win.
+    let rustflags = match std::env::var("RUSTFLAGS") {
+        Ok(existing) if !existing.is_empty() => {
+            format!("{existing} -C link-arg=-z -C link-arg=stack-size=32768")
+        }
+        _ => "-C link-arg=-z -C link-arg=stack-size=32768".to_string(),
+    };
     let output = Command::new("cargo")
         .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
         .current_dir(dir)
         .env("CARGO_TERM_COLOR", "never")
+        .env("RUSTFLAGS", rustflags)
         .output();
     match output {
         Ok(out) if out.status.success() => BuildResult {
