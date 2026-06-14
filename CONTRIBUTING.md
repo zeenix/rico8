@@ -35,8 +35,7 @@ Same rules apply here as for bug reports and feature requests. Plus:
 
 Commit subjects are prefixed with a single [gitmoji](https://gitmoji.dev/) emoji that categorizes
 the change (`🐛` for a bug fix, `✨` for a new feature, `📝` for docs, `♻️` for a refactor, and so
-on).
-The subject then reads as a normal sentence after the emoji:
+on). The subject then reads as a normal sentence after the emoji:
 
 ```text
 🐛 Stop the synth clipping when two channels peak together
