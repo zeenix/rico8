@@ -177,7 +177,9 @@ pub fn decode_assets(bytes: &[u8]) -> Result<Assets> {
     let body = bytes
         .strip_prefix(ASSETS_MAGIC.as_slice())
         .ok_or_else(|| anyhow!("assets.rico8 has an unknown header"))?;
-    Ok(postcard::from_bytes(body)?)
+    let assets: Assets = postcard::from_bytes(body)?;
+    crate::assets::validate(&assets)?;
+    Ok(assets)
 }
 
 fn sanitize_name(name: &str) -> Result<String> {

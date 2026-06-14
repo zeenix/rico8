@@ -5,6 +5,7 @@
 //! cartridge format serializes them. Sizes are fixed on purpose: the
 //! constraints are part of the console's identity.
 
+use anyhow::{bail, Result};
 use serde::{Deserialize, Serialize};
 
 /// Side length of one sprite in pixels.
@@ -302,9 +303,57 @@ impl Default for Assets {
     }
 }
 
+/// Check that a bundle carries exactly the fixed-size collections RICO-8
+/// requires. The editors only ever build correctly-sized bundles, but a
+/// corrupted or hand-edited `assets.rico8` (or cart) can deserialize with
+/// mismatched lengths; running such a bundle would panic the renderer on
+/// an out-of-bounds sprite, map or label read. Every loader validates here
+/// so a bad bundle fails with a clear message instead of crashing.
+pub fn validate(assets: &Assets) -> Result<()> {
+    if assets.sprites.pixels.len() != SHEET_W * SHEET_H
+        || assets.sprites.flags.len() != SPRITE_COUNT
+        || assets.map.tiles.len() != MAP_W * MAP_H
+        || assets.sfx.len() != SFX_COUNT
+        || assets.music.len() != MUSIC_COUNT
+    {
+        bail!("cart assets have invalid dimensions");
+    }
+    if let Some(label) = &assets.label {
+        if label.len() != SHEET_W * SHEET_H {
+            bail!("cart label has invalid dimensions");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn validate_accepts_default_and_rejects_bad_dimensions() {
+        assert!(validate(&Assets::default()).is_ok());
+
+        let mut a = Assets::default();
+        a.sprites.pixels.truncate(10);
+        assert!(validate(&a).is_err(), "short sprite sheet must be rejected");
+
+        let mut a = Assets::default();
+        a.sfx.pop();
+        assert!(validate(&a).is_err(), "missing sfx slot must be rejected");
+
+        let a = Assets {
+            label: Some(vec![0; 8]),
+            ..Default::default()
+        };
+        assert!(validate(&a).is_err(), "wrong-size label must be rejected");
+
+        let a = Assets {
+            label: Some(vec![0; SHEET_W * SHEET_H]),
+            ..Default::default()
+        };
+        assert!(validate(&a).is_ok(), "correctly-sized label is allowed");
+    }
 
     #[test]
     fn assets_postcard_roundtrip() {
