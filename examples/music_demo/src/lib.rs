@@ -2,12 +2,12 @@
 
 use rico8::*;
 
-struct Game {
+struct MusicDemo {
     playing: bool,
     t: u32,
 }
 
-impl Rico8Game for Game {
+impl Game for MusicDemo {
     fn update(&mut self, ctx: &mut Context) {
         self.t += 1;
         if ctx.btnp(Button::O) {
@@ -41,7 +41,7 @@ impl Rico8Game for Game {
     }
 }
 
-rico8::game!(Game {
+rico8::game!(MusicDemo {
     playing: false,
     t: 0,
 });

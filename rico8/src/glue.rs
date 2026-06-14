@@ -1,6 +1,6 @@
 //! Lifecycle glue between the `game!` macro exports and the game trait.
 
-use crate::{Context, Graphics, Rico8Game};
+use crate::{Context, Game, Graphics};
 
 /// Implementation details of the [`game!`](crate::game) macro. Not part
 /// of the public API; do not call directly.
@@ -22,7 +22,7 @@ pub mod __internal {
 
     impl<G> Slot<G>
     where
-        G: Rico8Game,
+        G: Game,
     {
         /// An empty slot, filled later by [`init`](Slot::init).
         ///
@@ -72,7 +72,7 @@ pub mod __internal {
 
     impl<G> Default for Slot<G>
     where
-        G: Rico8Game,
+        G: Game,
     {
         fn default() -> Self {
             Self::new()

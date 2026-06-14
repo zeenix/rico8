@@ -19,12 +19,12 @@ formats are original.
 ```rust
 use rico8::*;
 
-struct Game {
+struct MyGame {
     x: i32,
     y: i32,
 }
 
-impl Rico8Game for Game {
+impl Game for MyGame {
     fn update(&mut self, ctx: &mut Context) {
         if ctx.btn(Button::Right) {
             self.x += 1;
@@ -37,7 +37,7 @@ impl Rico8Game for Game {
     }
 }
 
-rico8::game!(Game { x: 64, y: 64 });
+rico8::game!(MyGame { x: 64, y: 64 });
 ```
 
 ## The console

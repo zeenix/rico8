@@ -2,7 +2,7 @@
 
 use rico8::*;
 
-struct Game {
+struct SfxDemo {
     last: Option<u8>,
     t: u32,
 }
@@ -14,7 +14,7 @@ const PADS: [(Button, u8, &str); 4] = [
     (Button::Down, 3, "hurt"),
 ];
 
-impl Rico8Game for Game {
+impl Game for SfxDemo {
     fn update(&mut self, ctx: &mut Context) {
         self.t += 1;
         for (btn, sfx, _) in PADS {
@@ -39,4 +39,4 @@ impl Rico8Game for Game {
     }
 }
 
-rico8::game!(Game { last: None, t: 0 });
+rico8::game!(SfxDemo { last: None, t: 0 });

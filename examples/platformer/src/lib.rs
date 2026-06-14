@@ -3,7 +3,7 @@
 
 use rico8::*;
 
-struct Game {
+struct Platformer {
     // Fixed-point position/velocity (1/16 pixel).
     x: i32,
     y: i32,
@@ -17,7 +17,7 @@ struct Game {
 
 const SOLID: u8 = 0;
 
-impl Game {
+impl Platformer {
     fn solid_at(&self, ctx: &Context, px: i32, py: i32) -> bool {
         let tile = ctx.mget(px / 8, py / 8);
         ctx.fget_flag(SpriteId(tile), SOLID)
@@ -32,7 +32,7 @@ impl Game {
     }
 }
 
-impl Rico8Game for Game {
+impl Game for Platformer {
     fn update(&mut self, ctx: &mut Context) {
         self.frame += 1;
         // Horizontal movement.
@@ -94,7 +94,7 @@ impl Rico8Game for Game {
     }
 }
 
-rico8::game!(Game {
+rico8::game!(Platformer {
     x: 16 * 16,
     y: 16 * 80,
     vx: 0,
