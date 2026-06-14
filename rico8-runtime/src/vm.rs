@@ -13,8 +13,12 @@ use crate::input::InputState;
 use anyhow::{anyhow, Context as _, Result};
 use wasmi::{Caller, Config, Engine, Instance, Linker, Module, Store, TypedFunc};
 
-/// Logical frames per second for cart update/draw.
-pub const FPS: u32 = 30;
+/// A cart's logical frames per second when it doesn't say otherwise.
+pub const DEFAULT_FPS: u32 = 60;
+
+/// The console's own tick rate: editors, menus and cart pickers. Independent
+/// of the cart rate, which the cart chooses via `rico8_fps`.
+pub const UI_FPS: u32 = 30;
 
 /// Fuel budget for a single `update` or `draw` call. Roughly one fuel per
 /// instruction; this is far more than a frame should need, so hitting it
@@ -33,6 +37,9 @@ pub struct HostState {
     /// Message from the cart's panic hook, captured just before the trap.
     pub panic_message: Option<String>,
     pub frame: u64,
+    /// The cart's logical frames per second (30 or 60), from its `rico8_fps`
+    /// export. Drives `time()` and the host's update/draw cadence.
+    pub fps: u32,
     rng: u64,
 }
 
@@ -47,6 +54,7 @@ impl HostState {
             logs: Vec::new(),
             panic_message: None,
             frame: 0,
+            fps: DEFAULT_FPS,
             rng: 0x2545_f491_4f6c_dd1d,
         }
     }
@@ -264,7 +272,8 @@ impl GameVm {
             c.data().audio.play_music(n)
         });
         link!(linker, "time", |c: Caller<'_, HostState>| -> f32 {
-            c.data().frame as f32 / FPS as f32
+            let st = c.data();
+            st.frame as f32 / st.fps as f32
         });
         link!(linker, "rnd", |mut c: Caller<'_, HostState>| -> f32 {
             c.data_mut().next_rand()
@@ -306,7 +315,26 @@ impl GameVm {
             draw,
         };
         vm.call("init", init).map_err(|e| anyhow!(e.to_string()))?;
+        vm.store.data_mut().fps = vm.query_fps();
         Ok(vm)
+    }
+
+    /// Read the cart's `rico8_fps` export. The SDK emits it from every cart;
+    /// 30 and 60 are honored, and anything else (or a hand-written cart with
+    /// no such export) falls back to the default.
+    fn query_fps(&mut self) -> u32 {
+        let Ok(func) = self
+            ._instance
+            .get_typed_func::<(), u32>(&self.store, "rico8_fps")
+        else {
+            return DEFAULT_FPS;
+        };
+        self.store.set_fuel(FUEL_PER_CALL).ok();
+        match func.call(&mut self.store, ()) {
+            Ok(30) => 30,
+            Ok(60) => 60,
+            _ => DEFAULT_FPS,
+        }
     }
 
     fn call(
@@ -342,6 +370,11 @@ impl GameVm {
     /// Call `rico8_draw`.
     pub fn call_draw(&mut self) -> std::result::Result<(), RuntimeError> {
         self.call("draw", self.draw)
+    }
+
+    /// The cart's logical frame rate: 30, or 60 if it opted in.
+    pub fn fps(&self) -> u32 {
+        self.store.data().fps
     }
 
     pub fn state(&self) -> &HostState {
@@ -389,6 +422,14 @@ mod tests {
         )
     "#;
 
+    const FPS30_CART: &str = r#"
+        (module
+          (func (export "rico8_init"))
+          (func (export "rico8_fps") (result i32) (i32.const 30))
+          (func (export "rico8_update"))
+          (func (export "rico8_draw")))
+    "#;
+
     fn load_test_vm(wat_src: &str) -> Result<GameVm> {
         let wasm = wat::parse_str(wat_src).unwrap();
         GameVm::load(&wasm, &Assets::default(), AudioHandle::dummy())
@@ -409,6 +450,20 @@ mod tests {
         vm.call_update().unwrap();
         vm.call_draw().unwrap();
         assert_eq!(vm.state().fb.pget(6, 7), 8, "btn(right) moved pixel");
+    }
+
+    #[test]
+    fn default_fps_is_60() {
+        // A cart with no rico8_fps export (e.g. hand-written WAT) takes the
+        // default rate.
+        let vm = load_test_vm(TEST_CART).unwrap();
+        assert_eq!(vm.fps(), 60);
+    }
+
+    #[test]
+    fn cart_can_select_30fps() {
+        let vm = load_test_vm(FPS30_CART).unwrap();
+        assert_eq!(vm.fps(), 30);
     }
 
     #[test]

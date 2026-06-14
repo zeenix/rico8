@@ -24,7 +24,7 @@ use rico8_runtime::cart;
 use rico8_runtime::fb::{Framebuffer, HEIGHT, WIDTH};
 use rico8_runtime::palette::col;
 use rico8_runtime::ui;
-use rico8_runtime::vm::{GameVm, FPS};
+use rico8_runtime::vm::{GameVm, UI_FPS};
 use sdl2::controller::{Button as CButton, GameController};
 use sdl2::event::Event;
 use sdl2::joystick::{HatState, Joystick};
@@ -35,7 +35,21 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 const SAMPLE_RATE: i32 = 44100;
-const FRAME: Duration = Duration::from_nanos(1_000_000_000 / FPS as u64);
+const FRAME: Duration = Duration::from_nanos(1_000_000_000 / UI_FPS as u64);
+
+/// One frame's wall-clock budget at a given logical frame rate.
+fn frame_duration(fps: u32) -> Duration {
+    Duration::from_nanos(1_000_000_000 / fps.max(1) as u64)
+}
+
+/// Draw the fps meter in the top-left: measured frames per second over the
+/// cart's target rate, e.g. `60/60`.
+fn draw_fps_overlay(fb: &mut Framebuffer, measured: f32, target: u32) {
+    let text = format!("{}/{}", measured.round() as u32, target);
+    let w = text.len() as i32 * 4 + 1;
+    fb.rectfill(0, 0, w, 6, col::BLACK);
+    fb.print(&text, 1, 1, col::YELLOW);
+}
 
 fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -333,6 +347,10 @@ impl App {
             Ok(vm) => Some(vm),
             Err(e) => return self.show_error(&format!("boot failed\n{e}")),
         };
+        // Carts run at their selected rate (30 or 60); the picker and error
+        // screens stay at 30.
+        let fps = vm.as_ref().map(GameVm::fps).unwrap_or(UI_FPS);
+        let frame = frame_duration(fps);
         eprintln!("rico8-player: running {}", path.display());
         let mut error_fb: Option<Framebuffer> = None;
         let mut rgba = vec![0u8; WIDTH as usize * HEIGHT as usize * 4];
@@ -346,6 +364,13 @@ impl App {
         // the pad isn't a recognized GameController (no Select/Start).
         let mut held = [false; 6];
         let mut combo_frames = 0u32;
+        // Wall-clock fps meter (F1 toggles it). The cart can't measure this
+        // itself — `time()` is a logical clock — so we count real presented
+        // frames over a moving window here on the host.
+        let mut show_fps = false;
+        let mut fps_frames = 0u32;
+        let mut fps_t0 = Instant::now();
+        let mut fps_val = 0.0f32;
 
         loop {
             for event in self.events.poll_iter() {
@@ -439,6 +464,9 @@ impl App {
                         if k == Keycode::Escape {
                             return Ok(Flow::BackToPicker);
                         }
+                        if k == Keycode::F1 {
+                            show_fps = !show_fps;
+                        }
                         if let Some(b) = Self::key_button(k) {
                             held[b] = true;
                             if let Some(vm) = vm.as_mut() {
@@ -465,7 +493,7 @@ impl App {
             // works on recognized GameControllers; this works on any pad.
             if held[4] && held[5] {
                 combo_frames += 1;
-                if combo_frames >= FPS {
+                if combo_frames >= fps {
                     return Ok(Flow::BackToPicker);
                 }
             } else {
@@ -482,6 +510,11 @@ impl App {
                     vm = None;
                 }
             }
+            if show_fps {
+                if let Some(v) = vm.as_mut() {
+                    draw_fps_overlay(&mut v.state_mut().fb, fps_val, fps);
+                }
+            }
             if let Some(v) = &vm {
                 self.present(&v.state().fb, &mut rgba)?;
             } else if let Some(fb) = &error_fb {
@@ -494,8 +527,17 @@ impl App {
                     return Ok(Flow::Quit);
                 }
             }
-            next += FRAME;
+            next += frame;
             let now = Instant::now();
+
+            // Measure presented frames over ~0.5 s windows.
+            fps_frames += 1;
+            let elapsed = now.duration_since(fps_t0);
+            if elapsed >= Duration::from_millis(500) {
+                fps_val = fps_frames as f32 / elapsed.as_secs_f32();
+                fps_frames = 0;
+                fps_t0 = now;
+            }
             if next > now {
                 std::thread::sleep(next - now);
             } else {

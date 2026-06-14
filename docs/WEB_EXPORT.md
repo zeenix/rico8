@@ -30,7 +30,7 @@ key events to the six buttons, and feed synth samples to WebAudio via
 a short scheduled-buffer queue.
 
 Yes, the cart's wasm runs in wasmi *inside* the player's wasm. The
-double interpretation costs far less than a 128x128/30 fps cart can
+double interpretation costs far less than a 128x128/60 fps cart can
 spend, and it buys bit-identical behavior with the desktop console —
 same rasterizer, same font, same synth, same error screens.
 
