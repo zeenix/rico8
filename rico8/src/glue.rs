@@ -34,9 +34,11 @@ pub mod __internal {
 
         /// Construct and store the game instance.
         pub fn init(&self, make: impl FnOnce() -> G) {
-            // Forward panics to the console so carts die with a readable
-            // error screen instead of a silent trap.
-            std::panic::set_hook(Box::new(|info| {
+            // On `std`, forward panics to the console so carts die with a
+            // readable error screen instead of a silent trap. On `no_std` the
+            // crate-level panic handler below does the same job.
+            #[cfg(feature = "std")]
+            std::panic::set_hook(std::boxed::Box::new(|info| {
                 let msg = info.to_string();
                 unsafe { crate::ffi::panic(msg.as_ptr(), msg.len() as u32) };
             }));
@@ -78,4 +80,41 @@ pub mod __internal {
             Self::new()
         }
     }
+}
+
+/// Fixed 256-byte sink so the `no_std` panic handler can format a message
+/// without an allocator. Writes past the end are dropped.
+#[cfg(not(feature = "std"))]
+struct PanicBuf {
+    bytes: [u8; 256],
+    len: usize,
+}
+
+#[cfg(not(feature = "std"))]
+impl core::fmt::Write for PanicBuf {
+    fn write_str(&mut self, s: &str) -> core::fmt::Result {
+        let room = self.bytes.len() - self.len;
+        let take = room.min(s.len());
+        self.bytes[self.len..self.len + take].copy_from_slice(&s.as_bytes()[..take]);
+        self.len += take;
+        Ok(())
+    }
+}
+
+/// Capture the panic message and hand it to the host, then trap. Mirrors the
+/// `std` `set_hook` path so both kinds of cart show the same error screen.
+#[cfg(not(feature = "std"))]
+#[panic_handler]
+fn handle_panic(info: &core::panic::PanicInfo) -> ! {
+    use core::fmt::Write;
+    let mut buf = PanicBuf {
+        bytes: [0; 256],
+        len: 0,
+    };
+    let _ = write!(buf, "{info}");
+    unsafe { crate::ffi::panic(buf.bytes.as_ptr(), buf.len as u32) };
+    #[cfg(target_arch = "wasm32")]
+    core::arch::wasm32::unreachable();
+    #[cfg(not(target_arch = "wasm32"))]
+    loop {}
 }

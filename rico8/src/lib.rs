@@ -32,6 +32,7 @@
 //! palette has 16 fixed colors, `update`/`draw` run at 60 fps (or 30,
 //! if the game sets [`Game::FRAME_RATE`]). The constraints
 //! are the point.
+#![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod ffi;
 mod glue;

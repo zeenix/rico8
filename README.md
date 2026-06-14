@@ -80,6 +80,12 @@ label. Type `keys` in the console for the full list.
 | framerate  | 60 fps (or 30, the cart's choice)     |
 | cart       | one PNG file                          |
 
+Carts also have runtime limits: 128 KiB cart size, 128 KiB RAM, and a 128 K
+per-frame work budget. By default carts are `#![no_std]` with `heapless` for
+fixed-size collections — that's what `rico8 new` scaffolds and what every
+game example uses, keeping carts tiny. Full details in
+[docs/LIMITS.md](docs/LIMITS.md).
+
 ## PNG cartridges
 
 `export` produces a real PNG image — cartridge art, label, title — with

@@ -33,6 +33,10 @@ const CHUNK_TYPE: [u8; 4] = *b"rcRt";
 const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
 /// Decompression bomb guard.
 const MAX_PAYLOAD: usize = 64 * 1024 * 1024;
+/// Hard cap on a cart's compiled wasm module: 128 K, shared with the memory
+/// and fuel limits. Keeps carts small and shareable and rations dependency
+/// bloat. Enforced on both save and load via [`validate`].
+pub const MAX_WASM_SIZE: usize = 131_072;
 
 /// Everything inside a cartridge.
 #[derive(Serialize, Deserialize)]
@@ -164,6 +168,13 @@ pub fn decode(bytes: &[u8]) -> Result<Cart> {
 fn validate(cart: &Cart) -> Result<()> {
     if !cart.wasm.starts_with(b"\0asm") {
         bail!("cart payload is not a wasm module");
+    }
+    if cart.wasm.len() > MAX_WASM_SIZE {
+        bail!(
+            "cart wasm is {} bytes; the limit is {} (128K)",
+            cart.wasm.len(),
+            MAX_WASM_SIZE
+        );
     }
     let a = &cart.assets;
     if a.sprites.pixels.len() != SHEET_W * SHEET_H
@@ -482,6 +493,40 @@ mod tests {
         let mut cart = test_cart();
         cart.wasm = b"not wasm".to_vec();
         assert!(encode(&cart).is_err());
+    }
+
+    #[test]
+    fn oversized_wasm_is_rejected() {
+        let mut cart = test_cart();
+        cart.wasm = b"\0asm\x01\0\0\0".to_vec();
+        cart.wasm.resize(MAX_WASM_SIZE + 1, 0);
+        assert!(
+            encode(&cart).is_err(),
+            "wasm over 128K must be rejected at export"
+        );
+    }
+
+    #[test]
+    fn max_size_wasm_is_accepted() {
+        let mut cart = test_cart();
+        cart.wasm = b"\0asm\x01\0\0\0".to_vec();
+        cart.wasm.resize(MAX_WASM_SIZE, 0);
+        assert!(
+            encode(&cart).is_ok(),
+            "wasm at exactly 128K must be accepted"
+        );
+    }
+
+    #[test]
+    fn validate_rejects_oversized_wasm() {
+        let mut cart = test_cart();
+        cart.wasm = b"\0asm\x01\0\0\0".to_vec();
+        cart.wasm.resize(MAX_WASM_SIZE + 1, 0);
+        let err = validate(&cart).unwrap_err().to_string();
+        assert!(
+            err.contains("the limit is"),
+            "expected size-gate message, got: {err}"
+        );
     }
 
     #[test]

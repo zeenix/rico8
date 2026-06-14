@@ -944,6 +944,9 @@ impl Shell {
                     let msg = format!("build ok ({:.1}s)", result.duration.as_secs_f32());
                     self.say(&msg, col::GREEN);
                     self.toast(&msg, col::GREEN, 2.0);
+                    for w in &result.warnings {
+                        self.say(w, col::ORANGE);
+                    }
                     if self.run_after_build {
                         self.run_after_build = false;
                         if let Err(e) = self.start_vm_from_loaded() {

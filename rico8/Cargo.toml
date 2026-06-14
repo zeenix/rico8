@@ -6,6 +6,13 @@ license.workspace = true
 repository.workspace = true
 description = "RICO-8 fantasy console SDK: write carts in Rust, compile to wasm32-unknown-unknown"
 
+[features]
+default = ["std"]
+# When disabled the SDK is `#![no_std]` and provides a panic handler, so carts
+# can be allocation-free with `heapless`. Enabled by default; do-nothing carts
+# stay on `std`.
+std = []
+
 # Deliberately dependency-free: game carts build for
 # wasm32-unknown-unknown against this crate and nothing else.
 [dependencies]
