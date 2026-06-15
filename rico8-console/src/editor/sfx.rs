@@ -184,76 +184,122 @@ impl SfxEditor {
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets, audio: &AudioHandle) {
+        let _ = audio;
         let m = *mouse;
-        if !m.left_pressed && !m.right_pressed {
+        // Press-edge controls: buttons, spinners, selectors, palette.
+        if (m.left_pressed || m.right_pressed) && self.handle_press(&m, assets) {
             return;
         }
-        let delta: i32 = if m.right_pressed { -1 } else { 1 };
-
-        // Top-left mode buttons (drawn by the shell) toggle the view.
-        if m.left_pressed && m.y < 8 {
-            if m.over(4, 0, 12, 7) {
-                self.mode = SfxMode::Pitch;
-                return;
-            } else if m.over(13, 0, 22, 7) {
-                self.mode = SfxMode::Tracker;
-                return;
+        // Click-and-drag drawing on the graph / volume strip / wave canvas.
+        if m.left {
+            match self.mode {
+                SfxMode::Pitch => self.pitch_draw(&m, assets),
+                SfxMode::Wave => self.wave_draw(&m, assets),
+                SfxMode::Tracker => {}
             }
-        }
-
-        // Shared header: sfx selector, speed, loop/len, the wave-designer toggle.
-        if m.over(3, 9, 23, 16) {
-            self.sfx = (self.sfx as i32 + delta).rem_euclid(64) as usize;
-            return;
-        } else if m.over(49, 9, 59, 16) {
-            let s = &mut assets.sfx[self.sfx];
-            s.speed = (s.speed as i32 + delta).clamp(1, 255) as u8;
-            return;
-        } else if m.over(90, 9, 100, 16) {
-            let s = &mut assets.sfx[self.sfx];
-            s.loop_start = (s.loop_start as i32 + delta).clamp(0, 31) as u8;
-            return;
-        } else if m.over(104, 9, 114, 16) {
-            let s = &mut assets.sfx[self.sfx];
-            s.loop_end = (s.loop_end as i32 + delta).clamp(0, 32) as u8;
-            return;
-        } else if self.sfx < 8 && m.over(118, 9, 126, 16) && m.left_pressed {
-            self.mode = SfxMode::Wave;
-            return;
-        }
-
-        match self.mode {
-            SfxMode::Pitch => self.pitch_tick(&m, assets, audio),
-            SfxMode::Tracker => self.tracker_tick(&m, assets, delta),
-            SfxMode::Wave => self.wave_tick(&m, assets),
         }
     }
 
-    fn pitch_tick(&mut self, m: &Mouse, assets: &mut Assets, audio: &AudioHandle) {
-        // Waveform palette: click selects the drawing instrument.
-        for w in 0..8u8 {
-            let x = 46 + w as i32 * 9;
-            if m.over(x, 18, x + 7, 24) && m.left_pressed {
-                self.wave_sel = w;
-                return;
+    /// Handle a press on a button/spinner/selector. Returns `true` when it
+    /// consumed the click (so drag-drawing is skipped).
+    fn handle_press(&mut self, m: &Mouse, assets: &mut Assets) -> bool {
+        let delta: i32 = if m.right_pressed { -1 } else { 1 };
+        // Top-left mode buttons (drawn by the shell).
+        if m.left_pressed && m.y < 8 {
+            if m.over(4, 0, 12, 7) {
+                self.mode = SfxMode::Pitch;
+                return true;
+            } else if m.over(13, 0, 22, 7) {
+                self.mode = SfxMode::Tracker;
+                return true;
             }
         }
-        let _ = audio;
+        // SFX selector: left arrow decrements, right arrow increments, and a
+        // click on the number itself nudges by the click's direction.
+        if m.left_pressed && m.over(4, 9, 8, 16) {
+            self.sfx = (self.sfx + 63) % 64;
+            return true;
+        } else if m.left_pressed && m.over(20, 9, 25, 16) {
+            self.sfx = (self.sfx + 1) % 64;
+            return true;
+        } else if m.over(9, 9, 19, 16) {
+            self.sfx = (self.sfx as i32 + delta).rem_euclid(64) as usize;
+            return true;
+        } else if m.over(49, 9, 59, 16) {
+            let s = &mut assets.sfx[self.sfx];
+            s.speed = (s.speed as i32 + delta).clamp(1, 255) as u8;
+            return true;
+        } else if m.over(90, 9, 100, 16) {
+            let s = &mut assets.sfx[self.sfx];
+            s.loop_start = (s.loop_start as i32 + delta).clamp(0, 31) as u8;
+            return true;
+        } else if m.over(104, 9, 114, 16) {
+            let s = &mut assets.sfx[self.sfx];
+            s.loop_end = (s.loop_end as i32 + delta).clamp(0, 32) as u8;
+            return true;
+        } else if self.sfx < 8 && m.left_pressed && m.over(118, 9, 126, 16) {
+            // The wave toggle flips between the wave designer and pitch view.
+            self.mode = if self.mode == SfxMode::Wave {
+                SfxMode::Pitch
+            } else {
+                SfxMode::Wave
+            };
+            return true;
+        }
+        match self.mode {
+            SfxMode::Pitch => {
+                // Palette: click selects the drawing instrument.
+                for w in 0..8u8 {
+                    let x = 46 + w as i32 * 9;
+                    if m.left_pressed && m.over(x, 18, x + 7, 24) {
+                        self.wave_sel = w;
+                        return true;
+                    }
+                }
+                // Right-click in the graph grabs that note's instrument.
+                let step = (m.x - 3) / 4;
+                if m.right_pressed
+                    && (0..SFX_LEN as i32).contains(&step)
+                    && (G_TOP..=G_BOT).contains(&m.y)
+                {
+                    if let Some(slot) = assets.sfx[self.sfx].notes[step as usize].instrument() {
+                        self.wave_sel = slot;
+                    }
+                    return true;
+                }
+                false
+            }
+            SfxMode::Tracker => {
+                self.tracker_tick(m, assets, delta);
+                true
+            }
+            SfxMode::Wave => {
+                // bass toggle under the canvas.
+                if m.left_pressed && m.over(4, WAVE_BOT + 3, 28, WAVE_BOT + 9) {
+                    let s = &mut assets.sfx[self.sfx];
+                    let mut w = s.custom_wave.unwrap_or(CustomWave {
+                        samples: [0; SFX_LEN],
+                        bass: false,
+                    });
+                    w.bass = !w.bass;
+                    s.custom_wave = Some(w);
+                    return true;
+                }
+                false
+            }
+        }
+    }
+
+    /// Drag on the pitch graph (sets pitch with the selected instrument) or on
+    /// the volume strip (sets volume).
+    fn pitch_draw(&mut self, m: &Mouse, assets: &mut Assets) {
         let step = (m.x - 3) / 4;
         if !(0..SFX_LEN as i32).contains(&step) {
             return;
         }
         let note = &mut assets.sfx[self.sfx].notes[step as usize];
-        // Drag in the graph sets pitch; right-click grabs the instrument.
         if (G_TOP..=G_BOT).contains(&m.y) {
-            if m.right_pressed {
-                if let Some(slot) = note.instrument() {
-                    self.wave_sel = slot;
-                }
-                return;
-            }
-            let pitch = ((G_BOT - m.y) * 63 / (G_BOT - G_TOP)).clamp(0, 63) as u8;
-            note.pitch = pitch;
+            note.pitch = ((G_BOT - m.y) * 63 / (G_BOT - G_TOP)).clamp(0, 63) as u8;
             if note.volume == 0 {
                 note.volume = 5;
             }
@@ -261,6 +307,24 @@ impl SfxEditor {
         } else if (V_TOP..=V_BOT).contains(&m.y) {
             note.volume = ((V_BOT - m.y) * 7 / (V_BOT - V_TOP)).clamp(0, 7) as u8;
         }
+    }
+
+    /// Drag on the wave-designer canvas to draw the waveform samples.
+    fn wave_draw(&mut self, m: &Mouse, assets: &mut Assets) {
+        let step = (m.x - 3) / 4;
+        if self.sfx >= 8
+            || !(0..SFX_LEN as i32).contains(&step)
+            || !(WAVE_TOP..=WAVE_BOT).contains(&m.y)
+        {
+            return;
+        }
+        let mid = (WAVE_TOP + WAVE_BOT) / 2;
+        let value = ((mid - m.y) * 16 / ((WAVE_BOT - WAVE_TOP) / 2)).clamp(-16, 15) as i8;
+        let w = assets.sfx[self.sfx].custom_wave.get_or_insert(CustomWave {
+            samples: [0; SFX_LEN],
+            bass: false,
+        });
+        w.samples[step as usize] = value;
     }
 
     fn tracker_tick(&mut self, m: &Mouse, assets: &mut Assets, delta: i32) {
@@ -292,34 +356,6 @@ impl SfxEditor {
                 };
             }
         }
-    }
-
-    fn wave_tick(&mut self, m: &Mouse, assets: &mut Assets) {
-        if self.sfx >= 8 {
-            return;
-        }
-        let step = (m.x - 3) / 4;
-        if !(0..SFX_LEN as i32).contains(&step) || !(WAVE_TOP..=WAVE_BOT).contains(&m.y) {
-            // The bass toggle sits under the canvas.
-            if m.over(4, WAVE_BOT + 3, 28, WAVE_BOT + 9) && m.left_pressed {
-                let s = &mut assets.sfx[self.sfx];
-                let mut w = s.custom_wave.unwrap_or(CustomWave {
-                    samples: [0; SFX_LEN],
-                    bass: false,
-                });
-                w.bass = !w.bass;
-                s.custom_wave = Some(w);
-            }
-            return;
-        }
-        let mid = (WAVE_TOP + WAVE_BOT) / 2;
-        let value = ((mid - m.y) * 16 / ((WAVE_BOT - WAVE_TOP) / 2)).clamp(-16, 15) as i8;
-        let s = &mut assets.sfx[self.sfx];
-        let w = s.custom_wave.get_or_insert(CustomWave {
-            samples: [0; SFX_LEN],
-            bass: false,
-        });
-        w.samples[step as usize] = value;
     }
 
     pub fn draw(&self, fb: &mut Framebuffer, assets: &Assets, audio: &AudioHandle) {
@@ -520,11 +556,11 @@ mod tests {
     }
 
     #[test]
-    fn wave_tick_draws_into_custom_wave() {
+    fn wave_drag_draws_into_custom_wave() {
         let mut ed = SfxEditor::new();
         ed.mode = SfxMode::Wave;
         let mut a = Assets::default();
-        // Click near the top of the canvas at step 0 -> a high positive sample.
+        // Drag near the top of the canvas at step 0 -> a high positive sample.
         let m = Mouse {
             x: 4,
             y: WAVE_TOP + 2,
@@ -532,7 +568,7 @@ mod tests {
             left_pressed: true,
             ..Default::default()
         };
-        ed.wave_tick(&m, &mut a);
+        ed.tick(&m, &mut a, &dummy());
         let w = a.sfx[0].custom_wave.expect("wave created");
         assert!(
             w.samples[0] > 8,

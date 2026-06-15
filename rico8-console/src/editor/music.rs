@@ -110,6 +110,11 @@ impl MusicEditor {
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets, audio: &AudioHandle) {
+        // While a song plays, follow the playing pattern so the view scrolls
+        // through patterns and reveals channels that come in on later patterns.
+        if let Some(p) = audio.with_synth(|s| s.playing_pattern()) {
+            self.pattern = p;
+        }
         let m = *mouse;
         if !m.left_pressed && !m.right_pressed {
             return;
@@ -191,17 +196,12 @@ impl MusicEditor {
             fb.print(&format!("{p:02}"), x + 1, 13, c);
         }
         ui::arrow_r(fb, 95, 13, col::PINK);
+        // Flow buttons: the colour itself shows on/off — light blue when the
+        // flag is set, dark blue when not (matching PICO-8).
         ui::blit(fb, 100, 12, &ui::FLOW);
-        // Mark set flow flags with a yellow underline under their button.
-        for (set, bx) in [
-            (pat.loop_start, 102),
-            (pat.loop_back, 109),
-            (pat.stop_at_end, 117),
-        ] {
-            if set {
-                fb.line(bx, 20, bx + 5, 20, col::YELLOW);
-            }
-        }
+        recolor_flow(fb, 100, 108, pat.loop_start);
+        recolor_flow(fb, 109, 116, pat.loop_back);
+        recolor_flow(fb, 117, 126, pat.stop_at_end);
 
         // --- Channels: header + note column ---
         for ch in 0..CHANNELS {
@@ -225,22 +225,43 @@ impl MusicEditor {
             let head = (playing == Some(self.pattern))
                 .then_some(steps[ch])
                 .flatten();
-            let rows = note_rows(sfx.loop_start, sfx.loop_end).min(MAX_ROWS);
-            for row in 0..rows {
+            let total = note_rows(sfx.loop_start, sfx.loop_end);
+            // Scroll the window so the playhead stays visible during playback.
+            let max_first = total.saturating_sub(MAX_ROWS);
+            let first = head.map_or(0, |h| h.saturating_sub(MAX_ROWS / 2).min(max_first));
+            for row in 0..MAX_ROWS {
+                let step = first + row;
+                if step >= total {
+                    break;
+                }
                 let y = GRID_TOP + row as i32 * ROW_PITCH;
-                if row > 0 && row % 4 == 0 {
+                if row > 0 && step.is_multiple_of(4) {
                     for gx in (x + 1..x + PANEL_W).step_by(2) {
                         fb.pset(gx, y - 2, col::DARK_GREY);
                     }
                 }
-                if head == Some(row) {
+                if head == Some(step) {
                     fb.rectfill(x, y - 1, x + PANEL_W, y + 5, col::YELLOW);
                 }
-                ui::note_cell(fb, x, y, sfx.notes[row]);
+                ui::note_cell(fb, x, y, sfx.notes[step]);
             }
         }
 
-        ui::status_bar(fb, "spc play  pgup/dn pattern  x channel");
+        ui::status_bar(fb, "spc play  pgup/dn pat  x ch");
+    }
+}
+
+/// Recolour a flow button's pixels (blue/dark-blue) to show its on/off state:
+/// light blue when `on`, dark blue when off.
+fn recolor_flow(fb: &mut Framebuffer, x0: i32, x1: i32, on: bool) {
+    let to = if on { col::BLUE } else { col::DARK_BLUE };
+    for y in 12..21 {
+        for x in x0..=x1 {
+            let c = fb.pget(x, y);
+            if c == col::BLUE || c == col::DARK_BLUE {
+                fb.pset(x, y, to);
+            }
+        }
     }
 }
 
