@@ -23,8 +23,8 @@
 
 use crate::{
     assets::{
-        self, Assets, MusicPattern, Note, Sfx, MAP_W, MUSIC_COUNT, SFX_COUNT, SFX_LEN, SHEET_H,
-        SHEET_W, SPRITE_COUNT,
+        self, Assets, MapData, MusicPattern, Note, Sfx, MAP_H, MAP_W, MUSIC_COUNT, SFX_COUNT,
+        SFX_LEN, SHEET_H, SHEET_W, SPRITE_COUNT,
     },
     project::Project,
 };
@@ -39,10 +39,13 @@ const PICO8_PNG_H: usize = 205;
 
 /// Size of the addressable cart ROM (gfx + map + flags + music + sfx).
 const ROM_LEN: usize = 0x4300;
-/// Rows the text `__map__` section covers: the top 32 rows only. The bottom
-/// 32 rows of a PICO-8 map alias the shared sprite memory and are left empty
-/// here.
+/// Rows the explicit PICO-8 map covers: the top 32 rows. The bottom 32 rows
+/// alias the shared sprite memory (`0x1000..0x2000`); we bring that region
+/// across as map rows 32..64 too — see [`fill_shared_map`].
 const PICO8_MAP_ROWS: usize = 32;
+/// Start of PICO-8's shared region: the bottom half of the sprite sheet,
+/// which doubles as the bottom 32 rows of the map.
+const SHARED_BASE: usize = 0x1000;
 /// Bytes per SFX in cart memory: 32 notes x 2 + 4 metadata bytes.
 const SFX_MEM_LEN: usize = 68;
 
@@ -183,6 +186,16 @@ fn parse_text(text: &str) -> Result<Assets> {
         }
     }
 
+    // Bring the shared region across as the bottom map rows as well. In the
+    // text format it lives in the bottom 64 gfx rows we just parsed; read it
+    // back as packed bytes (two pixels each, low nibble first).
+    let pixels = assets.sprites.pixels.clone();
+    fill_shared_map(&mut assets.map, |off| {
+        let byte = SHARED_BASE + off;
+        let (row, col) = (byte / 64, (byte % 64) * 2);
+        pixels[row * SHEET_W + col] | (pixels[row * SHEET_W + col + 1] << 4)
+    });
+
     // label: 128x128 hex screenshot, one digit per pixel.
     if !label.is_empty() {
         let mut px = vec![0u8; SHEET_W * SHEET_H];
@@ -213,7 +226,9 @@ fn parse_text(text: &str) -> Result<Assets> {
             }
             *note = Note {
                 pitch: (h[base] << 4 | h[base + 1]) & 0x3f,
-                wave: h[base + 2] & 7,
+                // The waveform hex digit is the full nibble: bit 3 flags a
+                // custom instrument, bits 0-2 the index. Keep it intact.
+                wave: h[base + 2] & 0x0f,
                 volume: h[base + 3] & 7,
                 effect: h[base + 4] & 7,
             };
@@ -282,6 +297,8 @@ fn parse_png(bytes: &[u8]) -> Result<Assets> {
             assets.map.tiles[y * MAP_W + x] = rom[0x2000 + y * MAP_W + x];
         }
     }
+    // The shared region 0x1000..0x2000 doubles as map rows 32..64.
+    fill_shared_map(&mut assets.map, |off| rom[SHARED_BASE + off]);
     // gff 0x3000..0x3100: one flag byte per sprite.
     assets
         .sprites
@@ -319,6 +336,22 @@ fn rom_from_png(bytes: &[u8]) -> Result<Vec<u8>> {
     Ok(rom)
 }
 
+/// Fill map rows 32..64 from PICO-8's shared region. PICO-8 aliases
+/// `0x1000..0x2000` between the bottom half of the sprite sheet and the
+/// bottom 32 rows of the map; a cart uses it for one or the other, with no
+/// flag saying which. RICO-8 de-aliases the two (it has a full 256-sprite
+/// sheet *and* a full 128x64 map), so we bring the region across both ways:
+/// the bytes already populate sprites 128..256, and here they populate the
+/// lower map too. The user keeps whichever their cart actually used and
+/// clears the other. `byte_at(off)` returns the byte at `0x1000 + off`.
+fn fill_shared_map(map: &mut MapData, byte_at: impl Fn(usize) -> u8) {
+    for r in 0..(MAP_H - PICO8_MAP_ROWS) {
+        for x in 0..MAP_W {
+            map.tiles[(PICO8_MAP_ROWS + r) * MAP_W + x] = byte_at(r * MAP_W + x);
+        }
+    }
+}
+
 /// One PICO-8 music pattern from its four cart-memory bytes. The loop/stop
 /// flags ride in the high bit of the first three channel bytes.
 fn music_from_mem(ch: [u8; 4]) -> MusicPattern {
@@ -336,15 +369,19 @@ fn music_from_mem(ch: [u8; 4]) -> MusicPattern {
 }
 
 /// One PICO-8 SFX from its 68 cart-memory bytes: 32 notes of two bytes
-/// (little-endian: pitch 0-5, waveform 6-8, volume 9-11, effect 12-14),
-/// then editor-mode, speed, loop-start and loop-end metadata.
+/// (little-endian: pitch 0-5, waveform 6-8, volume 9-11, effect 12-14,
+/// custom-instrument flag 15), then editor-mode, speed, loop-start and
+/// loop-end metadata.
 fn sfx_from_mem(b: &[u8]) -> Sfx {
     let mut notes = [Note::default(); SFX_LEN];
     for (i, note) in notes.iter_mut().enumerate() {
         let v = b[i * 2] as u16 | (b[i * 2 + 1] as u16) << 8;
+        // Bit 15 is PICO-8's custom-instrument flag; fold it into our wave
+        // nibble (bit 3) alongside the 3-bit waveform/instrument index.
+        let custom = (v >> 15 & 1) as u8;
         *note = Note {
             pitch: (v & 0x3f) as u8,
-            wave: (v >> 6 & 7) as u8,
+            wave: (v >> 6 & 7) as u8 | custom << 3,
             volume: (v >> 9 & 7) as u8,
             effect: (v >> 12 & 7) as u8,
         };
@@ -520,8 +557,9 @@ mod tests {
         // sfx 0: speed 0x10, loop 02..04, note0 pitch 21 wave 3 vol 6 eff 1.
         s.push_str("__sfx__\n");
         let mut sfx = String::from("00100204"); // mode, speed, loop start, loop end
-        sfx.push_str("21361"); // note 0
-        sfx.push_str(&"00000".repeat(31)); // notes 1..32 silent
+        sfx.push_str("21361"); // note 0: pitch 21, wave 3, vol 6, eff 1
+        sfx.push_str("10a50"); // note 1: custom instrument 2 (nibble 0xa), vol 5
+        sfx.push_str(&"00000".repeat(30)); // notes 2..32 silent
         s.push_str(&sfx);
         s.push('\n');
         // music 0: loop start flag, ch0=sfx1, others silent.
@@ -542,8 +580,14 @@ mod tests {
 
         let n = a.sfx[0].notes[0];
         assert_eq!((n.pitch, n.wave, n.volume, n.effect), (0x21, 3, 6, 1));
+        assert_eq!(n.instrument(), None, "a plain note is not a custom instr");
         assert_eq!(a.sfx[0].speed, 0x10);
         assert_eq!((a.sfx[0].loop_start, a.sfx[0].loop_end), (0x02, 0x04));
+
+        // Note 1 is a custom instrument: index 2 with the custom flag set.
+        let n1 = a.sfx[0].notes[1];
+        assert_eq!(n1.instrument(), Some(2));
+        assert_eq!(n1.wave_index(), 2);
 
         let m = &a.music[0];
         assert!(m.loop_start && !m.loop_back && !m.stop_at_end);
@@ -565,8 +609,9 @@ mod tests {
         rom[0] = 0xb0; // gfx byte 0: pixel(0,0)=0, pixel(1,0)=0xb
         rom[0x3000] = 0x42; // sprite 0 flags
         rom[0x2000 + 5] = 0x09; // map tile (5,0)
-                                // sfx 0, note 0: pitch=0x12, wave=2, vol=5, eff=3 -> v bits.
-        let v: u16 = 0x12 | (2 << 6) | (5 << 9) | (3 << 12);
+        rom[0x1000 + 3] = 0x57; // shared region -> map row 32, col 3
+                                // sfx 0, note 0: pitch=0x12, custom instr 2, vol=5, eff=3.
+        let v: u16 = 0x12 | (2 << 6) | (5 << 9) | (3 << 12) | (1 << 15);
         rom[0x3200] = (v & 0xff) as u8;
         rom[0x3201] = (v >> 8) as u8;
         rom[0x3200 + 65] = 0x18; // speed
@@ -581,8 +626,11 @@ mod tests {
         assert_eq!(a.sprites.get(1, 0), 0xb);
         assert_eq!(a.sprites.flags(0), 0x42);
         assert_eq!(a.map.get(5, 0), 0x09);
+        // The shared region lands both in sprites 128.. and in the lower map.
+        assert_eq!(a.map.get(3, 32), 0x57);
         let n = a.sfx[0].notes[0];
-        assert_eq!((n.pitch, n.wave, n.volume, n.effect), (0x12, 2, 5, 3));
+        assert_eq!((n.pitch, n.volume, n.effect), (0x12, 5, 3));
+        assert_eq!(n.instrument(), Some(2), "bit 15 marks a custom instrument");
         assert_eq!(a.sfx[0].speed, 0x18);
         assert_eq!(a.music[0].channels[0], Some(7));
         assert!(a.music[0].stop_at_end);
