@@ -71,14 +71,16 @@ pub fn draw_tab_bar(fb: &mut Framebuffer, active: Mode) {
         _ => "",
     };
     fb.print(title, 2, 1, col::DARK_PURPLE);
+    // The active tab is distinguished by icon colour only (peach), never a
+    // background box — a box in the inactive-icon colour just melds with them.
     for (i, (icon, mode)) in TABS.iter().enumerate() {
         let x = tab_x(i);
-        if *mode == active {
-            fb.rectfill(x - 1, 0, x + 7, 7, col::DARK_PURPLE);
-            rui::icon(fb, icon, x, 0, col::WHITE);
+        let color = if *mode == active {
+            col::PEACH
         } else {
-            rui::icon(fb, icon, x, 0, col::DARK_PURPLE);
-        }
+            col::DARK_PURPLE
+        };
+        rui::icon(fb, icon, x, 0, color);
     }
 }
 
@@ -99,4 +101,23 @@ pub fn status_bar(fb: &mut Framebuffer, text: &str) {
 /// Draw the mouse cursor on top of everything.
 pub fn draw_cursor(fb: &mut Framebuffer, mouse: &Mouse) {
     rui::cursor(fb, mouse.x, mouse.y);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn active_tab_has_no_background_box() {
+        let mut fb = Framebuffer::new();
+        draw_tab_bar(&mut fb, Mode::Music);
+        // The active tab is shown by icon colour only: the cell behind it must
+        // stay red, not a dark-purple box that melds with the other icons.
+        let x = tab_x(4);
+        assert_eq!(
+            fb.pget(x - 1, 3),
+            col::RED,
+            "no background box behind the active tab"
+        );
+    }
 }
