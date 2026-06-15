@@ -525,11 +525,13 @@ mod tests {
         ed.mode = SfxMode::Wave;
         let mut a = Assets::default();
         // Click near the top of the canvas at step 0 -> a high positive sample.
-        let mut m = Mouse::default();
-        m.left = true;
-        m.left_pressed = true;
-        m.x = 4;
-        m.y = WAVE_TOP + 2;
+        let m = Mouse {
+            x: 4,
+            y: WAVE_TOP + 2,
+            left: true,
+            left_pressed: true,
+            ..Default::default()
+        };
         ed.wave_tick(&m, &mut a);
         let w = a.sfx[0].custom_wave.expect("wave created");
         assert!(

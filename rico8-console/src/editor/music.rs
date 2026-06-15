@@ -141,8 +141,7 @@ impl MusicEditor {
             }
         }
         // Per-channel header controls.
-        for ch in 0..CHANNELS {
-            let x = PANEL_X[ch];
+        for (ch, &x) in PANEL_X.iter().enumerate() {
             if m.over(x + 2, 24, x + 6, 28) && m.left_pressed {
                 self.channel = ch;
                 self.toggle_channel(assets, ch);
