@@ -193,9 +193,33 @@ impl SfxEffect {
 #[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
 pub struct Note {
     pub pitch: u8,
+    /// Timbre, packed like PICO-8's SFX waveform nibble: bits 0-2 are the
+    /// index and bit 3 is the *custom-instrument* flag. With the flag clear,
+    /// the index (0..8) picks a built-in [`Waveform`]; with it set, the index
+    /// names another SFX slot (0..8) used as a custom instrument. Use
+    /// [`Note::instrument`] / [`Note::wave_index`] rather than reading the
+    /// raw bits.
     pub wave: u8,
     pub volume: u8,
     pub effect: u8,
+}
+
+/// Bit 3 of [`Note::wave`]: set when the note plays another SFX as a custom
+/// instrument instead of a built-in waveform.
+pub const NOTE_CUSTOM_FLAG: u8 = 0x08;
+
+impl Note {
+    /// The waveform/instrument index (0..8), with the custom-instrument flag
+    /// stripped off.
+    pub fn wave_index(&self) -> u8 {
+        self.wave & 7
+    }
+
+    /// `Some(slot)` when this note plays SFX `slot` (0..8) as a custom
+    /// instrument; `None` when it uses a built-in waveform.
+    pub fn instrument(&self) -> Option<u8> {
+        (self.wave & NOTE_CUSTOM_FLAG != 0).then_some(self.wave & 7)
+    }
 }
 
 /// One sound effect: 32 steps played at a configurable speed.
@@ -378,6 +402,23 @@ mod tests {
         assert_eq!(b.map.get(10, 5), 42);
         assert_eq!(b.sfx[0].notes[0].pitch, 33);
         assert_eq!(b.music[0].channels[0], Some(0));
+    }
+
+    #[test]
+    fn note_custom_instrument_flag() {
+        let builtin = Note {
+            wave: 3,
+            ..Default::default()
+        };
+        assert_eq!(builtin.wave_index(), 3);
+        assert_eq!(builtin.instrument(), None);
+
+        let custom = Note {
+            wave: NOTE_CUSTOM_FLAG | 2,
+            ..Default::default()
+        };
+        assert_eq!(custom.wave_index(), 2);
+        assert_eq!(custom.instrument(), Some(2));
     }
 
     #[test]

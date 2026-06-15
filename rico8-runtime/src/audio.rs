@@ -56,7 +56,11 @@ impl Voice {
     }
 
     /// Render one sample; returns `None` when the voice has finished.
-    fn sample(&mut self, dt: f32, total_t: f32) -> Option<f32> {
+    ///
+    /// `inst_waves` carries the timbre of each of the eight SFX slots usable
+    /// as custom instruments (its note-0 waveform), so a note flagged as a
+    /// custom instrument plays through that waveform at its own pitch.
+    fn sample(&mut self, dt: f32, total_t: f32, inst_waves: &[u8; 8]) -> Option<f32> {
         if self.step >= SFX_LEN {
             return None;
         }
@@ -85,7 +89,12 @@ impl Voice {
         }
 
         let freq = pitch_to_freq(pitch);
-        let wave = Waveform::from_u8(note.wave);
+        // A custom-instrument note borrows the timbre of another SFX (its
+        // note-0 waveform); otherwise the nibble names a built-in waveform.
+        let wave = match note.instrument() {
+            Some(slot) => Waveform::from_u8(inst_waves[slot as usize]),
+            None => Waveform::from_u8(note.wave),
+        };
 
         // Advance oscillator.
         self.phase = (self.phase + freq * dt).fract();
@@ -312,10 +321,18 @@ impl Synth {
             }
         }
 
+        // Timbre of the eight SFX slots usable as custom instruments.
+        let mut inst_waves = [0u8; 8];
+        for (i, w) in inst_waves.iter_mut().enumerate() {
+            if let Some(s) = self.sfx.get(i) {
+                *w = s.notes[0].wave_index();
+            }
+        }
+
         let mut mix = 0.0;
         for v in &mut self.voices {
             if let Some(voice) = v {
-                match voice.sample(dt, self.t) {
+                match voice.sample(dt, self.t, &inst_waves) {
                     Some(s) => mix += s,
                     None => *v = None,
                 }
@@ -464,6 +481,38 @@ mod tests {
             synth.next_sample();
         }
         assert_eq!(synth.channel_sfx()[0], None, "voice should end");
+    }
+
+    #[test]
+    fn custom_instrument_borrows_its_waveform() {
+        use crate::assets::NOTE_CUSTOM_FLAG;
+        // SFX 1 is the instrument: a noise (waveform 6) tone.
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        for note in sfx[1].notes.iter_mut() {
+            *note = Note {
+                pitch: 33,
+                wave: 6,
+                volume: 5,
+                effect: 0,
+            };
+        }
+        // SFX 0 plays using SFX 1 as a custom instrument.
+        for note in sfx[0].notes.iter_mut() {
+            *note = Note {
+                pitch: 33,
+                wave: NOTE_CUSTOM_FLAG | 1,
+                volume: 5,
+                effect: 0,
+            };
+        }
+        let mut synth = Synth::new(44100.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+        let mut peak = 0.0f32;
+        for _ in 0..1000 {
+            peak = peak.max(synth.next_sample().abs());
+        }
+        assert!(peak > 0.01, "a custom-instrument note should be audible");
     }
 
     #[test]
