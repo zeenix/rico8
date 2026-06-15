@@ -16,6 +16,13 @@ use rico8_runtime::{
 const STEP_Y: i32 = 20;
 const COL_X: [i32; 2] = [4, 68];
 
+/// Per-SFX filter switches, drawn as a strip in the right gutter. The first
+/// two (`nz`, `bz`) are on/off; the rest cycle 0..3.
+const FX_X: i32 = 106;
+const FX_Y: i32 = 30;
+const FX_DY: i32 = 9;
+const FX_LABELS: [&str; 5] = ["nz", "bz", "dt", "rv", "dm"];
+
 /// Editable fields of a step.
 #[derive(Clone, Copy, PartialEq)]
 enum Field {
@@ -160,6 +167,20 @@ impl SfxEditor {
         } else if m.over(110, 9, 125, 15) && m.left_pressed {
             self.preview(assets, audio);
         }
+        // Filter switches: nz/bz toggle, dt/rv/dm cycle (left +1, right -1).
+        for i in 0..FX_LABELS.len() {
+            let y = FX_Y + i as i32 * FX_DY;
+            if m.over(FX_X, y - 1, FX_X + 17, y + 5) {
+                let s = &mut assets.sfx[self.sfx];
+                match i {
+                    0 => s.noiz = !s.noiz,
+                    1 => s.buzz = !s.buzz,
+                    2 => s.detune = (s.detune as i32 + delta).rem_euclid(3) as u8,
+                    3 => s.reverb = (s.reverb as i32 + delta).rem_euclid(3) as u8,
+                    _ => s.dampen = (s.dampen as i32 + delta).rem_euclid(3) as u8,
+                }
+            }
+        }
         // Step grid.
         for (half, x) in COL_X.iter().enumerate() {
             if m.over(*x, STEP_Y, x + 35, STEP_Y + 16 * 6 - 1) {
@@ -245,6 +266,31 @@ impl SfxEditor {
                     },
                 );
             }
+        }
+
+        // Filter switches strip (right gutter).
+        fb.print("fx", FX_X + 4, STEP_Y, col::LIGHT_GREY);
+        let levels = [s.noiz as u8, s.buzz as u8, s.detune, s.reverb, s.dampen];
+        for (i, (label, &level)) in FX_LABELS.iter().zip(levels.iter()).enumerate() {
+            let y = FX_Y + i as i32 * FX_DY;
+            let on = level > 0;
+            fb.print(label, FX_X, y, if on { col::WHITE } else { col::DARK_GREY });
+            // nz/bz are on/off; the rest show their level.
+            let val = if i < 2 {
+                if on {
+                    "*".into()
+                } else {
+                    "-".into()
+                }
+            } else {
+                format!("{level}")
+            };
+            fb.print(
+                &val,
+                FX_X + 12,
+                y,
+                if on { col::ORANGE } else { col::DARK_GREY },
+            );
         }
 
         ui::status_bar(fb, &format!("oct {} [zsxd..] i=inst spc=play", self.octave));
