@@ -232,6 +232,18 @@ pub struct Sfx {
     pub loop_start: u8,
     /// Loop end step (exclusive).
     pub loop_end: u8,
+    /// Per-SFX filter switches, matching PICO-8's: replace the noise voice
+    /// with pure white noise.
+    pub noiz: bool,
+    /// Buzzier, harmonically richer timbre.
+    pub buzz: bool,
+    /// Detune a second voice against the first. `0` off; `1` a slight,
+    /// flange-like detune; `2` an octave-ish second voice.
+    pub detune: u8,
+    /// Echo with a short delay. `0` off; `1`/`2` are the two delay lengths.
+    pub reverb: u8,
+    /// Low-pass softening. `0` off; `1`/`2` are the two strengths.
+    pub dampen: u8,
 }
 
 impl Default for Sfx {
@@ -241,6 +253,11 @@ impl Default for Sfx {
             speed: 16,
             loop_start: 0,
             loop_end: 0,
+            noiz: false,
+            buzz: false,
+            detune: 0,
+            reverb: 0,
+            dampen: 0,
         }
     }
 }
@@ -249,6 +266,18 @@ impl Sfx {
     /// True when no step is audible — used to skip empty slots.
     pub fn is_empty(&self) -> bool {
         self.notes.iter().all(|n| n.volume == 0)
+    }
+
+    /// Set the filter switches from PICO-8's packed filter byte (the 65th
+    /// byte of an on-cart SFX): bit 1 noiz, bit 2 buzz, then base-3 digits
+    /// for detune (÷8), reverb (÷24) and dampen (÷72). Bit 0 is PICO-8's
+    /// editor mode and carries no sound, so it is ignored.
+    pub fn set_filters(&mut self, byte: u8) {
+        self.noiz = byte & 2 != 0;
+        self.buzz = byte & 4 != 0;
+        self.detune = byte / 8 % 3;
+        self.reverb = byte / 24 % 3;
+        self.dampen = byte / 72 % 3;
     }
 }
 
@@ -419,6 +448,21 @@ mod tests {
         };
         assert_eq!(custom.wave_index(), 2);
         assert_eq!(custom.instrument(), Some(2));
+    }
+
+    #[test]
+    fn sfx_filter_byte_decodes() {
+        let mut s = Sfx::default();
+        // 0x86 = 2(noiz) + 4(buzz) + 8(detune 1) + 48(reverb 2) + 64(dampen ?)
+        // -> detune 1, reverb 2, dampen 1; bit 0 (editor mode) ignored.
+        s.set_filters(0x86);
+        assert!(s.noiz && s.buzz);
+        assert_eq!((s.detune, s.reverb, s.dampen), (1, 2, 1));
+
+        let mut off = Sfx::default();
+        off.set_filters(0x01); // only editor-mode bit -> no audible switches
+        assert!(!off.noiz && !off.buzz);
+        assert_eq!((off.detune, off.reverb, off.dampen), (0, 0, 0));
     }
 
     #[test]
