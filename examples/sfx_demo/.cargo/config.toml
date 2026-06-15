@@ -1,0 +1,10 @@
+# Default to the wasm target so plain `cargo build`/`check`/`test` just work:
+# a `#![no_std]` cart can't build for the host (its unwinding panic strategy
+# isn't supported without std), and wasm32 is what carts compile to anyway.
+[build]
+target = "wasm32-unknown-unknown"
+
+# Shrink LLVM's 1 MiB shadow-stack reserve to 32 KiB so the cart's initial
+# linear memory fits the 128 K runtime cap (the console injects the same flag).
+[target.wasm32-unknown-unknown]
+rustflags = ["-C", "link-arg=-z", "-C", "link-arg=stack-size=32768"]
