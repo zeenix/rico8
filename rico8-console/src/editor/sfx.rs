@@ -8,7 +8,7 @@ use crate::{
     ui::{self, Mouse},
 };
 use rico8_runtime::{
-    assets::{Assets, CustomWave, Note, NOTE_CUSTOM_FLAG, SFX_LEN},
+    assets::{Assets, CustomWave, Note, Sfx, NOTE_CUSTOM_FLAG, SFX_LEN},
     audio::AudioHandle,
     fb::Framebuffer,
     palette::col,
@@ -86,12 +86,32 @@ impl SfxEditor {
     }
 
     fn preview(&self, assets: &Assets, audio: &AudioHandle) {
-        audio.load(assets.sfx.clone(), assets.music.clone());
+        // In the wave designer, play a sustained note *through* the drawn
+        // waveform (the slot's own notes don't use its waveform), so the user
+        // can actually hear the waveform they are drawing.
+        let (sfx, target) = if self.mode == SfxMode::Wave {
+            let scratch = if self.sfx == 63 { 62 } else { 63 };
+            let mut sfx = assets.sfx.clone();
+            let probe = Note {
+                pitch: 33,
+                wave: NOTE_CUSTOM_FLAG | self.sfx as u8,
+                volume: 5,
+                effect: 0,
+            };
+            sfx[scratch] = Sfx {
+                notes: [probe; SFX_LEN],
+                ..Sfx::default()
+            };
+            (sfx, scratch)
+        } else {
+            (assets.sfx.clone(), self.sfx)
+        };
+        audio.load(sfx, assets.music.clone());
         let playing = audio.with_synth(|s| s.channel_sfx()[0]);
-        if playing == Some(self.sfx) {
+        if playing == Some(target) {
             audio.play_sfx(-1, 0);
         } else {
-            audio.play_sfx(self.sfx as i32, 0);
+            audio.play_sfx(target as i32, 0);
         }
     }
 
@@ -420,17 +440,16 @@ impl SfxEditor {
             let x = 3 + i as i32 * 4;
             let playing = head == Some(i);
             if note.volume > 0 {
-                // Bars are coloured by their waveform/instrument, so picking a
-                // waveform and drawing visibly changes them; the playing step
-                // is highlighted yellow.
-                let bar = if playing {
-                    col::YELLOW
+                // PICO-8 draws dark-blue bars and colours the marker on top by
+                // the note's waveform/instrument; the playing step is yellow.
+                let bar = if playing { col::YELLOW } else { col::DARK_BLUE };
+                let h = (note.pitch as i32 * (G_BOT - G_TOP) / 63).max(1);
+                fb.rectfill(x, G_BOT - h, x + 2, G_BOT, bar);
+                let tip = if playing {
+                    col::WHITE
                 } else {
                     wave_color(note)
                 };
-                let h = (note.pitch as i32 * (G_BOT - G_TOP) / 63).max(1);
-                fb.rectfill(x, G_BOT - h, x + 2, G_BOT, bar);
-                let tip = if playing { col::WHITE } else { col::RED };
                 fb.rectfill(x, G_BOT - h, x + 2, G_BOT - h + 1, tip);
             }
             // Volume marker.
@@ -626,6 +645,28 @@ mod tests {
         assert_eq!(ed.mode, SfxMode::Tracker);
         ed.key(Key::Tab, Mods::default(), &mut a, &dummy());
         assert_eq!(ed.mode, SfxMode::Pitch);
+    }
+
+    #[test]
+    fn wave_preview_plays_through_the_drawn_waveform() {
+        use rico8_runtime::assets::SFX_LEN;
+        let mut a = Assets::default();
+        a.sfx[0].custom_wave = Some(CustomWave {
+            samples: [15; SFX_LEN],
+            bass: false,
+        });
+        let mut ed = SfxEditor::new();
+        ed.mode = SfxMode::Wave;
+        ed.sfx = 0;
+        let audio = dummy();
+        ed.preview(&a, &audio);
+        let mut peak = 0.0f32;
+        audio.with_synth(|s| {
+            for _ in 0..2000 {
+                peak = peak.max(s.next_sample().abs());
+            }
+        });
+        assert!(peak > 0.01, "drawing into the waveform should be audible");
     }
 
     #[test]
