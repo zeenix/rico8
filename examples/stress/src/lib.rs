@@ -61,27 +61,35 @@ impl Game for Stress {
         gfx.clear(Color::BLACK);
         // Wall-clock baseline: N * 20 shapes.
         for i in 0..(self.n * 20) {
-            let x = (i * 7) % 128;
-            let y = (i * 13) % 128;
-            gfx.rect_fill(x, y, 6, 6, Color::from_index((i % 15 + 1) as u8));
+            let x = ((i * 7) % 128) as f32;
+            let y = ((i * 13) % 128) as f32;
+            gfx.rect_fill(x, y, 6.0, 6.0, Color::from_index((i % 15 + 1) as u8));
         }
-        gfx.print("STRESS", 2, 2, Color::WHITE);
+        gfx.print("STRESS", 2.0, 2.0, Color::WHITE);
         let mut label = String::from("N=");
         push_int(&mut label, self.n);
-        gfx.print(&label, 2, 10, Color::YELLOW);
+        gfx.print(&label, 2.0, 10.0, Color::YELLOW);
         // The 4x6 font has no lowercase glyphs, so on/off must not rely on
         // letter case. Spell it out, and color it too.
         gfx.print(
             if self.mem_on { "MEM ON" } else { "MEM OFF" },
-            2,
-            18,
-            if self.mem_on { Color::GREEN } else { Color::DARK_GREY },
+            2.0,
+            18.0,
+            if self.mem_on {
+                Color::GREEN
+            } else {
+                Color::DARK_GREY
+            },
         );
         gfx.print(
             if self.cpu_on { "CPU ON" } else { "CPU OFF" },
-            2,
-            26,
-            if self.cpu_on { Color::GREEN } else { Color::DARK_GREY },
+            2.0,
+            26.0,
+            if self.cpu_on {
+                Color::GREEN
+            } else {
+                Color::DARK_GREY
+            },
         );
     }
 }

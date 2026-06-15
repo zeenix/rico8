@@ -226,7 +226,8 @@ impl Framebuffer {
     }
 
     /// Draw sprite `n` (and `w x h` neighbors) from a sheet. Color 0 is
-    /// transparent, matching the classic default.
+    /// transparent, matching the classic default. `w`/`h` are in sprite units
+    /// and may be fractional: `w = 0.5` draws a 4-pixel-wide slice.
     #[allow(clippy::too_many_arguments)]
     pub fn spr(
         &mut self,
@@ -234,15 +235,15 @@ impl Framebuffer {
         n: u32,
         x: i32,
         y: i32,
-        w: u32,
-        h: u32,
+        w: f32,
+        h: f32,
         flip_x: bool,
         flip_y: bool,
     ) {
-        let w = w.max(1);
-        let h = h.max(1);
-        let pw = (w * SPRITE_SIZE as u32) as i32;
-        let ph = (h * SPRITE_SIZE as u32) as i32;
+        // Fractional sprite counts draw a partial block: floor to whole
+        // pixels, so the last cell can be clipped mid-sprite.
+        let pw = (w.max(0.0) * SPRITE_SIZE as f32) as i32;
+        let ph = (h.max(0.0) * SPRITE_SIZE as f32) as i32;
         for py in 0..ph {
             for px in 0..pw {
                 let sx = if flip_x { pw - 1 - px } else { px };
@@ -284,8 +285,8 @@ impl Framebuffer {
                     tile as u32,
                     sx + tx * SPRITE_SIZE as i32,
                     sy + ty * SPRITE_SIZE as i32,
-                    1,
-                    1,
+                    1.0,
+                    1.0,
                     false,
                     false,
                 );
@@ -357,5 +358,22 @@ mod tests {
         let mut fb = Framebuffer::new();
         let end = fb.print("abc", 0, 0, 7);
         assert_eq!(end, 3 * font::GLYPH_W);
+    }
+
+    #[test]
+    fn fractional_sprite_draws_a_partial_slice() {
+        let mut fb = Framebuffer::new();
+        let mut sheet = SpriteSheet::default();
+        // Fill sprite 0 (the top-left 8x8 cell) solid.
+        for y in 0..8 {
+            for x in 0..8 {
+                sheet.set(x, y, 7);
+            }
+        }
+        // Half width draws only the left four columns.
+        fb.spr(&sheet, 0, 0, 0, 0.5, 1.0, false, false);
+        assert_eq!(fb.pget(3, 4), 7, "left half is drawn");
+        assert_eq!(fb.pget(4, 4), 0, "right half is untouched");
+        assert_eq!(fb.pget(7, 7), 0, "bottom-right corner is untouched");
     }
 }

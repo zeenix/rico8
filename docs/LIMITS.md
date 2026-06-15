@@ -109,6 +109,31 @@ builds its HUD text with `heapless::format!`.
 
 [`heapless`]: https://docs.rs/heapless
 
+### Float math with `libm`
+
+`core` only carries the float operations that don't need a math library:
+arithmetic, comparisons, and `min`/`max`/`clamp`. Everything that maps to a
+libm symbol — `floor`, `ceil`, `round`, `sqrt`, `sin`/`cos`, `abs`, `pow`,
+… — lives in `std`, so it isn't available to a `no_std` cart. When you need
+one, add [`libm`] and call its free functions:
+
+```toml
+libm = "0.2"
+```
+
+```rust
+let d = libm::fabsf(dx);
+let r = libm::sqrtf(dx * dx + dy * dy);
+let snapped = libm::floorf(x / 8.0) * 8.0;
+```
+
+You often don't need it for drawing: positions and sizes cross the ABI as
+`f32` and the console floors them for you, and converting an `f32` pixel to
+an integer tile index is just `x as i32` (which truncates). Reach for `libm`
+when the *cart's own* math needs it.
+
+[`libm`]: https://docs.rs/libm
+
 ### When you really need a heap
 
 A cart that genuinely needs a growable heap can opt into `std` by depending on

@@ -129,6 +129,14 @@ fn read_guest_str(caller: &Caller<'_, HostState>, ptr: u32, len: u32) -> String 
     String::from_utf8_lossy(&data[start..end]).into_owned()
 }
 
+/// Floor an `f32` screen coordinate to a pixel. The ABI carries positions
+/// and sizes as floats so carts can hold sub-pixel state; the framebuffer is
+/// an integer grid, so the host floors here, at the last moment, matching
+/// PICO-8. Flooring (not truncation) keeps motion even across `x = 0`.
+fn px(v: f32) -> i32 {
+    v.floor() as i32
+}
+
 macro_rules! link {
     ($linker:expr, $name:literal, $f:expr) => {
         $linker
@@ -161,75 +169,81 @@ impl GameVm {
             c.data_mut().fb.cls(col as u8)
         });
         link!(linker, "camera", |mut c: Caller<'_, HostState>,
-                                 x: i32,
-                                 y: i32| {
-            c.data_mut().fb.camera(x, y)
+                                 x: f32,
+                                 y: f32| {
+            c.data_mut().fb.camera(px(x), px(y))
         });
         link!(linker, "clip", |mut c: Caller<'_, HostState>,
-                               x: i32,
-                               y: i32,
-                               w: i32,
-                               h: i32| {
-            c.data_mut().fb.clip(x, y, w, h)
+                               x: f32,
+                               y: f32,
+                               w: f32,
+                               h: f32| {
+            c.data_mut().fb.clip(px(x), px(y), px(w), px(h))
         });
         link!(linker, "pset", |mut c: Caller<'_, HostState>,
-                               x: i32,
-                               y: i32,
+                               x: f32,
+                               y: f32,
                                col: i32| {
-            c.data_mut().fb.pset(x, y, col as u8)
+            c.data_mut().fb.pset(px(x), px(y), col as u8)
         });
         link!(linker, "pget", |c: Caller<'_, HostState>,
-                               x: i32,
-                               y: i32|
+                               x: f32,
+                               y: f32|
          -> i32 {
-            c.data().fb.pget(x, y) as i32
+            c.data().fb.pget(px(x), px(y)) as i32
         });
         link!(linker, "line", |mut c: Caller<'_, HostState>,
-                               x0: i32,
-                               y0: i32,
-                               x1: i32,
-                               y1: i32,
+                               x0: f32,
+                               y0: f32,
+                               x1: f32,
+                               y1: f32,
                                col: i32| {
-            c.data_mut().fb.line(x0, y0, x1, y1, col as u8)
+            c.data_mut()
+                .fb
+                .line(px(x0), px(y0), px(x1), px(y1), col as u8)
         });
         link!(linker, "rect", |mut c: Caller<'_, HostState>,
-                               x0: i32,
-                               y0: i32,
-                               x1: i32,
-                               y1: i32,
+                               x0: f32,
+                               y0: f32,
+                               x1: f32,
+                               y1: f32,
                                col: i32| {
-            c.data_mut().fb.rect(x0, y0, x1, y1, col as u8)
+            c.data_mut()
+                .fb
+                .rect(px(x0), px(y0), px(x1), px(y1), col as u8)
         });
         link!(
             linker,
             "rectfill",
-            |mut c: Caller<'_, HostState>, x0: i32, y0: i32, x1: i32, y1: i32, col: i32| {
-                c.data_mut().fb.rectfill(x0, y0, x1, y1, col as u8)
+            |mut c: Caller<'_, HostState>, x0: f32, y0: f32, x1: f32, y1: f32, col: i32| {
+                c.data_mut()
+                    .fb
+                    .rectfill(px(x0), px(y0), px(x1), px(y1), col as u8)
             }
         );
         link!(linker, "circ", |mut c: Caller<'_, HostState>,
-                               x: i32,
-                               y: i32,
-                               r: i32,
+                               x: f32,
+                               y: f32,
+                               r: f32,
                                col: i32| {
-            c.data_mut().fb.circ(x, y, r, col as u8)
+            c.data_mut().fb.circ(px(x), px(y), px(r), col as u8)
         });
         link!(
             linker,
             "circfill",
-            |mut c: Caller<'_, HostState>, x: i32, y: i32, r: i32, col: i32| {
-                c.data_mut().fb.circfill(x, y, r, col as u8)
+            |mut c: Caller<'_, HostState>, x: f32, y: f32, r: f32, col: i32| {
+                c.data_mut().fb.circfill(px(x), px(y), px(r), col as u8)
             }
         );
         link!(linker, "print", |mut c: Caller<'_, HostState>,
                                 ptr: u32,
                                 len: u32,
-                                x: i32,
-                                y: i32,
+                                x: f32,
+                                y: f32,
                                 col: i32|
-         -> i32 {
+         -> f32 {
             let s = read_guest_str(&c, ptr, len);
-            c.data_mut().fb.print(&s, x, y, col as u8)
+            c.data_mut().fb.print(&s, px(x), px(y), col as u8) as f32
         });
         link!(linker, "btn", |c: Caller<'_, HostState>, b: u32| -> i32 {
             c.data().input.btn(b) as i32
@@ -239,20 +253,20 @@ impl GameVm {
         });
         link!(linker, "spr", |mut c: Caller<'_, HostState>,
                               n: u32,
-                              x: i32,
-                              y: i32,
-                              w: u32,
-                              h: u32,
+                              x: f32,
+                              y: f32,
+                              w: f32,
+                              h: f32,
                               flip_x: i32,
                               flip_y: i32| {
             let HostState { fb, sprites, .. } = c.data_mut();
-            fb.spr(sprites, n, x, y, w, h, flip_x != 0, flip_y != 0);
+            fb.spr(sprites, n, px(x), px(y), w, h, flip_x != 0, flip_y != 0);
         });
         link!(linker, "map", |mut c: Caller<'_, HostState>,
                               cel_x: i32,
                               cel_y: i32,
-                              sx: i32,
-                              sy: i32,
+                              sx: f32,
+                              sy: f32,
                               cel_w: i32,
                               cel_h: i32,
                               layers: u32| {
@@ -264,8 +278,8 @@ impl GameVm {
                 sprites,
                 cel_x,
                 cel_y,
-                sx,
-                sy,
+                px(sx),
+                px(sy),
                 cel_w,
                 cel_h,
                 layers as u8,
@@ -431,10 +445,10 @@ mod tests {
     const TEST_CART: &str = r#"
         (module
           (import "rico8" "cls" (func $cls (param i32)))
-          (import "rico8" "pset" (func $pset (param i32 i32 i32)))
-          (import "rico8" "pget" (func $pget (param i32 i32) (result i32)))
+          (import "rico8" "pset" (func $pset (param f32 f32 i32)))
+          (import "rico8" "pget" (func $pget (param f32 f32) (result i32)))
           (import "rico8" "btn" (func $btn (param i32) (result i32)))
-          (import "rico8" "print" (func $print (param i32 i32 i32 i32 i32) (result i32)))
+          (import "rico8" "print" (func $print (param i32 i32 f32 f32 i32) (result f32)))
           (import "rico8" "log" (func $log (param i32 i32)))
           (memory (export "memory") 1)
           (data (i32.const 16) "hi from cart")
@@ -446,8 +460,8 @@ mod tests {
               (then (global.set $x (i32.add (global.get $x) (i32.const 1))))))
           (func (export "rico8_draw")
             (call $cls (i32.const 1))
-            (call $pset (global.get $x) (i32.const 7) (i32.const 8))
-            (drop (call $print (i32.const 16) (i32.const 2) (i32.const 0) (i32.const 0) (i32.const 7))))
+            (call $pset (f32.convert_i32_s (global.get $x)) (f32.const 7) (i32.const 8))
+            (drop (call $print (i32.const 16) (i32.const 2) (f32.const 0) (f32.const 0) (i32.const 7))))
         )
     "#;
 
