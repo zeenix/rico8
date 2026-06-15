@@ -453,6 +453,16 @@ impl Synth {
         }
         out
     }
+
+    /// Which step each channel's voice is currently sounding (for editor
+    /// playheads); `None` when the channel is idle.
+    pub fn channel_step(&self) -> [Option<usize>; CHANNELS] {
+        let mut out = [None; CHANNELS];
+        for (i, v) in self.voices.iter().enumerate() {
+            out[i] = v.as_ref().map(|v| v.step);
+        }
+        out
+    }
 }
 
 /// Clonable handle the VM and editors use to poke the synth.
@@ -483,6 +493,11 @@ impl AudioHandle {
 
     pub fn play_sfx(&self, n: i32, channel: i32) {
         self.with_synth(|s| s.play_sfx(n, channel));
+    }
+
+    /// The step each channel's voice is sounding (for editor playheads).
+    pub fn channel_step(&self) -> [Option<usize>; CHANNELS] {
+        self.with_synth(|s| s.channel_step())
     }
 
     pub fn play_music(&self, n: i32) {
@@ -729,5 +744,20 @@ mod tests {
         let chans = synth.channel_sfx();
         assert_eq!(chans[0], Some(0), "music keeps channel 0");
         assert!(chans[1..].contains(&Some(1)), "sfx lands elsewhere");
+    }
+
+    #[test]
+    fn channel_step_tracks_playback() {
+        let mut synth = Synth::new(44100.0);
+        synth.load(test_sfx(), vec![MusicPattern::default(); 64]);
+        assert_eq!(synth.channel_step(), [None, None, None, None]);
+        synth.play_sfx(0, 0);
+        // After starting, channel 0 is on step 0.
+        assert_eq!(synth.channel_step()[0], Some(0));
+        // Default speed 16 -> 0.125 s/step; advance ~0.2 s, expect step 1.
+        for _ in 0..(44100 / 5) {
+            synth.next_sample();
+        }
+        assert_eq!(synth.channel_step()[0], Some(1));
     }
 }
