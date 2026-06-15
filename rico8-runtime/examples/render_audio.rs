@@ -54,7 +54,12 @@ fn render_music(assets: &Assets) -> Vec<f32> {
     for _ in 0..(MUSIC_SECS * SR) as usize {
         let p = synth.playing_pattern();
         if p != last {
-            eprintln!("pattern {p:?} @ {:.2}s", samples.len() as f32 / SR);
+            let chans = synth.channel_sfx();
+            let active: Vec<_> = chans.iter().filter_map(|c| *c).collect();
+            eprintln!(
+                "pattern {p:?} @ {:.2}s  channels={chans:?} active={active:?}",
+                samples.len() as f32 / SR
+            );
             last = p;
         }
         samples.push(synth.next_sample());
