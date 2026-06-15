@@ -8,7 +8,7 @@ use crate::{
     ui::{self, Mouse},
 };
 use rico8_runtime::{
-    assets::{Assets, CustomWave, NOTE_CUSTOM_FLAG, SFX_LEN},
+    assets::{Assets, CustomWave, Note, NOTE_CUSTOM_FLAG, SFX_LEN},
     audio::AudioHandle,
     fb::Framebuffer,
     palette::col,
@@ -57,6 +57,9 @@ pub struct SfxEditor {
     mode: SfxMode,
     /// The waveform applied when drawing pitches in pitch mode (0..8).
     wave_sel: u8,
+    /// Pitch-mode palette shown as numbers (toggled by the circle button)
+    /// rather than waveform glyphs.
+    palette_numeric: bool,
 }
 
 impl SfxEditor {
@@ -68,6 +71,7 @@ impl SfxEditor {
             octave: 2,
             mode: SfxMode::Pitch,
             wave_sel: 0,
+            palette_numeric: false,
         }
     }
 
@@ -248,6 +252,12 @@ impl SfxEditor {
         }
         match self.mode {
             SfxMode::Pitch => {
+                // The circle toggles the palette between waveform glyphs and
+                // plain numbers.
+                if m.left_pressed && m.over(117, 18, 125, 25) {
+                    self.palette_numeric = !self.palette_numeric;
+                    return true;
+                }
                 // Palette: click selects the drawing instrument.
                 for w in 0..8u8 {
                     let x = 46 + w as i32 * 9;
@@ -362,7 +372,7 @@ impl SfxEditor {
         fb.rectfill(0, 8, 127, 119, col::DARK_GREY);
         self.draw_header(fb, assets);
         match self.mode {
-            SfxMode::Pitch => self.draw_pitch(fb, assets),
+            SfxMode::Pitch => self.draw_pitch(fb, assets, audio),
             SfxMode::Tracker => self.draw_tracker(fb, assets, audio),
             SfxMode::Wave => self.draw_wave(fb, assets),
         }
@@ -389,15 +399,17 @@ impl SfxEditor {
         }
     }
 
-    fn draw_pitch(&self, fb: &mut Framebuffer, assets: &Assets) {
+    fn draw_pitch(&self, fb: &mut Framebuffer, assets: &Assets, audio: &AudioHandle) {
         let s = &assets.sfx[self.sfx];
+        let head = audio.with_synth(|sy| {
+            if sy.channel_sfx()[0] == Some(self.sfx) {
+                sy.channel_step()[0]
+            } else {
+                None
+            }
+        });
         fb.print(":pitch", 3, 20, col::LAVENDER);
-        ui::blit(fb, 46, 19, &ui::PALETTE);
-        // Move the red selection box to the chosen waveform.
-        if self.wave_sel != 0 {
-            recolor_box(fb, 46, col::RED, col::LIGHT_GREY);
-            recolor_box(fb, 46 + self.wave_sel as i32 * 9, col::LIGHT_GREY, col::RED);
-        }
+        self.draw_palette(fb);
         ui::blit(fb, 117, 19, &ui::CIRCLE);
 
         // Black graph + volume panels.
@@ -406,14 +418,25 @@ impl SfxEditor {
 
         for (i, note) in s.notes.iter().enumerate() {
             let x = 3 + i as i32 * 4;
+            let playing = head == Some(i);
             if note.volume > 0 {
+                // Bars are coloured by their waveform/instrument, so picking a
+                // waveform and drawing visibly changes them; the playing step
+                // is highlighted yellow.
+                let bar = if playing {
+                    col::YELLOW
+                } else {
+                    wave_color(note)
+                };
                 let h = (note.pitch as i32 * (G_BOT - G_TOP) / 63).max(1);
-                fb.rectfill(x, G_BOT - h, x + 2, G_BOT, col::DARK_BLUE);
-                fb.rectfill(x, G_BOT - h, x + 2, G_BOT - h + 1, col::RED);
+                fb.rectfill(x, G_BOT - h, x + 2, G_BOT, bar);
+                let tip = if playing { col::WHITE } else { col::RED };
+                fb.rectfill(x, G_BOT - h, x + 2, G_BOT - h + 1, tip);
             }
             // Volume marker.
             let vy = V_BOT - note.volume as i32 * (V_BOT - V_TOP) / 7;
-            fb.rectfill(x, vy, x + 2, vy + 1, col::PINK);
+            let vc = if playing { col::YELLOW } else { col::PINK };
+            fb.rectfill(x, vy, x + 2, vy + 1, vc);
         }
 
         fb.print(":volume", 3, 95, col::LAVENDER);
@@ -421,6 +444,33 @@ impl SfxEditor {
             fb.line(118 + i * 2, 96, 118 + i * 2, 99, col::DARK_BLUE);
         }
         ui::status_bar(fb, "tab tracker  drag pitch/vol");
+    }
+
+    /// The waveform palette: 8 boxes (graphical glyphs or plain numbers), with
+    /// the selected waveform's box in red.
+    fn draw_palette(&self, fb: &mut Framebuffer) {
+        if self.palette_numeric {
+            for w in 0..8u8 {
+                let x = 46 + w as i32 * 9;
+                let sel = w == self.wave_sel;
+                fb.rectfill(
+                    x,
+                    18,
+                    x + 7,
+                    24,
+                    if sel { col::RED } else { col::LIGHT_GREY },
+                );
+                let c = if sel { col::WHITE } else { col::DARK_GREY };
+                fb.print(&format!("{w}"), x + 2, 19, c);
+            }
+        } else {
+            ui::blit(fb, 46, 19, &ui::PALETTE);
+            // Move the red selection box to the chosen waveform.
+            if self.wave_sel != 0 {
+                recolor_box(fb, 46, col::RED, col::LIGHT_GREY);
+                recolor_box(fb, 46 + self.wave_sel as i32 * 9, col::LIGHT_GREY, col::RED);
+            }
+        }
     }
 
     fn draw_tracker(&self, fb: &mut Framebuffer, assets: &Assets, audio: &AudioHandle) {
@@ -512,6 +562,29 @@ impl SfxEditor {
 
 const WAVE_TOP: i32 = 30;
 const WAVE_BOT: i32 = 104;
+
+/// A distinct colour per built-in waveform (0..8), so pitch-graph bars show
+/// which instrument each note uses.
+const WAVE_COLS: [u8; 8] = [
+    col::DARK_BLUE,
+    col::BLUE,
+    col::LAVENDER,
+    col::DARK_GREEN,
+    col::GREEN,
+    col::ORANGE,
+    col::PINK,
+    col::LIGHT_GREY,
+];
+
+/// The pitch-bar colour for a note: its waveform's colour, or peach when it
+/// references a custom instrument.
+fn wave_color(note: &Note) -> u8 {
+    if note.instrument().is_some() {
+        col::PEACH
+    } else {
+        WAVE_COLS[note.wave_index() as usize]
+    }
+}
 
 /// Repaint a 8x6 palette box's background colour (cols x..x+7, rows 19..24),
 /// leaving the white waveform glyph untouched. Used to move the red selection.
