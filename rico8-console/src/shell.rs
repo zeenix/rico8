@@ -1169,8 +1169,10 @@ impl Shell {
                 ui::draw_tab_bar(&mut self.fb, self.mode);
                 // The audio editors show PICO-8's pitch/tracker mode buttons in
                 // the top-left (the music editor's are decorative).
-                if self.mode == Mode::Music {
-                    ui::mode_buttons(&mut self.fb, true);
+                match self.mode {
+                    Mode::Music => ui::mode_buttons(&mut self.fb, true),
+                    Mode::Sfx => ui::mode_buttons(&mut self.fb, self.sfx_ed.is_pitch()),
+                    _ => {}
                 }
                 self.draw_toast();
                 ui::draw_cursor(&mut self.fb, &mouse);
