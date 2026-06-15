@@ -16,6 +16,28 @@ fn pitch_to_freq(pitch: f32) -> f32 {
     440.0 * ((pitch - 33.0) / 12.0).exp2()
 }
 
+/// True when the SFX loops (a real loop range, not a LEN marker).
+fn sfx_loops(sfx: &Sfx) -> bool {
+    sfx.loop_end > sfx.loop_start
+}
+
+/// Steps the SFX occupies for music timing: its loop end when looping, its
+/// LEN marker (`loop_start` with no loop end), otherwise the full 32.
+fn sfx_steps(sfx: &Sfx) -> usize {
+    if sfx.loop_end > sfx.loop_start {
+        sfx.loop_end as usize
+    } else if sfx.loop_start > 0 {
+        sfx.loop_start as usize
+    } else {
+        SFX_LEN
+    }
+}
+
+/// One play-through of the SFX in seconds, used to time music patterns.
+fn sfx_duration(sfx: &Sfx) -> f32 {
+    sfx_steps(sfx) as f32 * sfx.speed.max(1) as f32 / TICKS_PER_SECOND
+}
+
 /// One sample of a deterministic (non-noise) waveform at `phase` in `[0, 1)`.
 /// Factored out so the `detune` filter can run a second oscillator through it.
 fn tonal_wave(wave: Waveform, phase: f32) -> f32 {
@@ -218,8 +240,17 @@ impl Voice {
             self.prev_pitch = base_pitch;
             self.step += 1;
             let (ls, le) = (self.sfx.loop_start as usize, self.sfx.loop_end as usize);
-            if le > ls && self.step >= le && !self.from_music {
-                self.step = ls;
+            if le > ls {
+                // Looping SFX wrap at the loop end — for music voices too, so
+                // a short looping part repeats to fill its pattern (the
+                // sequencer replaces the voice when the pattern advances).
+                if self.step >= le {
+                    self.step = ls;
+                }
+            } else if ls > 0 && self.step >= ls {
+                // A "LEN" marker (loop start set, no loop end) shortens the
+                // SFX to `loop_start` steps.
+                self.step = SFX_LEN;
             }
         }
         Some(out)
@@ -323,13 +354,20 @@ impl Synth {
             self.music_state = None;
             return;
         };
+        // PICO-8 sets a pattern's length from the left-most non-looping active
+        // channel (the "timekeeper"); if every active channel loops, fall back
+        // to the longest. SFX shortened by a LEN marker count as that length.
+        let mut timekeeper: Option<f32> = None;
         let mut longest = 0.0f32;
         for (ch, slot) in pat.channels.iter().enumerate() {
             // Music takes ownership of its channels; others keep playing SFX.
             if let Some(sfx_idx) = slot {
                 if let Some(sfx) = self.sfx.get(*sfx_idx as usize).cloned() {
-                    let dur = sfx.speed.max(1) as f32 / TICKS_PER_SECOND * SFX_LEN as f32;
+                    let dur = sfx_duration(&sfx);
                     longest = longest.max(dur);
+                    if timekeeper.is_none() && !sfx_loops(&sfx) {
+                        timekeeper = Some(dur);
+                    }
                     self.voices[ch] =
                         Some(Voice::new(*sfx_idx as usize, sfx, true, self.sample_rate));
                 }
@@ -337,13 +375,14 @@ impl Synth {
                 self.voices[ch] = None;
             }
         }
-        if longest == 0.0 {
+        let length = timekeeper.unwrap_or(longest);
+        if length == 0.0 {
             self.music_state = None;
             return;
         }
         self.music_state = Some(MusicState {
             pattern: n,
-            remaining: longest,
+            remaining: length,
         });
     }
 
@@ -641,6 +680,40 @@ mod tests {
             synth.next_sample();
         }
         assert_eq!(synth.playing_pattern(), Some(0), "should loop to start");
+    }
+
+    #[test]
+    fn pattern_length_follows_first_non_looping_channel() {
+        // ch0 is the timekeeper at speed 4 (1.0s); ch1 is four times longer.
+        // The pattern must end with ch0, not stretch to ch1.
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        for (i, &spd) in [4u8, 16].iter().enumerate() {
+            sfx[i].speed = spd;
+            for n in sfx[i].notes.iter_mut() {
+                *n = Note {
+                    pitch: 33,
+                    wave: 0,
+                    volume: 5,
+                    effect: 0,
+                };
+            }
+        }
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels = [Some(0), Some(1), None, None];
+        music[0].stop_at_end = true;
+        let mut synth = Synth::new(44100.0);
+        synth.load(sfx, music);
+        synth.play_music(0);
+        let mut n = 0;
+        while synth.playing_pattern().is_some() && n < 44100 * 5 {
+            synth.next_sample();
+            n += 1;
+        }
+        let secs = n as f32 / 44100.0;
+        assert!(
+            (secs - 1.0).abs() < 0.1,
+            "pattern should track ch0, got {secs}s"
+        );
     }
 
     #[test]
