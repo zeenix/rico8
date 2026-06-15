@@ -16,6 +16,50 @@ fn pitch_to_freq(pitch: f32) -> f32 {
     440.0 * ((pitch - 33.0) / 12.0).exp2()
 }
 
+/// One sample of a deterministic (non-noise) waveform at `phase` in `[0, 1)`.
+/// Factored out so the `detune` filter can run a second oscillator through it.
+fn tonal_wave(wave: Waveform, phase: f32) -> f32 {
+    match wave {
+        Waveform::Triangle => 4.0 * (phase - 0.5).abs() - 1.0,
+        Waveform::TiltedSaw => {
+            if phase < 0.875 {
+                phase / 0.875 * 2.0 - 1.0
+            } else {
+                (1.0 - phase) / 0.125 * 2.0 - 1.0
+            }
+        }
+        Waveform::Saw => 2.0 * phase - 1.0,
+        Waveform::Square => {
+            if phase < 0.5 {
+                1.0
+            } else {
+                -1.0
+            }
+        }
+        Waveform::Pulse => {
+            if phase < 0.3125 {
+                1.0
+            } else {
+                -1.0
+            }
+        }
+        Waveform::Organ => {
+            let t1 = 4.0 * (phase - 0.5).abs() - 1.0;
+            let p2 = (phase * 0.5).fract();
+            let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
+            (t1 + t2) * 0.5
+        }
+        Waveform::Phaser => {
+            let t1 = 4.0 * (phase - 0.5).abs() - 1.0;
+            let p2 = (phase * 1.01).fract();
+            let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
+            (t1 + t2) * 0.5
+        }
+        // Noise is stateful; handled directly in `Voice::sample`.
+        Waveform::Noise => 0.0,
+    }
+}
+
 /// One playing voice on a channel.
 struct Voice {
     sfx_index: usize,
@@ -26,6 +70,8 @@ struct Voice {
     t_in_step: f32,
     /// Oscillator phase in `[0, 1)`.
     phase: f32,
+    /// Phase of the detuned second oscillator (`detune` filter).
+    phase2: f32,
     /// Pitch of the previous step, for slides.
     prev_pitch: f32,
     /// True when this voice was started by the music sequencer.
@@ -33,21 +79,38 @@ struct Voice {
     /// Noise generator state.
     noise: u32,
     noise_level: f32,
+    /// One-pole low-pass state (`dampen` filter).
+    lp: f32,
+    /// Echo delay ring buffer and write cursor (`reverb` filter); empty when
+    /// reverb is off.
+    echo: Vec<f32>,
+    echo_pos: usize,
 }
 
 impl Voice {
-    fn new(sfx_index: usize, sfx: Sfx, from_music: bool) -> Self {
+    fn new(sfx_index: usize, sfx: Sfx, from_music: bool, sample_rate: f32) -> Self {
         let first_pitch = sfx.notes[0].pitch as f32;
+        // Reverb delays by 2 or 4 ticks; size the ring buffer to suit.
+        let echo_ticks = match sfx.reverb {
+            1 => 2.0,
+            2 => 4.0,
+            _ => 0.0,
+        };
+        let echo_len = (echo_ticks / TICKS_PER_SECOND * sample_rate).round() as usize;
         Self {
             sfx_index,
             sfx,
             step: 0,
             t_in_step: 0.0,
             phase: 0.0,
+            phase2: 0.0,
             prev_pitch: first_pitch,
             from_music,
             noise: 0x1234_5678,
             noise_level: 0.0,
+            lp: 0.0,
+            echo: vec![0.0; echo_len],
+            echo_pos: 0,
         }
     }
 
@@ -98,38 +161,12 @@ impl Voice {
 
         // Advance oscillator.
         self.phase = (self.phase + freq * dt).fract();
-        let raw = match wave {
-            Waveform::Triangle => 4.0 * (self.phase - 0.5).abs() - 1.0,
-            Waveform::TiltedSaw => {
-                let p = self.phase;
-                if p < 0.875 {
-                    p / 0.875 * 2.0 - 1.0
-                } else {
-                    (1.0 - p) / 0.125 * 2.0 - 1.0
-                }
-            }
-            Waveform::Saw => 2.0 * self.phase - 1.0,
-            Waveform::Square => {
-                if self.phase < 0.5 {
-                    1.0
-                } else {
-                    -1.0
-                }
-            }
-            Waveform::Pulse => {
-                if self.phase < 0.3125 {
-                    1.0
-                } else {
-                    -1.0
-                }
-            }
-            Waveform::Organ => {
-                let t1 = 4.0 * (self.phase - 0.5).abs() - 1.0;
-                let p2 = (self.phase * 0.5).fract();
-                let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
-                (t1 + t2) * 0.5
-            }
-            Waveform::Noise => {
+        let mut raw = if wave == Waveform::Noise {
+            if self.sfx.noiz {
+                // `noiz` swaps the pitched noise for pure white noise.
+                self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
+                (self.noise >> 16) as f32 / 32768.0 - 1.0
+            } else {
                 // Resample an LFSR at the note frequency for pitched noise.
                 if self.phase < freq * dt {
                     self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -137,15 +174,42 @@ impl Voice {
                 }
                 self.noise_level
             }
-            Waveform::Phaser => {
-                let t1 = 4.0 * (self.phase - 0.5).abs() - 1.0;
-                let p2 = (self.phase * 1.01).fract();
-                let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
-                (t1 + t2) * 0.5
+        } else {
+            let mut s = tonal_wave(wave, self.phase);
+            // `detune` mixes in a second oscillator a little (or an octave)
+            // off the first.
+            if self.sfx.detune > 0 {
+                let ratio = if self.sfx.detune == 1 { 1.0073 } else { 2.0 };
+                self.phase2 = (self.phase2 + freq * ratio * dt).fract();
+                s = (s + tonal_wave(wave, self.phase2)) * 0.5;
             }
+            s
         };
 
-        let out = raw * vol * 0.25;
+        // `buzz` adds harmonics with a soft overdrive (normalized to unity).
+        if self.sfx.buzz {
+            const DRIVE: f32 = 2.5;
+            raw = (raw * DRIVE).tanh() / DRIVE.tanh();
+        }
+
+        let mut out = raw * vol * 0.25;
+
+        // `dampen` is a one-pole low-pass at one of two cutoffs.
+        if self.sfx.dampen > 0 {
+            let fc = if self.sfx.dampen == 1 { 2200.0 } else { 900.0 };
+            let rc = 1.0 / (2.0 * std::f32::consts::PI * fc);
+            let alpha = dt / (rc + dt);
+            self.lp += alpha * (out - self.lp);
+            out = self.lp;
+        }
+
+        // `reverb` is a feedback echo through the delay ring buffer.
+        if !self.echo.is_empty() {
+            let delayed = self.echo[self.echo_pos];
+            self.echo[self.echo_pos] = (out + delayed * 0.45).clamp(-1.0, 1.0);
+            self.echo_pos = (self.echo_pos + 1) % self.echo.len();
+            out = (out + delayed * 0.5).clamp(-1.0, 1.0);
+        }
 
         // Advance step clock.
         self.t_in_step += dt;
@@ -228,7 +292,7 @@ impl Synth {
                 None => CHANNELS - 1,
             }
         };
-        self.voices[ch] = Some(Voice::new(n as usize, sfx, false));
+        self.voices[ch] = Some(Voice::new(n as usize, sfx, false, self.sample_rate));
     }
 
     /// Start music at pattern `n`, or stop when `n < 0`.
@@ -266,7 +330,8 @@ impl Synth {
                 if let Some(sfx) = self.sfx.get(*sfx_idx as usize).cloned() {
                     let dur = sfx.speed.max(1) as f32 / TICKS_PER_SECOND * SFX_LEN as f32;
                     longest = longest.max(dur);
-                    self.voices[ch] = Some(Voice::new(*sfx_idx as usize, sfx, true));
+                    self.voices[ch] =
+                        Some(Voice::new(*sfx_idx as usize, sfx, true, self.sample_rate));
                 }
             } else if self.voices[ch].as_ref().is_some_and(|v| v.from_music) {
                 self.voices[ch] = None;
@@ -513,6 +578,28 @@ mod tests {
             peak = peak.max(synth.next_sample().abs());
         }
         assert!(peak > 0.01, "a custom-instrument note should be audible");
+    }
+
+    #[test]
+    fn sfx_filters_stay_audible_and_bounded() {
+        // Every filter switch on at once must still produce a clean, bounded
+        // signal (no NaNs, no runaway feedback).
+        let mut sfx = test_sfx();
+        sfx[0].noiz = true;
+        sfx[0].buzz = true;
+        sfx[0].detune = 2;
+        sfx[0].reverb = 2;
+        sfx[0].dampen = 1;
+        let mut synth = Synth::new(44100.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+        let mut peak = 0.0f32;
+        for _ in 0..44100 {
+            let s = synth.next_sample();
+            assert!(s.is_finite() && s.abs() <= 1.0, "sample out of range: {s}");
+            peak = peak.max(s.abs());
+        }
+        assert!(peak > 0.01, "filtered voice should still be audible");
     }
 
     #[test]
