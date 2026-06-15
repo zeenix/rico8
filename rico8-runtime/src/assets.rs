@@ -222,6 +222,17 @@ impl Note {
     }
 }
 
+/// A drawn custom-waveform instrument occupying SFX slots `0..8`. When present,
+/// the slot is used as an instrument timbre (one signed sample per step) by
+/// notes that reference it, rather than as a sequence of notes.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CustomWave {
+    /// One signed sample per step; the editor draws values in `-16..=15`.
+    pub samples: [i8; SFX_LEN],
+    /// Pitch the waveform an octave down (PICO-8's "bass" toggle).
+    pub bass: bool,
+}
+
 /// One sound effect: 32 steps played at a configurable speed.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Sfx {
@@ -244,6 +255,9 @@ pub struct Sfx {
     pub reverb: u8,
     /// Low-pass softening. `0` off; `1`/`2` are the two strengths.
     pub dampen: u8,
+    /// `Some` only for slots `0..8` that are drawn-waveform instruments.
+    #[serde(default)]
+    pub custom_wave: Option<CustomWave>,
 }
 
 impl Default for Sfx {
@@ -258,6 +272,7 @@ impl Default for Sfx {
             detune: 0,
             reverb: 0,
             dampen: 0,
+            custom_wave: None,
         }
     }
 }
@@ -472,5 +487,23 @@ mod tests {
         s.set(8, 8, 12);
         assert_eq!(s.sprite_pixel(17, 0, 0), 12);
         assert_eq!(s.sprite_pixel(16, 8, 0), 12);
+    }
+
+    #[test]
+    fn custom_wave_roundtrips_and_defaults_none() {
+        // A fresh SFX has no custom waveform.
+        assert!(Sfx::default().custom_wave.is_none());
+
+        let mut a = Assets::default();
+        a.sfx[0].custom_wave = Some(CustomWave {
+            samples: [3; SFX_LEN],
+            bass: true,
+        });
+        let bytes = postcard::to_allocvec(&a).unwrap();
+        let b: Assets = postcard::from_bytes(&bytes).unwrap();
+        let w = b.sfx[0].custom_wave.as_ref().expect("wave kept");
+        assert_eq!(w.samples[0], 3);
+        assert!(w.bass);
+        assert!(b.sfx[1].custom_wave.is_none());
     }
 }

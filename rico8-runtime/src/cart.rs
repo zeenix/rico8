@@ -23,7 +23,8 @@ use crate::{assets::Assets, font, palette};
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 
-/// Current cartridge format version.
+/// Current cartridge format version. Bump (and reject older carts with a clear
+/// message) once carts are published; until then format changes are free.
 pub const CART_VERSION: u16 = 1;
 const CART_MAGIC: &[u8; 5] = b"RICO8";
 const CHUNK_TYPE: [u8; 4] = *b"rcRt";

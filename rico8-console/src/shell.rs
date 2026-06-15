@@ -1055,6 +1055,11 @@ impl Shell {
                         if let Some(a) = assets_of(&mut self.loaded) {
                             self.music_ed.tick(&mouse, a, &audio);
                         }
+                        // The pencil on a channel jumps to that SFX for editing.
+                        if let Some(n) = self.music_ed.take_edit_request() {
+                            self.sfx_ed.select(n);
+                            self.switch_editor(Mode::Sfx);
+                        }
                     }
                     _ => {}
                 }
@@ -1162,6 +1167,13 @@ impl Shell {
                     _ => {}
                 }
                 ui::draw_tab_bar(&mut self.fb, self.mode);
+                // The audio editors show PICO-8's pitch/tracker mode buttons in
+                // the top-left (the music editor's are decorative).
+                match self.mode {
+                    Mode::Music => ui::mode_buttons(&mut self.fb, true),
+                    Mode::Sfx => ui::mode_buttons(&mut self.fb, self.sfx_ed.is_pitch()),
+                    _ => {}
+                }
                 self.draw_toast();
                 ui::draw_cursor(&mut self.fb, &mouse);
                 &self.fb

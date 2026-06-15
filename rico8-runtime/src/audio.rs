@@ -82,6 +82,20 @@ fn tonal_wave(wave: Waveform, phase: f32) -> f32 {
     }
 }
 
+/// One sample of a drawn waveform-instrument table at `phase` in `[0, 1)`,
+/// linearly interpolated. Samples are signed (`-16..=15`); normalized to
+/// roughly `[-1, 1)`.
+fn drawn_wave(w: &crate::assets::CustomWave, phase: f32) -> f32 {
+    let n = w.samples.len();
+    let fpos = phase * n as f32;
+    let i0 = (fpos as usize) % n;
+    let i1 = (i0 + 1) % n;
+    let frac = fpos - fpos.floor();
+    let a = w.samples[i0] as f32 / 16.0;
+    let b = w.samples[i1] as f32 / 16.0;
+    a + (b - a) * frac
+}
+
 /// One playing voice on a channel.
 struct Voice {
     sfx_index: usize,
@@ -145,7 +159,15 @@ impl Voice {
     /// `inst_waves` carries the timbre of each of the eight SFX slots usable
     /// as custom instruments (its note-0 waveform), so a note flagged as a
     /// custom instrument plays through that waveform at its own pitch.
-    fn sample(&mut self, dt: f32, total_t: f32, inst_waves: &[u8; 8]) -> Option<f32> {
+    /// `inst_drawn` carries those slots' drawn waveform tables, when any; a
+    /// custom-instrument note whose slot has one plays it instead of a built-in.
+    fn sample(
+        &mut self,
+        dt: f32,
+        total_t: f32,
+        inst_waves: &[u8; 8],
+        inst_drawn: &[Option<crate::assets::CustomWave>; 8],
+    ) -> Option<f32> {
         if self.step >= SFX_LEN {
             return None;
         }
@@ -173,9 +195,12 @@ impl Voice {
             }
         }
 
-        let freq = pitch_to_freq(pitch);
-        // A custom-instrument note borrows the timbre of another SFX (its
-        // note-0 waveform); otherwise the nibble names a built-in waveform.
+        // A custom-instrument note borrows the timbre of another SFX: its
+        // drawn waveform table when it has one, else that slot's note-0 built-in
+        // waveform. A plain note names a built-in waveform directly.
+        let drawn = note.instrument().and_then(|slot| inst_drawn[slot as usize]);
+        let bass = drawn.is_some_and(|w| w.bass);
+        let freq = pitch_to_freq(pitch) * if bass { 0.5 } else { 1.0 };
         let wave = match note.instrument() {
             Some(slot) => Waveform::from_u8(inst_waves[slot as usize]),
             None => Waveform::from_u8(note.wave),
@@ -183,7 +208,9 @@ impl Voice {
 
         // Advance oscillator.
         self.phase = (self.phase + freq * dt).fract();
-        let mut raw = if wave == Waveform::Noise {
+        let mut raw = if let Some(w) = &drawn {
+            drawn_wave(w, self.phase)
+        } else if wave == Waveform::Noise {
             if self.sfx.noiz {
                 // `noiz` swaps the pitched noise for pure white noise.
                 self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -425,18 +452,21 @@ impl Synth {
             }
         }
 
-        // Timbre of the eight SFX slots usable as custom instruments.
+        // Timbre of the eight SFX slots usable as custom instruments: each
+        // slot's note-0 built-in waveform and its drawn waveform table (if any).
         let mut inst_waves = [0u8; 8];
-        for (i, w) in inst_waves.iter_mut().enumerate() {
+        let mut inst_drawn: [Option<crate::assets::CustomWave>; 8] = Default::default();
+        for i in 0..8 {
             if let Some(s) = self.sfx.get(i) {
-                *w = s.notes[0].wave_index();
+                inst_waves[i] = s.notes[0].wave_index();
+                inst_drawn[i] = s.custom_wave;
             }
         }
 
         let mut mix = 0.0;
         for v in &mut self.voices {
             if let Some(voice) = v {
-                match voice.sample(dt, self.t, &inst_waves) {
+                match voice.sample(dt, self.t, &inst_waves, &inst_drawn) {
                     Some(s) => mix += s,
                     None => *v = None,
                 }
@@ -450,6 +480,16 @@ impl Synth {
         let mut out = [None; CHANNELS];
         for (i, v) in self.voices.iter().enumerate() {
             out[i] = v.as_ref().map(|v| v.sfx_index);
+        }
+        out
+    }
+
+    /// Which step each channel's voice is currently sounding (for editor
+    /// playheads); `None` when the channel is idle.
+    pub fn channel_step(&self) -> [Option<usize>; CHANNELS] {
+        let mut out = [None; CHANNELS];
+        for (i, v) in self.voices.iter().enumerate() {
+            out[i] = v.as_ref().map(|v| v.step);
         }
         out
     }
@@ -483,6 +523,11 @@ impl AudioHandle {
 
     pub fn play_sfx(&self, n: i32, channel: i32) {
         self.with_synth(|s| s.play_sfx(n, channel));
+    }
+
+    /// The step each channel's voice is sounding (for editor playheads).
+    pub fn channel_step(&self) -> [Option<usize>; CHANNELS] {
+        self.with_synth(|s| s.channel_step())
     }
 
     pub fn play_music(&self, n: i32) {
@@ -729,5 +774,56 @@ mod tests {
         let chans = synth.channel_sfx();
         assert_eq!(chans[0], Some(0), "music keeps channel 0");
         assert!(chans[1..].contains(&Some(1)), "sfx lands elsewhere");
+    }
+
+    #[test]
+    fn drawn_waveform_instrument_drives_output() {
+        use crate::assets::{CustomWave, Note, NOTE_CUSTOM_FLAG, SFX_COUNT, SFX_LEN};
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        // SFX 1 is a drawn-waveform instrument held at the maximum positive
+        // sample: this produces a constant positive (DC) signal, which no
+        // built-in (zero-mean) waveform could ever produce — so a nonzero
+        // positive mean proves the drawn samples are what's being played.
+        sfx[1].custom_wave = Some(CustomWave {
+            samples: [15; SFX_LEN],
+            bass: false,
+        });
+        for note in sfx[0].notes.iter_mut() {
+            *note = Note {
+                pitch: 33,
+                wave: NOTE_CUSTOM_FLAG | 1,
+                volume: 5,
+                effect: 0,
+            };
+        }
+        let mut synth = Synth::new(44100.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+        let mut sum = 0.0f32;
+        let n = 2000;
+        for _ in 0..n {
+            let s = synth.next_sample();
+            assert!(s.is_finite() && s.abs() <= 1.0, "sample out of range: {s}");
+            sum += s;
+        }
+        assert!(
+            sum / n as f32 > 0.05,
+            "drawn samples should drive the output"
+        );
+    }
+
+    #[test]
+    fn channel_step_tracks_playback() {
+        let mut synth = Synth::new(44100.0);
+        synth.load(test_sfx(), vec![MusicPattern::default(); 64]);
+        assert_eq!(synth.channel_step(), [None, None, None, None]);
+        synth.play_sfx(0, 0);
+        // After starting, channel 0 is on step 0.
+        assert_eq!(synth.channel_step()[0], Some(0));
+        // Default speed 16 -> 0.125 s/step; advance ~0.2 s, expect step 1.
+        for _ in 0..(44100 / 5) {
+            synth.next_sample();
+        }
+        assert_eq!(synth.channel_step()[0], Some(1));
     }
 }
