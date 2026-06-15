@@ -2,7 +2,7 @@
 //!
 //! `rico8` opens the console; `rico8 <dir|cart.png>` opens it with a cart
 //! loaded. A few headless subcommands (`new`, `build`, `export`,
-//! `extract`) support the external-editor workflow and CI.
+//! `extract`, `import-pico8`) support the external-editor workflow and CI.
 
 mod builder;
 mod editor;
@@ -62,6 +62,7 @@ fn main() -> Result<()> {
             !rest.contains(&"--no-source"),
         ),
         ["extract", png, dir] => headless_extract(Path::new(png), Path::new(dir)),
+        ["import-pico8", src, dir] => headless_import_pico8(Path::new(src), Path::new(dir)),
         ["export-web", input, out] => headless_export_web(Path::new(input), Path::new(out)),
         ["verify", png] => headless_verify(Path::new(png)),
         ["snap", project, outdir] => headless_snap(Path::new(project), Path::new(outdir)),
@@ -86,6 +87,8 @@ fn print_help() {
          \x20                            build + export a png cart (headless)\n\
          \x20 rico8 extract <cart.png> <dir>\n\
          \x20                            turn an editable cart into a project\n\
+         \x20 rico8 import-pico8 <cart.p8|.p8.png> <dir>\n\
+         \x20                            import a pico-8 cart's assets into a project\n\
          \x20 rico8 export-web <dir|cart.png> <out.html>\n\
          \x20                            export a self-contained playable web page\n\
          \x20 rico8 verify <cart.png>    load a cart and run 60 frames headless",
@@ -158,6 +161,15 @@ fn headless_extract(png: &Path, dir: &Path) -> Result<()> {
     project.assets = cart.assets;
     project.save()?;
     println!("extracted into {}", dir.display());
+    Ok(())
+}
+
+/// Import a PICO-8 cart (`.p8` text or `.p8.png`) into a new project. Only
+/// the assets — graphics, map, sound and music — transfer; the cart's Lua
+/// code is ignored.
+fn headless_import_pico8(src: &Path, dir: &Path) -> Result<()> {
+    rico8_runtime::pico8::import_project(src, dir, &sdk_path())?;
+    println!("imported {} into {}", src.display(), dir.display());
     Ok(())
 }
 

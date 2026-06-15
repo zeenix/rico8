@@ -104,6 +104,20 @@ and friends on ArkOS/ROCKNIX) via `rico8-player`, a tiny SDL2 player
 with a console-style cart picker — copy it into the ports folder, drop
 `.png` carts next to it, play. See [docs/HANDHELD.md](docs/HANDHELD.md).
 
+## Coming from PICO-8
+
+RICO-8 shares PICO-8's palette, waveforms and sprite layout, so a PICO-8
+cart's assets import almost one-to-one:
+
+```text
+rico8 import-pico8 mygame.p8 mygame      # or mygame.p8.png
+```
+
+The graphics, sprite flags, map, sound effects and music transfer into a new
+project. Only the assets come across — the cart's Lua code is ignored — and
+the project gets a stub `src/lib.rs` to write your game in Rust. See
+[docs/PICO8_IMPORT.md](docs/PICO8_IMPORT.md).
+
 ## Projects are real crates
 
 A RICO-8 project is an ordinary Cargo crate that builds a `cdylib` for
@@ -117,6 +131,7 @@ rico8 new <dir>                  create a project
 rico8 build <dir>                compile it to wasm
 rico8 export <dir> <out.png>     build + write a png cart
 rico8 extract <cart.png> <dir>   editable cart -> project
+rico8 import-pico8 <c> <dir>     pico-8 cart (.p8/.p8.png) -> project
 rico8 export-web <dir> <o.html>  one playable web page
 rico8 verify <cart.png>          run 60 frames headless
 ```
@@ -149,6 +164,7 @@ docs/
   ABI.md          the wasm import surface, function by function
   ARCHITECTURE.md how the pieces fit
   CART_FORMAT.md  the PNG cartridge format
+  PICO8_IMPORT.md importing PICO-8 .p8 / .p8.png carts
 ```
 
 ## Building
