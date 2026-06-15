@@ -215,6 +215,8 @@ fn parse_text(text: &str) -> Result<Assets> {
         if h.len() < 8 {
             continue;
         }
+        // The first metadata byte packs the editor mode and filter switches.
+        let filters = h[0] << 4 | h[1];
         let speed = (h[2] << 4 | h[3]).max(1);
         let loop_start = h[4] << 4 | h[5];
         let loop_end = h[6] << 4 | h[7];
@@ -233,12 +235,15 @@ fn parse_text(text: &str) -> Result<Assets> {
                 effect: h[base + 4] & 7,
             };
         }
-        assets.sfx[s] = Sfx {
+        let mut out = Sfx {
             notes,
             speed,
             loop_start,
             loop_end,
+            ..Default::default()
         };
+        out.set_filters(filters);
+        assets.sfx[s] = out;
     }
 
     // music: a flag byte then four channel bytes, e.g. "00 41424344".
@@ -370,8 +375,8 @@ fn music_from_mem(ch: [u8; 4]) -> MusicPattern {
 
 /// One PICO-8 SFX from its 68 cart-memory bytes: 32 notes of two bytes
 /// (little-endian: pitch 0-5, waveform 6-8, volume 9-11, effect 12-14,
-/// custom-instrument flag 15), then editor-mode, speed, loop-start and
-/// loop-end metadata.
+/// custom-instrument flag 15), then the filter/editor-mode byte, speed,
+/// loop-start and loop-end metadata.
 fn sfx_from_mem(b: &[u8]) -> Sfx {
     let mut notes = [Note::default(); SFX_LEN];
     for (i, note) in notes.iter_mut().enumerate() {
@@ -386,12 +391,15 @@ fn sfx_from_mem(b: &[u8]) -> Sfx {
             effect: (v >> 12 & 7) as u8,
         };
     }
-    Sfx {
+    let mut sfx = Sfx {
         notes,
         speed: b[65].max(1),
         loop_start: b[66],
         loop_end: b[67],
-    }
+        ..Default::default()
+    };
+    sfx.set_filters(b[64]);
+    sfx
 }
 
 /// Decode one music channel byte: the low 6 bits are the SFX index; bit 6
@@ -556,7 +564,8 @@ mod tests {
         s.push('\n');
         // sfx 0: speed 0x10, loop 02..04, note0 pitch 21 wave 3 vol 6 eff 1.
         s.push_str("__sfx__\n");
-        let mut sfx = String::from("00100204"); // mode, speed, loop start, loop end
+        // filter byte 0x86 = noiz + buzz + detune 1 + reverb 2 + dampen 1.
+        let mut sfx = String::from("86100204"); // filters, speed, loop start, loop end
         sfx.push_str("21361"); // note 0: pitch 21, wave 3, vol 6, eff 1
         sfx.push_str("10a50"); // note 1: custom instrument 2 (nibble 0xa), vol 5
         sfx.push_str(&"00000".repeat(30)); // notes 2..32 silent
@@ -583,6 +592,10 @@ mod tests {
         assert_eq!(n.instrument(), None, "a plain note is not a custom instr");
         assert_eq!(a.sfx[0].speed, 0x10);
         assert_eq!((a.sfx[0].loop_start, a.sfx[0].loop_end), (0x02, 0x04));
+        // Filter byte 0x86 decodes to every switch engaged.
+        let f = &a.sfx[0];
+        assert!(f.noiz && f.buzz);
+        assert_eq!((f.detune, f.reverb, f.dampen), (1, 2, 1));
 
         // Note 1 is a custom instrument: index 2 with the custom flag set.
         let n1 = a.sfx[0].notes[1];
@@ -614,6 +627,7 @@ mod tests {
         let v: u16 = 0x12 | (2 << 6) | (5 << 9) | (3 << 12) | (1 << 15);
         rom[0x3200] = (v & 0xff) as u8;
         rom[0x3201] = (v >> 8) as u8;
+        rom[0x3200 + 64] = 0x1a; // filters: noiz + reverb 1
         rom[0x3200 + 65] = 0x18; // speed
                                  // music 0: ch0 = sfx 7, stop flag on ch2.
         rom[0x3100] = 0x07;
@@ -632,6 +646,11 @@ mod tests {
         assert_eq!((n.pitch, n.volume, n.effect), (0x12, 5, 3));
         assert_eq!(n.instrument(), Some(2), "bit 15 marks a custom instrument");
         assert_eq!(a.sfx[0].speed, 0x18);
+        assert!(a.sfx[0].noiz && !a.sfx[0].buzz);
+        assert_eq!(
+            (a.sfx[0].detune, a.sfx[0].reverb, a.sfx[0].dampen),
+            (0, 1, 0)
+        );
         assert_eq!(a.music[0].channels[0], Some(7));
         assert!(a.music[0].stop_at_end);
     }
