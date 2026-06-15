@@ -258,11 +258,13 @@ fn base_assets() -> Assets {
 fn main() {
     let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples");
     for (dir, author) in [
+        ("hello", "rico-8"),
         ("sprite_move", "rico-8"),
         ("platformer", "rico-8"),
         ("map_demo", "rico-8"),
         ("sfx_demo", "rico-8"),
         ("music_demo", "rico-8"),
+        ("stress", "rico-8"),
     ] {
         let mut assets = base_assets();
         assets.meta.name = dir.replace('_', " ");

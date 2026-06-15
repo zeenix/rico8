@@ -22,7 +22,12 @@ use std::{
 };
 
 /// Magic + version header for the assets file.
-const ASSETS_MAGIC: &[u8; 7] = b"RICO8A\x01";
+const ASSETS_MAGIC: &[u8; 6] = b"RICO8A";
+/// `assets.rico8` body format version, so a future (post-release) format change
+/// can reject older files with a clear message instead of mis-parsing them.
+/// Until a cart format ships, format changes just regenerate the example assets
+/// and leave this at 1.
+const ASSETS_VERSION: u8 = 1;
 
 /// Default game source created by `new`.
 pub const TEMPLATE_CODE: &str = r#"#![no_std]
@@ -175,18 +180,28 @@ panic = "abort"
     }
 }
 
-/// Serialize assets with the magic/version header.
+/// Serialize assets with the magic + version header.
 pub fn encode_assets(assets: &Assets) -> Result<Vec<u8>> {
     let mut out = ASSETS_MAGIC.to_vec();
+    out.push(ASSETS_VERSION);
     out.extend(postcard::to_allocvec(assets)?);
     Ok(out)
 }
 
-/// Parse an assets file, checking the header.
+/// Parse an assets file, checking the header and format version.
 pub fn decode_assets(bytes: &[u8]) -> Result<Assets> {
     let body = bytes
         .strip_prefix(ASSETS_MAGIC.as_slice())
         .ok_or_else(|| anyhow!("assets.rico8 has an unknown header"))?;
+    let (&version, body) = body
+        .split_first()
+        .ok_or_else(|| anyhow!("assets.rico8 header is truncated"))?;
+    if version != ASSETS_VERSION {
+        bail!(
+            "assets.rico8 is format version {version}, but this rico-8 needs \
+             version {ASSETS_VERSION}; recreate or re-import the cart"
+        );
+    }
     let assets: Assets = postcard::from_bytes(body)?;
     crate::assets::validate(&assets)?;
     Ok(assets)
@@ -257,9 +272,33 @@ mod tests {
     }
 
     #[test]
+    fn example_assets_load_in_the_current_format() {
+        // The committed example carts must stay loadable; this catches an
+        // assets-format change that forgets to regenerate them.
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples");
+        for dir in [
+            "hello",
+            "sprite_move",
+            "platformer",
+            "map_demo",
+            "sfx_demo",
+            "music_demo",
+            "stress",
+        ] {
+            let path = root.join(dir).join("assets.rico8");
+            let bytes =
+                std::fs::read(&path).unwrap_or_else(|e| panic!("read {}: {e}", path.display()));
+            decode_assets(&bytes).unwrap_or_else(|e| panic!("decode {}: {e}", path.display()));
+        }
+    }
+
+    #[test]
     fn assets_header_is_checked() {
         assert!(decode_assets(b"NOTRICO8").is_err());
+        // A file from a different format version is rejected, not mis-parsed.
+        assert!(decode_assets(b"RICO8A\x02anything").is_err());
         let bytes = encode_assets(&Assets::default()).unwrap();
+        assert_eq!(bytes[6], ASSETS_VERSION, "version byte follows the magic");
         assert!(decode_assets(&bytes).is_ok());
     }
 
