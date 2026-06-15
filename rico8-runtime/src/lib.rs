@@ -17,6 +17,7 @@ pub mod fb;
 pub mod font;
 pub mod input;
 pub mod palette;
+pub mod pico8;
 pub mod project;
 pub mod ui;
 pub mod vm;
