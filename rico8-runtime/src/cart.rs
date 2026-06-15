@@ -19,10 +19,7 @@
 //! `CartPayload` always carries the compiled `game.wasm` and the full
 //! asset bundle; carts exported as *editable* also carry the Rust source.
 
-use crate::{
-    assets::{Assets, MUSIC_COUNT, SFX_COUNT, SHEET_H, SHEET_W, SPRITE_COUNT},
-    font, palette,
-};
+use crate::{assets::Assets, font, palette};
 use anyhow::{anyhow, bail, Result};
 use serde::{Deserialize, Serialize};
 
@@ -176,20 +173,7 @@ fn validate(cart: &Cart) -> Result<()> {
             MAX_WASM_SIZE
         );
     }
-    let a = &cart.assets;
-    if a.sprites.pixels.len() != SHEET_W * SHEET_H
-        || a.sprites.flags.len() != SPRITE_COUNT
-        || a.map.tiles.len() != crate::assets::MAP_W * crate::assets::MAP_H
-        || a.sfx.len() != SFX_COUNT
-        || a.music.len() != MUSIC_COUNT
-    {
-        bail!("cart assets have invalid dimensions");
-    }
-    if let Some(label) = &a.label {
-        if label.len() != 128 * 128 {
-            bail!("cart label has invalid dimensions");
-        }
-    }
+    crate::assets::validate(&cart.assets)?;
     Ok(())
 }
 
