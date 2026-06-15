@@ -128,6 +128,13 @@ fn cart_title(src: &Path) -> Option<String> {
     (!name.is_empty()).then(|| name.to_string())
 }
 
+/// Default project directory name to import a cart into when none is given:
+/// the cart's name with its suffixes peeled off (`airwolf.p8` -> `airwolf`),
+/// falling back to `imported`.
+pub fn default_dir_name(src: &Path) -> String {
+    cart_title(src).unwrap_or_else(|| "imported".into())
+}
+
 // ---------------------------------------------------------------------------
 // Text .p8 parsing
 // ---------------------------------------------------------------------------
@@ -605,6 +612,14 @@ mod tests {
         let m = &a.music[0];
         assert!(m.loop_start && !m.loop_back && !m.stop_at_end);
         assert_eq!(m.channels, [Some(1), None, None, None]);
+    }
+
+    #[test]
+    fn default_dir_name_strips_suffixes() {
+        assert_eq!(default_dir_name(Path::new("airwolf.p8")), "airwolf");
+        assert_eq!(default_dir_name(Path::new("celeste.p8.png")), "celeste");
+        assert_eq!(default_dir_name(Path::new("/a/b/jelpi.p8")), "jelpi");
+        assert_eq!(default_dir_name(Path::new("noext")), "noext");
     }
 
     #[test]

@@ -596,7 +596,7 @@ impl Shell {
             ("run", "build + run (esc stops)"),
             ("export <f.png|f.html>", "export cart (png or web)"),
             ("import <f.png> <dir>", "cart -> project"),
-            ("import-pico8 <f> <dir>", "pico-8 cart -> project"),
+            ("import-pico8 <f> [dir]", "pico-8 cart -> project"),
             ("info", "cart metadata"),
             ("title/author <text>", "set metadata"),
             ("code/sprite/map/sfx/music", "editors (esc)"),
@@ -825,11 +825,15 @@ impl Shell {
     /// Import a PICO-8 cart's assets into a fresh project. Only the graphics,
     /// map, sound and music transfer; the cart's Lua code is ignored.
     fn cmd_import_pico8(&mut self, args: &[&str]) -> Result<()> {
-        let (Some(src), Some(dir)) = (args.first(), args.get(1)) else {
-            bail!("usage: import-pico8 <cart.p8|cart.p8.png> <dir>");
+        let Some(src) = args.first() else {
+            bail!("usage: import-pico8 <cart.p8|cart.p8.png> [dir]");
         };
         let src = self.cwd.join(src);
-        let dir = self.cwd.join(dir);
+        // The destination defaults to the cart's name when omitted.
+        let dir = match args.get(1) {
+            Some(d) => self.cwd.join(d),
+            None => self.cwd.join(rico8_runtime::pico8::default_dir_name(&src)),
+        };
         let project = rico8_runtime::pico8::import_project(&src, &dir, &self.sdk_path)?;
         self.say(
             &format!("imported assets into {}", dir.display()),
