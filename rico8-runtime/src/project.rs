@@ -107,11 +107,21 @@ panic = "abort"
         fs::create_dir_all(dir.join(".cargo"))?;
         fs::write(
             dir.join(".cargo/config.toml"),
-            // Shrink LLVM's 1 MiB shadow-stack reserve to 32 KiB so the cart's
-            // initial linear memory fits the 128 K runtime cap. Target-scoped so
-            // host tooling is unaffected. The console injects the same flag via
-            // RUSTFLAGS when it builds; this keeps plain `cargo build` consistent.
-            "[target.wasm32-unknown-unknown]\n\
+            // Default to the wasm target so plain `cargo build`/`check`/`test`
+            // just work: a `#![no_std]` cart can't build for the host (its
+            // unwinding panic strategy isn't supported without std), and wasm32
+            // is what carts compile to anyway. The console still passes
+            // `--target wasm32-unknown-unknown` explicitly, which matches.
+            //
+            // The rustflags shrink LLVM's 1 MiB shadow-stack reserve to 32 KiB
+            // so the cart's initial linear memory fits the 128 K runtime cap.
+            // Target-scoped so host tooling is unaffected. The console injects
+            // the same flag via RUSTFLAGS when it builds; this keeps plain
+            // `cargo build` consistent.
+            "[build]\n\
+             target = \"wasm32-unknown-unknown\"\n\
+             \n\
+             [target.wasm32-unknown-unknown]\n\
              rustflags = [\"-C\", \"link-arg=-z\", \"-C\", \"link-arg=stack-size=32768\"]\n",
         )?;
         let mut assets = Assets::default();
@@ -276,6 +286,12 @@ mod tests {
         let cfg = fs::read_to_string(dir.join("g/.cargo/config.toml")).unwrap();
         assert!(cfg.contains("wasm32-unknown-unknown"), "config: {cfg}");
         assert!(cfg.contains("stack-size=32768"), "config: {cfg}");
+        // Default build target so plain `cargo build`/`check` target wasm and a
+        // no_std cart doesn't fail with "unwinding panics are not supported".
+        assert!(
+            cfg.contains("[build]") && cfg.contains("target = \"wasm32-unknown-unknown\""),
+            "config: {cfg}"
+        );
         fs::remove_dir_all(&dir).unwrap();
     }
 }
