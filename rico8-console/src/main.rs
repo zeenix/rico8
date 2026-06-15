@@ -62,6 +62,11 @@ fn main() -> Result<()> {
             !rest.contains(&"--no-source"),
         ),
         ["extract", png, dir] => headless_extract(Path::new(png), Path::new(dir)),
+        ["import-pico8", src] => {
+            let src = Path::new(src);
+            let dir = rico8_runtime::pico8::default_dir_name(src);
+            headless_import_pico8(src, Path::new(&dir))
+        }
         ["import-pico8", src, dir] => headless_import_pico8(Path::new(src), Path::new(dir)),
         ["export-web", input, out] => headless_export_web(Path::new(input), Path::new(out)),
         ["verify", png] => headless_verify(Path::new(png)),
@@ -87,8 +92,9 @@ fn print_help() {
          \x20                            build + export a png cart (headless)\n\
          \x20 rico8 extract <cart.png> <dir>\n\
          \x20                            turn an editable cart into a project\n\
-         \x20 rico8 import-pico8 <cart.p8|.p8.png> <dir>\n\
+         \x20 rico8 import-pico8 <cart.p8|.p8.png> [dir]\n\
          \x20                            import a pico-8 cart's assets into a project\n\
+         \x20                            (dir defaults to the cart's name)\n\
          \x20 rico8 export-web <dir|cart.png> <out.html>\n\
          \x20                            export a self-contained playable web page\n\
          \x20 rico8 verify <cart.png>    load a cart and run 60 frames headless",

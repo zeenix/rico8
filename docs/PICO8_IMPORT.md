@@ -26,15 +26,23 @@ to edit.
 | ------------------------- | ----------------------- | ---------------------------------------- |
 | `__gfx__` (sprite sheet)  | sprite sheet            | 128x128, one palette index per pixel     |
 | `__gff__` (sprite flags)  | sprite flags            | all 256 sprites, 8 flags each            |
-| `__map__`                 | map (top 32 rows)       | see the map note below                   |
+| `__map__`                 | map (all 64 rows)       | see the map note below                   |
 | `__label__`               | cart label             | the captured screenshot, when present    |
-| `__sfx__`                 | sound effects           | notes, speed, loop points                |
+| `__sfx__`                 | sound effects           | notes, speed, loop points, filters       |
 | `__music__`               | music patterns          | channels and loop/stop flags             |
 
 Because the palette and the audio model line up exactly — waveforms
 (triangle, tilted saw, saw, square, pulse, organ, noise, phaser) and effects
 (slide, vibrato, drop, fade in, fade out, arpeggios) are in the same order —
-sprites *look* and sounds *sound* like they did in PICO-8.
+sprites *look* and sounds *sound* like they did in PICO-8. SFX that use
+another SFX as a **custom instrument** carry that across too, the same way
+PICO-8 packs it (waveform nibble bit 3); the SFX editor shows custom-instrument
+steps in yellow and `i` toggles the flag.
+
+The per-SFX **filter switches** — noiz, buzz, detune, reverb and dampen — come
+across as well (PICO-8 packs them into the SFX's filter byte). They appear as a
+`nz bz dt rv dm` strip on the right of the SFX editor; click to toggle the
+on/off pair and cycle the three levelled ones.
 
 ## What does not: the code
 
@@ -55,14 +63,21 @@ imported art and audio.
   it using the fixed PICO-8 memory map (`0x0000` gfx, `0x2000` map, `0x3000`
   flags, `0x3100` music, `0x3200` sfx).
 
+## The shared region
+
+A PICO-8 map is 128x32 tiles by default; its lower half *optionally* aliases
+the bottom half of the sprite sheet (`0x1000–0x1fff`). A cart uses that memory
+for one or the other, and nothing in the file says which. RICO-8 de-aliases
+the two — it has a full 256-sprite sheet **and** a full 128x64 map — so the
+import simply brings the shared region across **both** ways: it fills sprites
+128–255 *and* map rows 32–63 from the same bytes. Keep whichever your cart
+actually used and clear the other in the editor.
+
 ## Limitations
 
-- **Map sharing.** A PICO-8 map is 128x32 tiles by default; its lower half
-  optionally aliases the shared sprite memory. The import brings the 32
-  explicit rows into the top of RICO-8's 128x64 map and leaves the rest
-  empty. If a cart used the shared region for map data, those tiles stay in
-  the sprite sheet (sprites 128–255), exactly as PICO-8 stored them.
-- **Custom instruments.** PICO-8 SFX that reference other SFX as custom
-  instruments are imported as their base built-in waveform (0–7); the custom
-  layering is dropped.
+- **Some audio is approximated.** Every audio value is preserved and round-
+  trips, but two things are modelled rather than reproduced bit-for-bit:
+  custom instruments borrow the referenced SFX's timbre (its first step's
+  waveform) at the played pitch, and the filter switches (noiz/buzz/detune/
+  reverb/dampen) are faithful approximations of PICO-8's, not its exact DSP.
 - **The code, as above.** Assets transfer; the logic is yours to write.

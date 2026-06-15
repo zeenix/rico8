@@ -7,7 +7,7 @@ use crate::{
     ui::{self, Mouse},
 };
 use rico8_runtime::{
-    assets::{Assets, SFX_LEN},
+    assets::{Assets, NOTE_CUSTOM_FLAG, SFX_LEN},
     audio::AudioHandle,
     fb::Framebuffer,
     palette::col,
@@ -15,6 +15,13 @@ use rico8_runtime::{
 
 const STEP_Y: i32 = 20;
 const COL_X: [i32; 2] = [4, 68];
+
+/// Per-SFX filter switches, drawn as a strip in the right gutter. The first
+/// two (`nz`, `bz`) are on/off; the rest cycle 0..3.
+const FX_X: i32 = 106;
+const FX_Y: i32 = 30;
+const FX_DY: i32 = 9;
+const FX_LABELS: [&str; 5] = ["nz", "bz", "dt", "rv", "dm"];
 
 /// Editable fields of a step.
 #[derive(Clone, Copy, PartialEq)]
@@ -117,8 +124,13 @@ impl SfxEditor {
                 self.step = (self.step + 1) % SFX_LEN;
             }
             Field::Wave => {
-                if let Some(d) = c.to_digit(8) {
-                    note.wave = d as u8;
+                if c == 'i' {
+                    // Toggle "custom instrument": the index then names another
+                    // SFX (0-7) used as the instrument rather than a built-in
+                    // waveform, matching PICO-8.
+                    note.wave ^= NOTE_CUSTOM_FLAG;
+                } else if let Some(d) = c.to_digit(8) {
+                    note.wave = (note.wave & NOTE_CUSTOM_FLAG) | d as u8;
                 }
             }
             Field::Vol => {
@@ -154,6 +166,20 @@ impl SfxEditor {
             s.loop_end = (s.loop_end as i32 + delta).clamp(0, 32) as u8;
         } else if m.over(110, 9, 125, 15) && m.left_pressed {
             self.preview(assets, audio);
+        }
+        // Filter switches: nz/bz toggle, dt/rv/dm cycle (left +1, right -1).
+        for i in 0..FX_LABELS.len() {
+            let y = FX_Y + i as i32 * FX_DY;
+            if m.over(FX_X, y - 1, FX_X + 17, y + 5) {
+                let s = &mut assets.sfx[self.sfx];
+                match i {
+                    0 => s.noiz = !s.noiz,
+                    1 => s.buzz = !s.buzz,
+                    2 => s.detune = (s.detune as i32 + delta).rem_euclid(3) as u8,
+                    3 => s.reverb = (s.reverb as i32 + delta).rem_euclid(3) as u8,
+                    _ => s.dampen = (s.dampen as i32 + delta).rem_euclid(3) as u8,
+                }
+            }
         }
         // Step grid.
         for (half, x) in COL_X.iter().enumerate() {
@@ -213,12 +239,16 @@ impl SfxEditor {
 
                 let note_col = if active { col::WHITE } else { col::DARK_GREY };
                 fb.print(&note_name(n.pitch, active), x, y, note_col);
-                fb.print(
-                    &format!("{}", n.wave),
-                    x + 16,
-                    y,
-                    if active { col::PINK } else { col::DARK_GREY },
-                );
+                // The waveform/instrument index, tinted yellow when it refers
+                // to a custom instrument (another SFX) rather than a built-in.
+                let wave_col = if !active {
+                    col::DARK_GREY
+                } else if n.instrument().is_some() {
+                    col::YELLOW
+                } else {
+                    col::PINK
+                };
+                fb.print(&format!("{}", n.wave_index()), x + 16, y, wave_col);
                 fb.print(
                     &format!("{}", n.volume),
                     x + 24,
@@ -238,7 +268,32 @@ impl SfxEditor {
             }
         }
 
-        ui::status_bar(fb, &format!("oct {} [zsxd..] spc=play", self.octave));
+        // Filter switches strip (right gutter).
+        fb.print("fx", FX_X + 4, STEP_Y, col::LIGHT_GREY);
+        let levels = [s.noiz as u8, s.buzz as u8, s.detune, s.reverb, s.dampen];
+        for (i, (label, &level)) in FX_LABELS.iter().zip(levels.iter()).enumerate() {
+            let y = FX_Y + i as i32 * FX_DY;
+            let on = level > 0;
+            fb.print(label, FX_X, y, if on { col::WHITE } else { col::DARK_GREY });
+            // nz/bz are on/off; the rest show their level.
+            let val = if i < 2 {
+                if on {
+                    "*".into()
+                } else {
+                    "-".into()
+                }
+            } else {
+                format!("{level}")
+            };
+            fb.print(
+                &val,
+                FX_X + 12,
+                y,
+                if on { col::ORANGE } else { col::DARK_GREY },
+            );
+        }
+
+        ui::status_bar(fb, &format!("oct {} [zsxd..] i=inst spc=play", self.octave));
     }
 }
 

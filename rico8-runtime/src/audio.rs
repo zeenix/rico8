@@ -16,6 +16,72 @@ fn pitch_to_freq(pitch: f32) -> f32 {
     440.0 * ((pitch - 33.0) / 12.0).exp2()
 }
 
+/// True when the SFX loops (a real loop range, not a LEN marker).
+fn sfx_loops(sfx: &Sfx) -> bool {
+    sfx.loop_end > sfx.loop_start
+}
+
+/// Steps the SFX occupies for music timing: its loop end when looping, its
+/// LEN marker (`loop_start` with no loop end), otherwise the full 32.
+fn sfx_steps(sfx: &Sfx) -> usize {
+    if sfx.loop_end > sfx.loop_start {
+        sfx.loop_end as usize
+    } else if sfx.loop_start > 0 {
+        sfx.loop_start as usize
+    } else {
+        SFX_LEN
+    }
+}
+
+/// One play-through of the SFX in seconds, used to time music patterns.
+fn sfx_duration(sfx: &Sfx) -> f32 {
+    sfx_steps(sfx) as f32 * sfx.speed.max(1) as f32 / TICKS_PER_SECOND
+}
+
+/// One sample of a deterministic (non-noise) waveform at `phase` in `[0, 1)`.
+/// Factored out so the `detune` filter can run a second oscillator through it.
+fn tonal_wave(wave: Waveform, phase: f32) -> f32 {
+    match wave {
+        Waveform::Triangle => 4.0 * (phase - 0.5).abs() - 1.0,
+        Waveform::TiltedSaw => {
+            if phase < 0.875 {
+                phase / 0.875 * 2.0 - 1.0
+            } else {
+                (1.0 - phase) / 0.125 * 2.0 - 1.0
+            }
+        }
+        Waveform::Saw => 2.0 * phase - 1.0,
+        Waveform::Square => {
+            if phase < 0.5 {
+                1.0
+            } else {
+                -1.0
+            }
+        }
+        Waveform::Pulse => {
+            if phase < 0.3125 {
+                1.0
+            } else {
+                -1.0
+            }
+        }
+        Waveform::Organ => {
+            let t1 = 4.0 * (phase - 0.5).abs() - 1.0;
+            let p2 = (phase * 0.5).fract();
+            let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
+            (t1 + t2) * 0.5
+        }
+        Waveform::Phaser => {
+            let t1 = 4.0 * (phase - 0.5).abs() - 1.0;
+            let p2 = (phase * 1.01).fract();
+            let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
+            (t1 + t2) * 0.5
+        }
+        // Noise is stateful; handled directly in `Voice::sample`.
+        Waveform::Noise => 0.0,
+    }
+}
+
 /// One playing voice on a channel.
 struct Voice {
     sfx_index: usize,
@@ -26,6 +92,8 @@ struct Voice {
     t_in_step: f32,
     /// Oscillator phase in `[0, 1)`.
     phase: f32,
+    /// Phase of the detuned second oscillator (`detune` filter).
+    phase2: f32,
     /// Pitch of the previous step, for slides.
     prev_pitch: f32,
     /// True when this voice was started by the music sequencer.
@@ -33,21 +101,38 @@ struct Voice {
     /// Noise generator state.
     noise: u32,
     noise_level: f32,
+    /// One-pole low-pass state (`dampen` filter).
+    lp: f32,
+    /// Echo delay ring buffer and write cursor (`reverb` filter); empty when
+    /// reverb is off.
+    echo: Vec<f32>,
+    echo_pos: usize,
 }
 
 impl Voice {
-    fn new(sfx_index: usize, sfx: Sfx, from_music: bool) -> Self {
+    fn new(sfx_index: usize, sfx: Sfx, from_music: bool, sample_rate: f32) -> Self {
         let first_pitch = sfx.notes[0].pitch as f32;
+        // Reverb delays by 2 or 4 ticks; size the ring buffer to suit.
+        let echo_ticks = match sfx.reverb {
+            1 => 2.0,
+            2 => 4.0,
+            _ => 0.0,
+        };
+        let echo_len = (echo_ticks / TICKS_PER_SECOND * sample_rate).round() as usize;
         Self {
             sfx_index,
             sfx,
             step: 0,
             t_in_step: 0.0,
             phase: 0.0,
+            phase2: 0.0,
             prev_pitch: first_pitch,
             from_music,
             noise: 0x1234_5678,
             noise_level: 0.0,
+            lp: 0.0,
+            echo: vec![0.0; echo_len],
+            echo_pos: 0,
         }
     }
 
@@ -56,7 +141,11 @@ impl Voice {
     }
 
     /// Render one sample; returns `None` when the voice has finished.
-    fn sample(&mut self, dt: f32, total_t: f32) -> Option<f32> {
+    ///
+    /// `inst_waves` carries the timbre of each of the eight SFX slots usable
+    /// as custom instruments (its note-0 waveform), so a note flagged as a
+    /// custom instrument plays through that waveform at its own pitch.
+    fn sample(&mut self, dt: f32, total_t: f32, inst_waves: &[u8; 8]) -> Option<f32> {
         if self.step >= SFX_LEN {
             return None;
         }
@@ -85,42 +174,21 @@ impl Voice {
         }
 
         let freq = pitch_to_freq(pitch);
-        let wave = Waveform::from_u8(note.wave);
+        // A custom-instrument note borrows the timbre of another SFX (its
+        // note-0 waveform); otherwise the nibble names a built-in waveform.
+        let wave = match note.instrument() {
+            Some(slot) => Waveform::from_u8(inst_waves[slot as usize]),
+            None => Waveform::from_u8(note.wave),
+        };
 
         // Advance oscillator.
         self.phase = (self.phase + freq * dt).fract();
-        let raw = match wave {
-            Waveform::Triangle => 4.0 * (self.phase - 0.5).abs() - 1.0,
-            Waveform::TiltedSaw => {
-                let p = self.phase;
-                if p < 0.875 {
-                    p / 0.875 * 2.0 - 1.0
-                } else {
-                    (1.0 - p) / 0.125 * 2.0 - 1.0
-                }
-            }
-            Waveform::Saw => 2.0 * self.phase - 1.0,
-            Waveform::Square => {
-                if self.phase < 0.5 {
-                    1.0
-                } else {
-                    -1.0
-                }
-            }
-            Waveform::Pulse => {
-                if self.phase < 0.3125 {
-                    1.0
-                } else {
-                    -1.0
-                }
-            }
-            Waveform::Organ => {
-                let t1 = 4.0 * (self.phase - 0.5).abs() - 1.0;
-                let p2 = (self.phase * 0.5).fract();
-                let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
-                (t1 + t2) * 0.5
-            }
-            Waveform::Noise => {
+        let mut raw = if wave == Waveform::Noise {
+            if self.sfx.noiz {
+                // `noiz` swaps the pitched noise for pure white noise.
+                self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
+                (self.noise >> 16) as f32 / 32768.0 - 1.0
+            } else {
                 // Resample an LFSR at the note frequency for pitched noise.
                 if self.phase < freq * dt {
                     self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
@@ -128,15 +196,42 @@ impl Voice {
                 }
                 self.noise_level
             }
-            Waveform::Phaser => {
-                let t1 = 4.0 * (self.phase - 0.5).abs() - 1.0;
-                let p2 = (self.phase * 1.01).fract();
-                let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
-                (t1 + t2) * 0.5
+        } else {
+            let mut s = tonal_wave(wave, self.phase);
+            // `detune` mixes in a second oscillator a little (or an octave)
+            // off the first.
+            if self.sfx.detune > 0 {
+                let ratio = if self.sfx.detune == 1 { 1.0073 } else { 2.0 };
+                self.phase2 = (self.phase2 + freq * ratio * dt).fract();
+                s = (s + tonal_wave(wave, self.phase2)) * 0.5;
             }
+            s
         };
 
-        let out = raw * vol * 0.25;
+        // `buzz` adds harmonics with a soft overdrive (normalized to unity).
+        if self.sfx.buzz {
+            const DRIVE: f32 = 2.5;
+            raw = (raw * DRIVE).tanh() / DRIVE.tanh();
+        }
+
+        let mut out = raw * vol * 0.25;
+
+        // `dampen` is a one-pole low-pass at one of two cutoffs.
+        if self.sfx.dampen > 0 {
+            let fc = if self.sfx.dampen == 1 { 2200.0 } else { 900.0 };
+            let rc = 1.0 / (2.0 * std::f32::consts::PI * fc);
+            let alpha = dt / (rc + dt);
+            self.lp += alpha * (out - self.lp);
+            out = self.lp;
+        }
+
+        // `reverb` is a feedback echo through the delay ring buffer.
+        if !self.echo.is_empty() {
+            let delayed = self.echo[self.echo_pos];
+            self.echo[self.echo_pos] = (out + delayed * 0.45).clamp(-1.0, 1.0);
+            self.echo_pos = (self.echo_pos + 1) % self.echo.len();
+            out = (out + delayed * 0.5).clamp(-1.0, 1.0);
+        }
 
         // Advance step clock.
         self.t_in_step += dt;
@@ -145,8 +240,17 @@ impl Voice {
             self.prev_pitch = base_pitch;
             self.step += 1;
             let (ls, le) = (self.sfx.loop_start as usize, self.sfx.loop_end as usize);
-            if le > ls && self.step >= le && !self.from_music {
-                self.step = ls;
+            if le > ls {
+                // Looping SFX wrap at the loop end — for music voices too, so
+                // a short looping part repeats to fill its pattern (the
+                // sequencer replaces the voice when the pattern advances).
+                if self.step >= le {
+                    self.step = ls;
+                }
+            } else if ls > 0 && self.step >= ls {
+                // A "LEN" marker (loop start set, no loop end) shortens the
+                // SFX to `loop_start` steps.
+                self.step = SFX_LEN;
             }
         }
         Some(out)
@@ -219,7 +323,7 @@ impl Synth {
                 None => CHANNELS - 1,
             }
         };
-        self.voices[ch] = Some(Voice::new(n as usize, sfx, false));
+        self.voices[ch] = Some(Voice::new(n as usize, sfx, false, self.sample_rate));
     }
 
     /// Start music at pattern `n`, or stop when `n < 0`.
@@ -250,26 +354,35 @@ impl Synth {
             self.music_state = None;
             return;
         };
+        // PICO-8 sets a pattern's length from the left-most non-looping active
+        // channel (the "timekeeper"); if every active channel loops, fall back
+        // to the longest. SFX shortened by a LEN marker count as that length.
+        let mut timekeeper: Option<f32> = None;
         let mut longest = 0.0f32;
         for (ch, slot) in pat.channels.iter().enumerate() {
             // Music takes ownership of its channels; others keep playing SFX.
             if let Some(sfx_idx) = slot {
                 if let Some(sfx) = self.sfx.get(*sfx_idx as usize).cloned() {
-                    let dur = sfx.speed.max(1) as f32 / TICKS_PER_SECOND * SFX_LEN as f32;
+                    let dur = sfx_duration(&sfx);
                     longest = longest.max(dur);
-                    self.voices[ch] = Some(Voice::new(*sfx_idx as usize, sfx, true));
+                    if timekeeper.is_none() && !sfx_loops(&sfx) {
+                        timekeeper = Some(dur);
+                    }
+                    self.voices[ch] =
+                        Some(Voice::new(*sfx_idx as usize, sfx, true, self.sample_rate));
                 }
             } else if self.voices[ch].as_ref().is_some_and(|v| v.from_music) {
                 self.voices[ch] = None;
             }
         }
-        if longest == 0.0 {
+        let length = timekeeper.unwrap_or(longest);
+        if length == 0.0 {
             self.music_state = None;
             return;
         }
         self.music_state = Some(MusicState {
             pattern: n,
-            remaining: longest,
+            remaining: length,
         });
     }
 
@@ -312,10 +425,18 @@ impl Synth {
             }
         }
 
+        // Timbre of the eight SFX slots usable as custom instruments.
+        let mut inst_waves = [0u8; 8];
+        for (i, w) in inst_waves.iter_mut().enumerate() {
+            if let Some(s) = self.sfx.get(i) {
+                *w = s.notes[0].wave_index();
+            }
+        }
+
         let mut mix = 0.0;
         for v in &mut self.voices {
             if let Some(voice) = v {
-                match voice.sample(dt, self.t) {
+                match voice.sample(dt, self.t, &inst_waves) {
                     Some(s) => mix += s,
                     None => *v = None,
                 }
@@ -467,6 +588,60 @@ mod tests {
     }
 
     #[test]
+    fn custom_instrument_borrows_its_waveform() {
+        use crate::assets::NOTE_CUSTOM_FLAG;
+        // SFX 1 is the instrument: a noise (waveform 6) tone.
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        for note in sfx[1].notes.iter_mut() {
+            *note = Note {
+                pitch: 33,
+                wave: 6,
+                volume: 5,
+                effect: 0,
+            };
+        }
+        // SFX 0 plays using SFX 1 as a custom instrument.
+        for note in sfx[0].notes.iter_mut() {
+            *note = Note {
+                pitch: 33,
+                wave: NOTE_CUSTOM_FLAG | 1,
+                volume: 5,
+                effect: 0,
+            };
+        }
+        let mut synth = Synth::new(44100.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+        let mut peak = 0.0f32;
+        for _ in 0..1000 {
+            peak = peak.max(synth.next_sample().abs());
+        }
+        assert!(peak > 0.01, "a custom-instrument note should be audible");
+    }
+
+    #[test]
+    fn sfx_filters_stay_audible_and_bounded() {
+        // Every filter switch on at once must still produce a clean, bounded
+        // signal (no NaNs, no runaway feedback).
+        let mut sfx = test_sfx();
+        sfx[0].noiz = true;
+        sfx[0].buzz = true;
+        sfx[0].detune = 2;
+        sfx[0].reverb = 2;
+        sfx[0].dampen = 1;
+        let mut synth = Synth::new(44100.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+        let mut peak = 0.0f32;
+        for _ in 0..44100 {
+            let s = synth.next_sample();
+            assert!(s.is_finite() && s.abs() <= 1.0, "sample out of range: {s}");
+            peak = peak.max(s.abs());
+        }
+        assert!(peak > 0.01, "filtered voice should still be audible");
+    }
+
+    #[test]
     fn empty_sfx_slot_is_ignored() {
         let mut synth = Synth::new(44100.0);
         synth.load(test_sfx(), vec![]);
@@ -505,6 +680,40 @@ mod tests {
             synth.next_sample();
         }
         assert_eq!(synth.playing_pattern(), Some(0), "should loop to start");
+    }
+
+    #[test]
+    fn pattern_length_follows_first_non_looping_channel() {
+        // ch0 is the timekeeper at speed 4 (1.0s); ch1 is four times longer.
+        // The pattern must end with ch0, not stretch to ch1.
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        for (i, &spd) in [4u8, 16].iter().enumerate() {
+            sfx[i].speed = spd;
+            for n in sfx[i].notes.iter_mut() {
+                *n = Note {
+                    pitch: 33,
+                    wave: 0,
+                    volume: 5,
+                    effect: 0,
+                };
+            }
+        }
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels = [Some(0), Some(1), None, None];
+        music[0].stop_at_end = true;
+        let mut synth = Synth::new(44100.0);
+        synth.load(sfx, music);
+        synth.play_music(0);
+        let mut n = 0;
+        while synth.playing_pattern().is_some() && n < 44100 * 5 {
+            synth.next_sample();
+            n += 1;
+        }
+        let secs = n as f32 / 44100.0;
+        assert!(
+            (secs - 1.0).abs() < 0.1,
+            "pattern should track ch0, got {secs}s"
+        );
     }
 
     #[test]
