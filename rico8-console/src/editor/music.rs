@@ -19,6 +19,9 @@ const ROW_H: i32 = 12;
 pub struct MusicEditor {
     pattern: usize,
     channel: usize,
+    /// Set when the user clicks a channel's pencil; the shell reads it to jump
+    /// to that SFX in the SFX editor.
+    edit_request: Option<usize>,
 }
 
 impl MusicEditor {
@@ -26,7 +29,13 @@ impl MusicEditor {
         Self {
             pattern: 0,
             channel: 0,
+            edit_request: None,
         }
+    }
+
+    /// Take a pending "edit this channel's SFX" request, if any.
+    pub fn take_edit_request(&mut self) -> Option<usize> {
+        self.edit_request.take()
     }
 
     fn toggle_play(&self, assets: &Assets, audio: &AudioHandle) {

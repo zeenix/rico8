@@ -1055,6 +1055,11 @@ impl Shell {
                         if let Some(a) = assets_of(&mut self.loaded) {
                             self.music_ed.tick(&mouse, a, &audio);
                         }
+                        // The pencil on a channel jumps to that SFX for editing.
+                        if let Some(n) = self.music_ed.take_edit_request() {
+                            self.sfx_ed.select(n);
+                            self.switch_editor(Mode::Sfx);
+                        }
                     }
                     _ => {}
                 }

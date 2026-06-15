@@ -54,6 +54,11 @@ impl SfxEditor {
         }
     }
 
+    /// Select an SFX slot (used when jumping in from the music editor's pencil).
+    pub fn select(&mut self, sfx: usize) {
+        self.sfx = sfx % 64;
+    }
+
     fn preview(&self, assets: &Assets, audio: &AudioHandle) {
         audio.load(assets.sfx.clone(), assets.music.clone());
         let playing = audio.with_synth(|s| s.channel_sfx()[0]);
