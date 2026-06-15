@@ -28,7 +28,7 @@ to edit.
 | `__gff__` (sprite flags)  | sprite flags            | all 256 sprites, 8 flags each            |
 | `__map__`                 | map (all 64 rows)       | see the map note below                   |
 | `__label__`               | cart label             | the captured screenshot, when present    |
-| `__sfx__`                 | sound effects           | notes, speed, loop points                |
+| `__sfx__`                 | sound effects           | notes, speed, loop points, filters       |
 | `__music__`               | music patterns          | channels and loop/stop flags             |
 
 Because the palette and the audio model line up exactly — waveforms
@@ -38,6 +38,11 @@ sprites *look* and sounds *sound* like they did in PICO-8. SFX that use
 another SFX as a **custom instrument** carry that across too, the same way
 PICO-8 packs it (waveform nibble bit 3); the SFX editor shows custom-instrument
 steps in yellow and `i` toggles the flag.
+
+The per-SFX **filter switches** — noiz, buzz, detune, reverb and dampen — come
+across as well (PICO-8 packs them into the SFX's filter byte). They appear as a
+`nz bz dt rv dm` strip on the right of the SFX editor; click to toggle the
+on/off pair and cycle the three levelled ones.
 
 ## What does not: the code
 
@@ -70,8 +75,9 @@ actually used and clear the other in the editor.
 
 ## Limitations
 
-- **Custom instruments are approximated.** The custom-instrument flag and the
-  referenced SFX are preserved, and playback borrows that SFX's timbre (its
-  first step's waveform) at the played pitch — close, but not a sample-exact
-  reproduction of PICO-8's instrument synthesis.
+- **Some audio is approximated.** Every audio value is preserved and round-
+  trips, but two things are modelled rather than reproduced bit-for-bit:
+  custom instruments borrow the referenced SFX's timbre (its first step's
+  waveform) at the played pitch, and the filter switches (noiz/buzz/detune/
+  reverb/dampen) are faithful approximations of PICO-8's, not its exact DSP.
 - **The code, as above.** Assets transfer; the logic is yours to write.
