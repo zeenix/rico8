@@ -4,6 +4,7 @@
 
 use crate::shell::Mode;
 use rico8_runtime::{
+    assets::Note,
     fb::{Framebuffer, HEIGHT, WIDTH},
     palette::col,
     ui as rui,
@@ -97,6 +98,150 @@ pub fn status_bar(fb: &mut Framebuffer, text: &str) {
     fb.rectfill(0, HEIGHT - 8, WIDTH - 1, HEIGHT - 1, col::RED);
     fb.print(text, 2, HEIGHT - 7, col::DARK_PURPLE);
 }
+
+// ---------------------------------------------------------------------------
+// Shared SFX/music editor chrome, matching PICO-8's. Pixel-exact icons (flow
+// buttons, waveform palette, the wave/circle toggles) are blitted from grids
+// lifted verbatim from PICO-8's framebuffer.
+// ---------------------------------------------------------------------------
+
+/// Paint a pixel grid (one hex palette index per cell; `.` = black/0; `5` = the
+/// dark-grey editor background, treated as transparent so it shows through).
+pub fn blit(fb: &mut Framebuffer, x0: i32, y0: i32, rows: &[&str]) {
+    for (dy, row) in rows.iter().enumerate() {
+        for (dx, ch) in row.chars().enumerate() {
+            if ch == '5' {
+                continue;
+            }
+            let c = ch.to_digit(16).unwrap_or(0) as u8;
+            fb.pset(x0 + dx as i32, y0 + dy as i32, c);
+        }
+    }
+}
+
+/// Left-pointing arrow (apex at left).
+pub fn arrow_l(fb: &mut Framebuffer, x: i32, y: i32, c: u8) {
+    fb.pset(x, y + 2, c);
+    fb.line(x + 1, y + 1, x + 1, y + 3, c);
+    fb.line(x + 2, y, x + 2, y + 4, c);
+}
+
+/// Right-pointing arrow (apex at right).
+pub fn arrow_r(fb: &mut Framebuffer, x: i32, y: i32, c: u8) {
+    fb.line(x, y, x, y + 4, c);
+    fb.line(x + 1, y + 1, x + 1, y + 3, c);
+    fb.pset(x + 2, y + 2, c);
+}
+
+/// The two top-left view-mode buttons: a bar-chart (pitch) and a 3x3 dot grid
+/// (tracker). The active one is peach, the other dark-purple.
+pub fn mode_buttons(fb: &mut Framebuffer, pitch_active: bool) {
+    let (bars, grid) = if pitch_active {
+        (col::PEACH, col::DARK_PURPLE)
+    } else {
+        (col::DARK_PURPLE, col::PEACH)
+    };
+    for i in 0..4 {
+        fb.line(5 + i * 2, 1, 5 + i * 2, 6, bars);
+    }
+    for r in 0..3 {
+        for c in 0..4 {
+            fb.pset(15 + c * 2, 2 + r * 2, grid);
+        }
+    }
+}
+
+/// A channel enable toggle: a 5x5 light-grey box with a white centre when on.
+pub fn radio(fb: &mut Framebuffer, x: i32, y: i32, on: bool) {
+    fb.rect(x, y, x + 4, y + 4, col::LIGHT_GREY);
+    if on {
+        fb.pset(x + 2, y + 2, col::WHITE);
+    }
+}
+
+/// The "edit this SFX" pencil glyph (lavender).
+pub fn pencil(fb: &mut Framebuffer, x: i32, y: i32) {
+    fb.line(x + 3, y, x, y + 3, col::LAVENDER);
+    fb.line(x + 4, y + 1, x + 1, y + 4, col::LAVENDER);
+}
+
+const LETTERS: [&str; 12] = ["c", "c", "d", "d", "e", "f", "f", "g", "g", "a", "a", "b"];
+const SHARP: [bool; 12] = [
+    false, true, false, true, false, false, true, false, true, false, true, false,
+];
+
+/// One tracker note cell at (x, y), in PICO-8's field layout/colours: letter
+/// (white) · `#` accidental · octave (light grey) · instrument (pink, or green
+/// when a custom instrument) · volume (blue) · effect (grey `.` / orange digit).
+/// A silent step (volume 0) renders as a faint dotted line.
+pub fn note_cell(fb: &mut Framebuffer, x: i32, y: i32, note: Note) {
+    if note.volume == 0 {
+        for gx in (x + 2..x + 27).step_by(3) {
+            fb.pset(gx, y + 4, col::DARK_BLUE);
+        }
+        return;
+    }
+    let k = (note.pitch % 12) as usize;
+    fb.print(LETTERS[k], x + 2, y, col::WHITE);
+    if SHARP[k] {
+        fb.print("#", x + 6, y, col::WHITE);
+    }
+    fb.print(&format!("{}", note.pitch / 12), x + 10, y, col::LIGHT_GREY);
+    let inst_col = if note.instrument().is_some() {
+        col::GREEN
+    } else {
+        col::PINK
+    };
+    fb.print(&format!("{}", note.wave_index()), x + 15, y, inst_col);
+    fb.print(&format!("{}", note.volume), x + 20, y, col::BLUE);
+    if note.effect == 0 {
+        fb.print(".", x + 24, y, col::DARK_GREY);
+    } else {
+        fb.print(&format!("{}", note.effect), x + 24, y, col::ORANGE);
+    }
+}
+
+/// Flow-control flags (loop-start, loop-back, stop), lifted from PICO-8.
+pub const FLOW: [&str; 8] = [
+    "555555555555555555555555555",
+    "555555c55555555555555555555",
+    "555555cc5555515515551111555",
+    "555cccccc555115515551111555",
+    "555c..cc.551111115551111555",
+    "555c55c.555.11...5551111555",
+    "555.55.55555.1555555....555",
+    "5555555555555.5555555555555",
+];
+
+/// The 8 SFX waveform-graph palette boxes (box 0 red/selected here), lifted
+/// from PICO-8. `8` = red box, `6` = grey box, `7` = white graph line.
+pub const PALETTE: [&str; 6] = [
+    "888888885666666665666666665666666665666666665666666665666666665",
+    "888778885666667665666666775667777765666677765667666665667666765",
+    "887887885666776765666677675667666765666676765676766665767676765",
+    "878888785677666765667766675667666765666676765766676765777777775",
+    "788888875766666675776666675777666775777776775766677675676767675",
+    "888888885666666665666666665666666665666666665666666665676666675",
+];
+
+/// The palette's display-mode circle toggle (lavender), lifted from PICO-8.
+pub const CIRCLE: [&str; 6] = [
+    "555555555",
+    "55555dd55",
+    "5555d55d5",
+    "5555d55d5",
+    "55555dd55",
+    "555555555",
+];
+
+/// The header default-waveform wave icon (lavender), lifted from PICO-8.
+pub const WAVEI: [&str; 5] = [
+    "555555555",
+    "555d55555",
+    "55d5d5555",
+    "5d555d5d5",
+    "555555d55",
+];
 
 /// Draw the mouse cursor on top of everything.
 pub fn draw_cursor(fb: &mut Framebuffer, mouse: &Mouse) {
