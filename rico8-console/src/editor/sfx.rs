@@ -7,7 +7,7 @@ use crate::{
     ui::{self, Mouse},
 };
 use rico8_runtime::{
-    assets::{Assets, SFX_LEN},
+    assets::{Assets, NOTE_CUSTOM_FLAG, SFX_LEN},
     audio::AudioHandle,
     fb::Framebuffer,
     palette::col,
@@ -117,8 +117,13 @@ impl SfxEditor {
                 self.step = (self.step + 1) % SFX_LEN;
             }
             Field::Wave => {
-                if let Some(d) = c.to_digit(8) {
-                    note.wave = d as u8;
+                if c == 'i' {
+                    // Toggle "custom instrument": the index then names another
+                    // SFX (0-7) used as the instrument rather than a built-in
+                    // waveform, matching PICO-8.
+                    note.wave ^= NOTE_CUSTOM_FLAG;
+                } else if let Some(d) = c.to_digit(8) {
+                    note.wave = (note.wave & NOTE_CUSTOM_FLAG) | d as u8;
                 }
             }
             Field::Vol => {
@@ -213,12 +218,16 @@ impl SfxEditor {
 
                 let note_col = if active { col::WHITE } else { col::DARK_GREY };
                 fb.print(&note_name(n.pitch, active), x, y, note_col);
-                fb.print(
-                    &format!("{}", n.wave),
-                    x + 16,
-                    y,
-                    if active { col::PINK } else { col::DARK_GREY },
-                );
+                // The waveform/instrument index, tinted yellow when it refers
+                // to a custom instrument (another SFX) rather than a built-in.
+                let wave_col = if !active {
+                    col::DARK_GREY
+                } else if n.instrument().is_some() {
+                    col::YELLOW
+                } else {
+                    col::PINK
+                };
+                fb.print(&format!("{}", n.wave_index()), x + 16, y, wave_col);
                 fb.print(
                     &format!("{}", n.volume),
                     x + 24,
@@ -238,7 +247,7 @@ impl SfxEditor {
             }
         }
 
-        ui::status_bar(fb, &format!("oct {} [zsxd..] spc=play", self.octave));
+        ui::status_bar(fb, &format!("oct {} [zsxd..] i=inst spc=play", self.octave));
     }
 }
 
