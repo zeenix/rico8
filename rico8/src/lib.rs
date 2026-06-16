@@ -35,8 +35,11 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod ffi;
+mod flags;
 mod glue;
 
+use crate::flags::bitflag_enum;
+pub use crate::flags::{BitFlag, BitFlags, UnknownBits};
 pub use glue::__internal;
 
 /// The screen is 128x128 pixels.
@@ -102,18 +105,39 @@ impl From<u8> for Color {
     }
 }
 
-/// The six console buttons.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum Button {
-    Left = 0,
-    Right = 1,
-    Up = 2,
-    Down = 3,
-    /// "O" action button — Z, C or N on the keyboard.
-    O = 4,
-    /// "X" action button — X, V or M on the keyboard.
-    X = 5,
+bitflag_enum! {
+    /// The six console buttons.
+    pub enum Button {
+        Left = 1 << 0,
+        Right = 1 << 1,
+        Up = 1 << 2,
+        Down = 1 << 3,
+        /// "O" action button — Z, C or N on the keyboard.
+        O = 1 << 4,
+        /// "X" action button — X, V or M on the keyboard.
+        X = 1 << 5,
+    }
+}
+
+/// The ABI button index (`0..=5`) for a [`Button`] flag.
+const fn button_index(b: Button) -> u32 {
+    (b as u8).trailing_zeros()
+}
+
+bitflag_enum! {
+    /// One of a sprite's eight flags. The flags carry no fixed meaning — a cart
+    /// assigns its own (e.g. "solid"). Used by [`Context::sprite_flags`] /
+    /// [`Context::set_sprite_flags`] and the [`Graphics::map`] layer filter.
+    pub enum SpriteFlag {
+        Flag0 = 1 << 0,
+        Flag1 = 1 << 1,
+        Flag2 = 1 << 2,
+        Flag3 = 1 << 3,
+        Flag4 = 1 << 4,
+        Flag5 = 1 << 5,
+        Flag6 = 1 << 6,
+        Flag7 = 1 << 7,
+    }
 }
 
 /// A sprite on the 16x16 sprite sheet (`0..=255`).
@@ -139,12 +163,12 @@ pub struct Context {
 impl Context {
     /// Is a button held down?
     pub fn btn(&self, b: Button) -> bool {
-        unsafe { ffi::btn(b as u32) != 0 }
+        unsafe { ffi::btn(button_index(b)) != 0 }
     }
 
     /// Was a button just pressed? Repeats after a short delay while held.
     pub fn btnp(&self, b: Button) -> bool {
-        unsafe { ffi::btnp(b as u32) != 0 }
+        unsafe { ffi::btnp(button_index(b)) != 0 }
     }
 
     /// Read a map tile (sprite number; 0 = empty).
@@ -399,4 +423,29 @@ macro_rules! game {
     ($game:ident) => {
         $crate::game!($game = <$game as ::core::default::Default>::default());
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn button_index_matches_abi_order() {
+        assert_eq!(button_index(Button::Left), 0);
+        assert_eq!(button_index(Button::Right), 1);
+        assert_eq!(button_index(Button::Up), 2);
+        assert_eq!(button_index(Button::Down), 3);
+        assert_eq!(button_index(Button::O), 4);
+        assert_eq!(button_index(Button::X), 5);
+    }
+
+    #[test]
+    fn button_mask_round_trips() {
+        // bits 0, 3, 5 == Left, Down, X
+        let mask = BitFlags::<Button>::from_bits(0b10_1001).unwrap();
+        assert!(mask.contains(Button::Left));
+        assert!(mask.contains(Button::Down));
+        assert!(mask.contains(Button::X));
+        assert!(!mask.contains(Button::Right));
+    }
 }
