@@ -140,7 +140,7 @@ impl MapEditor {
         self.drag = Drag::None;
     }
 
-    pub fn key(&mut self, key: Key, _mods: Mods, _assets: &mut Assets) {
+    pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets) {
         match key {
             Key::Left => self.cam_x = (self.cam_x - 1).max(0),
             Key::Right => self.cam_x = (self.cam_x + 1).min(MAP_W as i32 - VIEW_TILES_X),
@@ -148,6 +148,9 @@ impl MapEditor {
             Key::Down => self.cam_y = (self.cam_y + 1).min(MAP_H as i32 - VIEW_TILES_Y),
             Key::PageUp => self.page = (self.page + 3) % 4,
             Key::PageDown => self.page = (self.page + 1) % 4,
+            Key::Char('c') if mods.ctrl => self.copy_selection(assets, false),
+            Key::Char('x') if mods.ctrl => self.copy_selection(assets, true),
+            Key::Delete | Key::Backspace => self.delete_selection(assets),
             Key::Char('d') => self.set_tool(Tool::Draw),
             Key::Char('t') => self.set_tool(Tool::Paste),
             Key::Char('s') => self.set_tool(Tool::Select),
@@ -177,16 +180,71 @@ impl MapEditor {
                     }
                 }
             }
+            Tool::Paste => {
+                if mouse.left_pressed {
+                    if let Some((cx, cy)) = self.hovered_cell() {
+                        self.paste_at(assets, cx, cy);
+                    }
+                }
+            }
             Tool::Select => {
                 if mouse.left_pressed && mouse.y >= VIEW_Y && mouse.y <= VIEW_BOTTOM {
                     let (cx, cy) = self.clamped_cell();
-                    self.drag = Drag::Selecting { ax: cx, ay: cy };
+                    if self.point_in_selection(cx, cy) {
+                        let s = self.sel.unwrap();
+                        let mut tiles = Vec::with_capacity((s.w * s.h) as usize);
+                        for y in 0..s.h {
+                            for x in 0..s.w {
+                                tiles.push(assets.map.get(s.x + x, s.y + y));
+                            }
+                        }
+                        self.drag = Drag::Moving {
+                            tiles,
+                            w: s.w,
+                            h: s.h,
+                            gx: cx,
+                            gy: cy,
+                        };
+                    } else {
+                        self.drag = Drag::Selecting { ax: cx, ay: cy };
+                    }
                 }
                 if !mouse.left {
-                    if let Drag::Selecting { .. } = self.drag {
-                        let (x, y, w, h) = self.selection_in_progress().unwrap();
-                        self.sel = Some(Selection { x, y, w, h });
-                        self.drag = Drag::None;
+                    match std::mem::replace(&mut self.drag, Drag::None) {
+                        Drag::Selecting { ax, ay } => {
+                            let (cx, cy) = self.clamped_cell();
+                            let (x, y, w, h) = normalize_rect(ax, ay, cx, cy);
+                            self.sel = Some(Selection { x, y, w, h });
+                        }
+                        Drag::Moving {
+                            tiles,
+                            w,
+                            h,
+                            gx,
+                            gy,
+                        } => {
+                            let s = self.sel.unwrap();
+                            let (cx, cy) = self.clamped_cell();
+                            let (nx, ny) = (s.x + (cx - gx), s.y + (cy - gy));
+                            for y in 0..h {
+                                for x in 0..w {
+                                    assets.map.set(s.x + x, s.y + y, 0);
+                                }
+                            }
+                            for y in 0..h {
+                                for x in 0..w {
+                                    let (dx, dy) = (nx + x, ny + y);
+                                    if (0..MAP_W as i32).contains(&dx)
+                                        && (0..MAP_H as i32).contains(&dy)
+                                    {
+                                        assets.map.set(dx, dy, tiles[(y * w + x) as usize]);
+                                    }
+                                }
+                            }
+                            self.sel = Some(Selection { x: nx, y: ny, w, h });
+                        }
+                        // A non-Select drag (e.g. a stale Shape/Pan) is put back untouched.
+                        other => self.drag = other,
                     }
                 }
             }
@@ -385,6 +443,64 @@ impl MapEditor {
         }
     }
 
+    /// Copy (or cut) the current selection into the clipboard.
+    fn copy_selection(&mut self, assets: &mut Assets, cut: bool) {
+        let Some(s) = self.sel else { return };
+        let mut tiles = Vec::with_capacity((s.w * s.h) as usize);
+        for y in 0..s.h {
+            for x in 0..s.w {
+                tiles.push(assets.map.get(s.x + x, s.y + y));
+            }
+        }
+        self.clip = Some(Clipboard {
+            w: s.w,
+            h: s.h,
+            tiles,
+        });
+        if cut {
+            // Cut clears the source cells but keeps the selection rectangle.
+            for y in 0..s.h {
+                for x in 0..s.w {
+                    assets.map.set(s.x + x, s.y + y, 0);
+                }
+            }
+        }
+    }
+
+    /// Clear the current selection to tile 0 without touching the clipboard. The
+    /// selection itself is kept, so it can be re-filled, moved, or pasted over.
+    fn delete_selection(&self, assets: &mut Assets) {
+        let Some(s) = self.sel else { return };
+        for y in 0..s.h {
+            for x in 0..s.w {
+                assets.map.set(s.x + x, s.y + y, 0);
+            }
+        }
+    }
+
+    /// Stamp the clipboard at map cell (cx, cy).
+    fn paste_at(&self, assets: &mut Assets, cx: i32, cy: i32) {
+        let Some(clip) = &self.clip else { return };
+        for y in 0..clip.h {
+            for x in 0..clip.w {
+                let (dx, dy) = (cx + x, cy + y);
+                if (0..MAP_W as i32).contains(&dx) && (0..MAP_H as i32).contains(&dy) {
+                    assets
+                        .map
+                        .set(dx, dy, clip.tiles[(y * clip.w + x) as usize]);
+                }
+            }
+        }
+    }
+
+    /// Whether map cell (cx, cy) is inside the current selection.
+    fn point_in_selection(&self, cx: i32, cy: i32) -> bool {
+        match self.sel {
+            Some(s) => cx >= s.x && cx < s.x + s.w && cy >= s.y && cy < s.y + s.h,
+            None => false,
+        }
+    }
+
     /// The map cell under the cursor, if the cursor is over the view.
     fn hovered_cell(&self) -> Option<(i32, i32)> {
         if self.mx < 0 || self.mx > 127 || self.my < VIEW_Y || self.my > VIEW_BOTTOM {
@@ -553,5 +669,81 @@ mod tests {
         ed.key(Key::Char('s'), Mods::default(), &mut a);
         ed.tick(&rel(40, VIEW_Y + 40), &mut a);
         assert!(ed.sel.is_none(), "no phantom selection committed");
+    }
+
+    fn make_selection(ed: &mut MapEditor, a: &mut Assets, x: i32, y: i32, w: i32, h: i32) {
+        ed.tool = Tool::Select;
+        ed.tick(&press(x * 8 + 1, VIEW_Y + y * 8 + 1), a);
+        ed.tick(&held((x + w - 1) * 8 + 1, VIEW_Y + (y + h - 1) * 8 + 1), a);
+        ed.tick(&rel((x + w - 1) * 8 + 1, VIEW_Y + (y + h - 1) * 8 + 1), a);
+    }
+
+    #[test]
+    fn copy_then_paste_reproduces_the_block() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        a.map.set(2, 1, 11);
+        a.map.set(3, 1, 12);
+        make_selection(&mut ed, &mut a, 2, 1, 2, 1);
+        ed.key(
+            Key::Char('c'),
+            Mods {
+                ctrl: true,
+                ..Default::default()
+            },
+            &mut a,
+        );
+        let clip = ed.clip.clone().expect("clipboard filled");
+        assert_eq!((clip.w, clip.h, clip.tiles), (2, 1, vec![11, 12]));
+        // Paste at cell (5, 4).
+        ed.tool = Tool::Paste;
+        ed.tick(&press(5 * 8 + 1, VIEW_Y + 4 * 8 + 1), &mut a);
+        assert_eq!(a.map.get(5, 4), 11);
+        assert_eq!(a.map.get(6, 4), 12);
+    }
+
+    #[test]
+    fn cut_clears_the_source() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        a.map.set(2, 1, 11);
+        make_selection(&mut ed, &mut a, 2, 1, 1, 1);
+        ed.key(
+            Key::Char('x'),
+            Mods {
+                ctrl: true,
+                ..Default::default()
+            },
+            &mut a,
+        );
+        assert_eq!(a.map.get(2, 1), 0);
+        assert_eq!(ed.clip.as_ref().unwrap().tiles, vec![11]);
+    }
+
+    #[test]
+    fn delete_clears_without_touching_the_clipboard() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        a.map.set(2, 1, 11);
+        make_selection(&mut ed, &mut a, 2, 1, 1, 1);
+        ed.key(Key::Delete, Mods::default(), &mut a);
+        assert_eq!(a.map.get(2, 1), 0);
+        assert!(ed.clip.is_none());
+    }
+
+    #[test]
+    fn dragging_inside_a_selection_moves_the_block() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        a.map.set(2, 1, 11);
+        make_selection(&mut ed, &mut a, 2, 1, 1, 1);
+        // Press inside the selection (cell 2,1), drag to cell (5,4), release there.
+        ed.tick(&press(2 * 8 + 1, VIEW_Y + 1 * 8 + 1), &mut a);
+        ed.tick(&held(5 * 8 + 1, VIEW_Y + 4 * 8 + 1), &mut a);
+        ed.tick(&rel(5 * 8 + 1, VIEW_Y + 4 * 8 + 1), &mut a);
+        assert_eq!(a.map.get(2, 1), 0, "source cleared");
+        assert_eq!(a.map.get(5, 4), 11, "block moved");
+        let s = ed.sel.expect("selection follows the move");
+        assert_eq!((s.x, s.y, s.w, s.h), (5, 4, 1, 1));
     }
 }
