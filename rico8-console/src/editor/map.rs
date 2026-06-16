@@ -248,6 +248,27 @@ impl MapEditor {
                     }
                 }
             }
+            Tool::Fill => {
+                if mouse.left_pressed && mouse.y >= VIEW_Y && mouse.y <= VIEW_BOTTOM {
+                    let (cx, cy) = self.clamped_cell();
+                    self.drag = Drag::Shape { ax: cx, ay: cy };
+                }
+                if !mouse.left {
+                    if let Drag::Shape { ax, ay } = std::mem::replace(&mut self.drag, Drag::None) {
+                        let (cx, cy) = self.clamped_cell();
+                        if (cx, cy) == (ax, ay) {
+                            self.flood_fill(assets, ax, ay);
+                        } else {
+                            let (x, y, w, h) = normalize_rect(ax, ay, cx, cy);
+                            for yy in y..y + h {
+                                for xx in x..x + w {
+                                    assets.map.set(xx, yy, self.brush as u8);
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -285,6 +306,7 @@ impl MapEditor {
         self.draw_toolbar(fb, assets);
         self.draw_view(fb, assets);
         self.draw_selection(fb);
+        self.draw_shape_preview(fb);
         fb.rectfill(0, SEP_Y, 127, SEP_Y + 1, col::LIGHT_GREY);
         self.draw_sheet(fb, assets);
         self.draw_status(fb, assets);
@@ -499,6 +521,38 @@ impl MapEditor {
             Some(s) => cx >= s.x && cx < s.x + s.w && cy >= s.y && cy < s.y + s.h,
             None => false,
         }
+    }
+
+    /// Flood-fill from (sx, sy) replacing all contiguous same-tile cells with the brush.
+    fn flood_fill(&self, assets: &mut Assets, sx: i32, sy: i32) {
+        let target = assets.map.get(sx, sy);
+        let brush = self.brush as u8;
+        if target == brush {
+            return;
+        }
+        let mut stack = vec![(sx, sy)];
+        while let Some((x, y)) = stack.pop() {
+            if !(0..MAP_W as i32).contains(&x) || !(0..MAP_H as i32).contains(&y) {
+                continue;
+            }
+            if assets.map.get(x, y) != target {
+                continue;
+            }
+            assets.map.set(x, y, brush);
+            stack.extend([(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]);
+        }
+    }
+
+    /// Draw a rectangle outline preview while dragging the Fill (or Circle) tool.
+    fn draw_shape_preview(&self, fb: &mut Framebuffer) {
+        let Drag::Shape { ax, ay } = self.drag else {
+            return;
+        };
+        let (cx, cy) = self.clamped_cell();
+        let (x, y, w, h) = normalize_rect(ax, ay, cx, cy);
+        let sx = (x - self.cam_x) * 8;
+        let sy = VIEW_Y + (y - self.cam_y) * 8;
+        fb.rect(sx, sy, sx + w * 8 - 1, sy + h * 8 - 1, col::WHITE);
     }
 
     /// The map cell under the cursor, if the cursor is over the view.
@@ -745,5 +799,37 @@ mod tests {
         assert_eq!(a.map.get(5, 4), 11, "block moved");
         let s = ed.sel.expect("selection follows the move");
         assert_eq!((s.x, s.y, s.w, s.h), (5, 4, 1, 1));
+    }
+
+    #[test]
+    fn fill_click_flood_fills_the_contiguous_region() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.tool = Tool::Fill;
+        ed.brush = 9;
+        // Default map is all 0; a single click should flood the whole visible-and-beyond region.
+        ed.tick(&press(8 + 1, VIEW_Y + 1), &mut a); // cell (1,0), tile 0
+        ed.tick(&rel(8 + 1, VIEW_Y + 1), &mut a); // release on the same cell -> flood
+        assert_eq!(a.map.get(1, 0), 9);
+        assert_eq!(a.map.get(0, 0), 9, "neighbour flooded");
+        assert_eq!(a.map.get(40, 30), 9, "far same-tile cell flooded");
+    }
+
+    #[test]
+    fn fill_drag_fills_a_rectangle() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        a.map.set(50, 50, 3); // make the map non-uniform so flood wouldn't cover the rect.
+        ed.tool = Tool::Fill;
+        ed.brush = 4;
+        ed.tick(&press(1 * 8 + 1, VIEW_Y + 1 * 8 + 1), &mut a); // (1,1)
+        ed.tick(&held(2 * 8 + 1, VIEW_Y + 2 * 8 + 1), &mut a); // drag to (2,2)
+        ed.tick(&rel(2 * 8 + 1, VIEW_Y + 2 * 8 + 1), &mut a); // release on (2,2) -> rect
+        for y in 1..=2 {
+            for x in 1..=2 {
+                assert_eq!(a.map.get(x, y), 4, "cell ({x},{y}) filled");
+            }
+        }
+        assert_eq!(a.map.get(0, 0), 0, "outside rect untouched");
     }
 }
