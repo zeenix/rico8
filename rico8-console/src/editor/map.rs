@@ -282,7 +282,26 @@ impl MapEditor {
                     }
                 }
             }
-            _ => {}
+            Tool::Pan => {
+                if mouse.left_pressed {
+                    self.drag = Drag::Panning {
+                        amx: mouse.x,
+                        amy: mouse.y,
+                        acx: self.cam_x,
+                        acy: self.cam_y,
+                    };
+                }
+                if let Drag::Panning { amx, amy, acx, acy } = self.drag {
+                    if mouse.left {
+                        self.cam_x =
+                            (acx + (amx - mouse.x) / 8).clamp(0, MAP_W as i32 - VIEW_TILES_X);
+                        self.cam_y =
+                            (acy + (amy - mouse.y) / 8).clamp(0, MAP_H as i32 - VIEW_TILES_Y);
+                    } else {
+                        self.drag = Drag::None;
+                    }
+                }
+            }
         }
     }
 
@@ -727,9 +746,9 @@ mod tests {
         let mut a = Assets::default();
         ed.tool = Tool::Select;
         // Press at cell (3,1), drag up-left to cell (1,0), release there.
-        ed.tick(&press(3 * 8 + 1, VIEW_Y + 1 * 8 + 1), &mut a);
-        ed.tick(&held(1 * 8 + 1, VIEW_Y + 1), &mut a);
-        ed.tick(&rel(1 * 8 + 1, VIEW_Y + 1), &mut a);
+        ed.tick(&press(3 * 8 + 1, VIEW_Y + 9), &mut a);
+        ed.tick(&held(9, VIEW_Y + 1), &mut a);
+        ed.tick(&rel(9, VIEW_Y + 1), &mut a);
         let s = ed.sel.expect("selection set");
         assert_eq!((s.x, s.y, s.w, s.h), (1, 0, 3, 2));
     }
@@ -827,7 +846,7 @@ mod tests {
         a.map.set(2, 1, 11);
         make_selection(&mut ed, &mut a, 2, 1, 1, 1);
         // Press inside the selection (cell 2,1), drag to cell (5,4), release there.
-        ed.tick(&press(2 * 8 + 1, VIEW_Y + 1 * 8 + 1), &mut a);
+        ed.tick(&press(2 * 8 + 1, VIEW_Y + 9), &mut a);
         ed.tick(&held(5 * 8 + 1, VIEW_Y + 4 * 8 + 1), &mut a);
         ed.tick(&rel(5 * 8 + 1, VIEW_Y + 4 * 8 + 1), &mut a);
         assert_eq!(a.map.get(2, 1), 0, "source cleared");
@@ -857,7 +876,7 @@ mod tests {
         a.map.set(50, 50, 3); // make the map non-uniform so flood wouldn't cover the rect.
         ed.tool = Tool::Fill;
         ed.brush = 4;
-        ed.tick(&press(1 * 8 + 1, VIEW_Y + 1 * 8 + 1), &mut a); // (1,1)
+        ed.tick(&press(9, VIEW_Y + 9), &mut a); // (1,1)
         ed.tick(&held(2 * 8 + 1, VIEW_Y + 2 * 8 + 1), &mut a); // drag to (2,2)
         ed.tick(&rel(2 * 8 + 1, VIEW_Y + 2 * 8 + 1), &mut a); // release on (2,2) -> rect
         for y in 1..=2 {
@@ -866,6 +885,20 @@ mod tests {
             }
         }
         assert_eq!(a.map.get(0, 0), 0, "outside rect untouched");
+    }
+
+    #[test]
+    fn pan_drag_scrolls_the_camera() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.tool = Tool::Pan;
+        ed.cam_x = 20;
+        ed.cam_y = 20;
+        // Press at x=80, drag left to x=40 (delta -40 px = -5 cells) -> cam_x += 5.
+        ed.tick(&press(80, VIEW_Y + 40), &mut a);
+        ed.tick(&held(40, VIEW_Y + 16), &mut a); // dx -40 -> +5 cells; dy -24 -> +3 cells
+        assert_eq!(ed.cam_x, 25);
+        assert_eq!(ed.cam_y, 23);
     }
 
     #[test]
