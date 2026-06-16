@@ -10,6 +10,24 @@ use rico8_runtime::{
     ui as rui,
 };
 
+/// An 8×8 one-bit icon: each byte is a row, MSB is the left pixel.
+pub type Icon8 = [u8; 8];
+
+/// Blit an [`Icon8`] at (x, y) in the given colour; unset bits are left untouched.
+pub fn draw_icon8(fb: &mut Framebuffer, icon: &Icon8, x: i32, y: i32, color: u8) {
+    for (ry, row) in icon.iter().enumerate() {
+        for rx in 0..8 {
+            if row & (0x80 >> rx) != 0 {
+                fb.pset(x + rx, y + ry as i32, color);
+            }
+        }
+    }
+}
+
+/// The pencil glyph, sampled pixel-for-pixel from PICO-8 (shared by the sprite
+/// and map editors).
+pub const ICON_PENCIL: Icon8 = [0x08, 0x1C, 0x3E, 0x7C, 0xB8, 0x90, 0xE0, 0x00];
+
 /// Mouse state in virtual-screen coordinates.
 #[derive(Debug, Clone, Copy)]
 pub struct Mouse {
@@ -251,6 +269,17 @@ pub fn draw_cursor(fb: &mut Framebuffer, mouse: &Mouse) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pencil_icon_draws_its_lit_pixels() {
+        let mut fb = Framebuffer::new();
+        draw_icon8(&mut fb, &ICON_PENCIL, 10, 20, col::WHITE);
+        // Row 0 of ICON_PENCIL (0x08) lights exactly column 4.
+        assert_eq!(fb.pget(10 + 4, 20), col::WHITE, "row 0 bit 4 lit");
+        assert_eq!(fb.pget(10, 20), col::BLACK, "row 0 bit 0 unlit");
+        // Row 6 (0xE0) lights columns 0..=2.
+        assert_eq!(fb.pget(10, 26), col::WHITE, "row 6 bit 0 lit");
+    }
 
     #[test]
     fn active_tab_has_no_background_box() {
