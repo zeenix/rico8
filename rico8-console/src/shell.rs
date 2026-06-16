@@ -605,6 +605,7 @@ impl Shell {
             }
             "new" => self.cmd_new(args),
             "load" => self.cmd_load(args),
+            "reload" => self.cmd_reload(),
             "save" => self.cmd_save(args),
             "run" => {
                 self.cmd_run();
@@ -675,6 +676,7 @@ impl Shell {
         for (c, d) in [
             ("new <name>", "create a project"),
             ("load <dir|cart.png>", "load a cart"),
+            ("reload", "re-read from disk, drop edits"),
             ("save", "save project to disk"),
             ("run", "build + run (esc stops)"),
             ("export <f.png|f.html>", "export cart (png or web)"),
@@ -758,6 +760,18 @@ impl Shell {
             self.loaded = Loaded::Project(project);
         }
         Ok(())
+    }
+
+    /// Re-read the current project/cart from disk, discarding in-console edits.
+    /// Resolves a conflict in favour of the external version.
+    fn cmd_reload(&mut self) -> Result<()> {
+        let path = match &self.loaded {
+            Loaded::None => bail!("nothing loaded"),
+            Loaded::Project(p) => p.dir.clone(),
+            Loaded::Cart { path, .. } => path.clone(),
+        };
+        let path_str = path.to_string_lossy().into_owned();
+        self.cmd_load(&[&path_str])
     }
 
     fn cmd_save(&mut self, _args: &[&str]) -> Result<()> {
@@ -1876,6 +1890,32 @@ mod tests {
             shell.tick();
         }
         assert_eq!(shell.cart_name(), "edited");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `reload` discards in-console edits and re-reads the project from disk,
+    /// resolving a conflict in favour of the external version.
+    #[test]
+    fn reload_takes_disk_version() {
+        let dir = std::env::temp_dir().join(format!("rico8_reload_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load");
+
+        // External edit on disk.
+        let lib = project_dir.join("src/lib.rs");
+        std::fs::write(&lib, "// DISK VERSION\n").unwrap();
+
+        shell.cmd_reload().expect("reload");
+        let code = shell.code().unwrap_or_default().to_string();
+        assert!(
+            code.starts_with("// DISK VERSION"),
+            "reload took disk; got:\n{code}"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
