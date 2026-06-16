@@ -269,6 +269,19 @@ impl MapEditor {
                     }
                 }
             }
+            Tool::Circle => {
+                if mouse.left_pressed && mouse.y >= VIEW_Y && mouse.y <= VIEW_BOTTOM {
+                    let (cx, cy) = self.clamped_cell();
+                    self.drag = Drag::Shape { ax: cx, ay: cy };
+                }
+                if !mouse.left {
+                    if let Drag::Shape { ax, ay } = std::mem::replace(&mut self.drag, Drag::None) {
+                        let (cx, cy) = self.clamped_cell();
+                        let (x, y, w, h) = normalize_rect(ax, ay, cx, cy);
+                        self.stamp_ellipse(assets, x, y, w, h);
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -540,6 +553,28 @@ impl MapEditor {
             }
             assets.map.set(x, y, brush);
             stack.extend([(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]);
+        }
+    }
+
+    /// Stamp the ellipse outline inscribed in the `w × h` bounding box at `(x, y)`.
+    fn stamp_ellipse(&self, assets: &mut Assets, x: i32, y: i32, w: i32, h: i32) {
+        let brush = self.brush as u8;
+        // Centre and radii reach the cell centres on the box edges, so the
+        // outline touches the bounding box (radius (n-1)/2 for an n-cell span).
+        let (cx, cy) = (
+            x as f32 + (w - 1) as f32 / 2.0,
+            y as f32 + (h - 1) as f32 / 2.0,
+        );
+        let (rx, ry) = ((w - 1) as f32 / 2.0, (h - 1) as f32 / 2.0);
+        // Walk the perimeter by angle; overlapping samples just re-write a cell.
+        let steps = ((w + h) * 4).max(16);
+        for s in 0..steps {
+            let t = std::f32::consts::TAU * s as f32 / steps as f32;
+            let px = (cx + rx * t.cos()).round() as i32;
+            let py = (cy + ry * t.sin()).round() as i32;
+            if (0..MAP_W as i32).contains(&px) && (0..MAP_H as i32).contains(&py) {
+                assets.map.set(px, py, brush);
+            }
         }
     }
 
@@ -831,5 +866,24 @@ mod tests {
             }
         }
         assert_eq!(a.map.get(0, 0), 0, "outside rect untouched");
+    }
+
+    #[test]
+    fn circle_drag_stamps_an_ellipse_outline() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.tool = Tool::Circle;
+        ed.brush = 6;
+        // Bounding box cells (2,2)..(6,6): a 5x5 box centred at (4,4).
+        ed.tick(&press(2 * 8 + 1, VIEW_Y + 2 * 8 + 1), &mut a);
+        ed.tick(&held(6 * 8 + 1, VIEW_Y + 6 * 8 + 1), &mut a);
+        ed.tick(&rel(6 * 8 + 1, VIEW_Y + 6 * 8 + 1), &mut a);
+        // Outline touches the box-edge midpoints...
+        assert_eq!(a.map.get(4, 2), 6, "top midpoint on outline");
+        assert_eq!(a.map.get(2, 4), 6, "left midpoint on outline");
+        assert_eq!(a.map.get(6, 4), 6, "right midpoint on outline");
+        assert_eq!(a.map.get(4, 6), 6, "bottom midpoint on outline");
+        // ...and the centre stays empty (outline only).
+        assert_eq!(a.map.get(4, 4), 0, "centre not filled");
     }
 }
