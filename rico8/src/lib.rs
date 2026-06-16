@@ -193,30 +193,51 @@ impl Context {
             .expect("btnp_mask returned an unknown button bit (rico8 host/SDK ABI mismatch)")
     }
 
-    /// Read a map tile (sprite number; 0 = empty).
-    pub fn mget(&self, x: i32, y: i32) -> u8 {
-        unsafe { ffi::mget(x, y) as u8 }
+    /// The sprite number of a map tile (`SpriteId(0)` = empty).
+    pub fn map_tile(&self, x: i32, y: i32) -> SpriteId {
+        SpriteId(unsafe { ffi::mget(x, y) } as u8)
+    }
+
+    /// Alias for [`Context::map_tile`].
+    pub fn mget(&self, x: i32, y: i32) -> SpriteId {
+        self.map_tile(x, y)
     }
 
     /// Write a map tile. Changes live in console RAM and are discarded on
     /// reload, like any self-respecting cartridge.
-    pub fn mset(&mut self, x: i32, y: i32, sprite: SpriteId) {
+    pub fn set_map_tile(&mut self, x: i32, y: i32, sprite: SpriteId) {
         unsafe { ffi::mset(x, y, sprite.0 as u32) }
     }
 
-    /// All eight flags of a sprite as a bitmask.
-    pub fn fget(&self, sprite: SpriteId) -> u8 {
-        unsafe { ffi::fget(sprite.0 as u32) as u8 }
+    /// Alias for [`Context::set_map_tile`].
+    pub fn mset(&mut self, x: i32, y: i32, sprite: SpriteId) {
+        self.set_map_tile(x, y, sprite)
     }
 
-    /// True when the sprite has flag `flag` (`0..8`) set.
-    pub fn fget_flag(&self, sprite: SpriteId, flag: u8) -> bool {
-        self.fget(sprite) & (1 << (flag & 7)) != 0
+    /// Every flag set on a sprite.
+    pub fn sprite_flags(&self, sprite: SpriteId) -> BitFlags<SpriteFlag> {
+        BitFlags::from_bits(unsafe { ffi::fget(sprite.0 as u32) } as u8)
+            .expect("fget returned an unknown sprite-flag bit (rico8 host/SDK ABI mismatch)")
     }
 
-    /// Overwrite a sprite's flag bitmask.
-    pub fn fset(&mut self, sprite: SpriteId, flags: u8) {
-        unsafe { ffi::fset(sprite.0 as u32, flags as u32) }
+    /// Alias for [`Context::sprite_flags`].
+    pub fn fget(&self, sprite: SpriteId) -> BitFlags<SpriteFlag> {
+        self.sprite_flags(sprite)
+    }
+
+    /// Whether a sprite has a particular flag set.
+    pub fn has_sprite_flag(&self, sprite: SpriteId, flag: SpriteFlag) -> bool {
+        self.sprite_flags(sprite).contains(flag)
+    }
+
+    /// Overwrite a sprite's flags.
+    pub fn set_sprite_flags(&mut self, sprite: SpriteId, flags: impl Into<BitFlags<SpriteFlag>>) {
+        unsafe { ffi::fset(sprite.0 as u32, flags.into().bits() as u32) }
+    }
+
+    /// Alias for [`Context::set_sprite_flags`].
+    pub fn fset(&mut self, sprite: SpriteId, flags: impl Into<BitFlags<SpriteFlag>>) {
+        self.set_sprite_flags(sprite, flags)
     }
 
     /// Play a sound effect on a free channel.
@@ -478,6 +499,17 @@ mod tests {
         // Native stubs report nothing held/pressed.
         assert!(ctx.buttons_down().is_empty());
         assert!(ctx.buttons_pressed().is_empty());
+    }
+
+    #[test]
+    fn sprite_flag_and_tile_helpers() {
+        let ctx = Context { _private: () };
+        // Native stubs: fget -> 0 (no flags), mget -> 0.
+        assert!(ctx.sprite_flags(SpriteId(1)).is_empty());
+        assert_eq!(ctx.sprite_flags(SpriteId(1)), ctx.fget(SpriteId(1)));
+        assert!(!ctx.has_sprite_flag(SpriteId(1), SpriteFlag::Flag0));
+        assert_eq!(ctx.map_tile(0, 0), SpriteId(0));
+        assert_eq!(ctx.map_tile(0, 0), ctx.mget(0, 0));
     }
 
     #[test]
