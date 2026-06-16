@@ -8,6 +8,7 @@ use crate::{
         code::CodeEditor, map::MapEditor, music::MusicEditor, sfx::SfxEditor, sprite::SpriteEditor,
     },
     ui::{self, Mouse},
+    watch::{FileChange, FileWatch, SourceTreeWatch},
 };
 use anyhow::{anyhow, bail, Result};
 use rico8_runtime::{
@@ -16,7 +17,7 @@ use rico8_runtime::{
     cart::{self, Cart},
     fb::Framebuffer,
     palette::col,
-    project::Project,
+    project::{decode_assets, encode_assets, Project},
     vm::{GameVm, RuntimeError, UI_FPS},
 };
 use std::{
@@ -100,6 +101,34 @@ fn assets_ref(loaded: &Loaded) -> Option<&Assets> {
     }
 }
 
+/// Disk watchers for the currently-loaded *project*: the two files rico8
+/// mirrors in memory plus the crate's source tree for build triggering.
+struct ProjectWatch {
+    code: FileWatch,
+    assets: FileWatch,
+    source_tree: SourceTreeWatch,
+}
+
+impl ProjectWatch {
+    fn new(p: &Project) -> Self {
+        let assets_baseline = encode_assets(&p.assets).unwrap_or_default();
+        Self {
+            code: FileWatch::new(p.dir.join("src/lib.rs"), p.code.clone().into_bytes()),
+            assets: FileWatch::new(p.dir.join("assets.rico8"), assets_baseline),
+            source_tree: SourceTreeWatch::new(&p.dir),
+        }
+    }
+
+    /// Re-baseline every watcher to the project's current in-memory state and
+    /// the current source tree (after rico8 saved the files itself).
+    fn sync(&mut self, p: &Project) {
+        self.code.mark_synced(p.code.clone().into_bytes());
+        self.assets
+            .mark_synced(encode_assets(&p.assets).unwrap_or_default());
+        self.source_tree.sync();
+    }
+}
+
 /// Draw the fps meter in the top-left: measured frames per second over the
 /// cart's target rate, e.g. `60/60`.
 fn fps_overlay(fb: &mut Framebuffer, measured: f32, target: u32) {
@@ -156,6 +185,9 @@ pub struct Shell {
     // Hot reload.
     wasm_mtime: Option<SystemTime>,
 
+    // Disk watching for external-edit live-reload.
+    project_watch: Option<ProjectWatch>,
+
     // Mouse, shared with editors.
     pub mouse: Mouse,
 
@@ -204,6 +236,7 @@ impl Shell {
             run_after_build: false,
             toast: None,
             wasm_mtime: None,
+            project_watch: None,
             mouse: Mouse::default(),
             code_ed: CodeEditor::new(),
             sprite_ed: SpriteEditor::new(),
@@ -634,6 +667,7 @@ impl Shell {
         let project = Project::create(&dir, name, &self.sdk_path)?;
         self.say(&format!("created ./{name}"), col::GREEN);
         self.code_ed.set_text(&project.code);
+        self.project_watch = Some(ProjectWatch::new(&project));
         self.loaded = Loaded::Project(project);
         Ok(())
     }
@@ -659,6 +693,7 @@ impl Shell {
                     .as_deref()
                     .unwrap_or("// no source in this cart"),
             );
+            self.project_watch = None;
             self.loaded = Loaded::Cart { cart, path };
             self.say(&format!("loaded cart: {name}"), col::GREEN);
             if !has_src {
@@ -668,6 +703,7 @@ impl Shell {
             let project = Project::load(&path)?;
             self.code_ed.set_text(&project.code);
             self.say(&format!("loaded {}", project.name), col::GREEN);
+            self.project_watch = Some(ProjectWatch::new(&project));
             self.loaded = Loaded::Project(project);
         }
         Ok(())
@@ -685,6 +721,10 @@ impl Shell {
                 format!("saved {}", path.display())
             }
         };
+        // After saving a project, rico8's own write must not look external.
+        if let (Loaded::Project(p), Some(w)) = (&self.loaded, &mut self.project_watch) {
+            w.sync(p);
+        }
         self.say(&message, col::GREEN);
         Ok(())
     }
@@ -725,8 +765,13 @@ impl Shell {
                     self.toast("already building...", col::ORANGE, 1.5);
                     return;
                 }
-                if let Loaded::Project(p) = &mut self.loaded {
-                    let _ = p.save();
+                // Pick up external edits and flush in-console edits without
+                // clobbering either. Abort the run on an unresolved conflict.
+                if !self.reconcile_for_build() {
+                    self.say("disk & editor both changed", col::ORANGE);
+                    self.say("save or reload to resolve", col::ORANGE);
+                    self.toast("conflict: save or reload", col::ORANGE, 3.0);
+                    return;
                 }
                 self.mode = Mode::Console;
                 self.say("compiling...", col::LIGHT_GREY);
@@ -734,6 +779,76 @@ impl Shell {
                 self.run_after_build = true;
             }
         }
+    }
+
+    /// Reconcile a project's disk and in-memory copies in preparation for a
+    /// build. Adopts clean external changes, flushes in-console edits to disk,
+    /// and returns `false` (build should abort) on an unresolved conflict.
+    fn reconcile_for_build(&mut self) -> bool {
+        let Loaded::Project(_) = &self.loaded else {
+            return true;
+        };
+        // Snapshot the in-memory bytes to feed the watchers.
+        let (code_mem, assets_mem) = match &self.loaded {
+            Loaded::Project(p) => (
+                p.code.clone().into_bytes(),
+                encode_assets(&p.assets).unwrap_or_default(),
+            ),
+            _ => return true,
+        };
+        let Some(w) = &mut self.project_watch else {
+            return true;
+        };
+        // Adopt external changes first (clean memory), or bail on conflict.
+        let code_change = w.code.poll(&code_mem);
+        let assets_change = w.assets.poll(&assets_mem);
+        // Absorb the source-tree high-water mark so the flush below + the build
+        // it triggers are not re-detected as an external change next poll.
+        w.source_tree.poll();
+        if matches!(code_change, FileChange::Conflict)
+            || matches!(assets_change, FileChange::Conflict)
+        {
+            return false;
+        }
+        if let FileChange::Adopt(bytes) = code_change {
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            if let Loaded::Project(p) = &mut self.loaded {
+                p.code = text.clone();
+            }
+            self.code_ed.set_text(&text);
+        }
+        if let FileChange::Adopt(bytes) = assets_change {
+            match (decode_assets(&bytes), &mut self.loaded) {
+                (Ok(assets), Loaded::Project(p)) => p.assets = assets,
+                (Err(_), _) => {
+                    // Malformed disk file: re-sync the watcher to the current
+                    // in-memory encoding so we do not flush over it.
+                    if let (Loaded::Project(p), Some(w)) = (&self.loaded, &mut self.project_watch) {
+                        w.assets
+                            .mark_synced(encode_assets(&p.assets).unwrap_or_default());
+                    }
+                }
+                _ => {}
+            }
+        }
+        // Flush any in-console edits that are not yet on disk, so cargo builds
+        // exactly what the editors show. (No-op when nothing is dirty.)
+        let needs_flush = match (&self.loaded, &self.project_watch) {
+            (Loaded::Project(p), Some(w)) => {
+                p.code.as_bytes() != w.code.baseline()
+                    || encode_assets(&p.assets).unwrap_or_default() != w.assets.baseline()
+            }
+            _ => false,
+        };
+        if needs_flush {
+            if let Loaded::Project(p) = &self.loaded {
+                let _ = p.save();
+            }
+            if let (Loaded::Project(p), Some(w)) = (&self.loaded, &mut self.project_watch) {
+                w.sync(p);
+            }
+        }
+        true
     }
 
     fn start_vm_from_loaded(&mut self) -> Result<()> {
@@ -822,6 +937,9 @@ impl Shell {
         self.say(&format!("imported into {}", dir.display()), col::GREEN);
         self.code_ed.set_text(&project.code);
         self.loaded = Loaded::Project(project);
+        if let Loaded::Project(p) = &self.loaded {
+            self.project_watch = Some(ProjectWatch::new(p));
+        }
         Ok(())
     }
 
@@ -844,6 +962,9 @@ impl Shell {
         );
         self.code_ed.set_text(&project.code);
         self.loaded = Loaded::Project(project);
+        if let Loaded::Project(p) = &self.loaded {
+            self.project_watch = Some(ProjectWatch::new(p));
+        }
         Ok(())
     }
 
@@ -1348,6 +1469,67 @@ mod tests {
         let (text, color, _) = shell.toast.as_ref().unwrap();
         assert!(text.starts_with("build failed"), "got: {text}");
         assert_eq!(*color, col::RED);
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `run` after an external edit (clean in-console state) builds the
+    /// external version and does NOT overwrite it with the stale in-memory copy.
+    #[test]
+    fn run_does_not_clobber_external_edits() {
+        let dir = std::env::temp_dir().join(format!("rico8_run_noclobber_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load");
+
+        // Simulate an external editor changing src/lib.rs to a still-valid file.
+        let lib = project_dir.join("src/lib.rs");
+        let original = std::fs::read_to_string(&lib).unwrap();
+        let edited = format!("// EXTERNAL EDIT\n{original}");
+        // Bump mtime so the watcher sees it as newer than load time.
+        std::fs::write(&lib, &edited).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&lib)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+
+        shell.cmd_run();
+
+        // The on-disk file must still contain the external edit — not be
+        // reverted to the stale in-memory copy.
+        let after = std::fs::read_to_string(&lib).unwrap();
+        assert!(
+            after.starts_with("// EXTERNAL EDIT\n"),
+            "external edit survived run; got:\n{after}"
+        );
+
+        // Let the build finish so we leave no thread dangling.
+        for _ in 0..(120 * 30) {
+            shell.tick();
+            if shell.build.is_none() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `new` must arm the disk watcher, otherwise in-console edits are dropped
+    /// before the build (reconcile_for_build skips the flush when unwatched).
+    #[test]
+    fn new_arms_the_project_watcher() {
+        let dir = std::env::temp_dir().join(format!("rico8_new_watch_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        shell.cwd = dir.clone();
+        shell.cmd_new(&["game"]).expect("new");
+        assert!(shell.project_watch.is_some(), "new should arm the watcher");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
