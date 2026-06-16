@@ -129,6 +129,51 @@ impl ProjectWatch {
     }
 }
 
+/// Disk watcher for a loaded PNG cart: re-parses on external change and
+/// reconciles its assets against any in-console edits.
+struct CartWatch {
+    path: PathBuf,
+    synced_mtime: Option<SystemTime>,
+    /// Encoded assets as of the last sync (the editable, comparable part).
+    baseline: Vec<u8>,
+}
+
+impl CartWatch {
+    fn new(path: PathBuf, baseline: Vec<u8>) -> Self {
+        let synced_mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
+        Self {
+            path,
+            synced_mtime,
+            baseline,
+        }
+    }
+
+    /// Re-baseline after rico8 wrote the cart itself (save), so our own write
+    /// is not seen as an external change.
+    fn mark_synced(&mut self, baseline: Vec<u8>) {
+        self.baseline = baseline;
+        self.synced_mtime = std::fs::metadata(&self.path)
+            .and_then(|m| m.modified())
+            .ok();
+    }
+
+    /// The new mtime if the file advanced past the last sync, else `None`.
+    fn advanced(&mut self) -> Option<SystemTime> {
+        let mtime = std::fs::metadata(&self.path)
+            .and_then(|m| m.modified())
+            .ok()?;
+        let advanced = self.synced_mtime.map(|prev| mtime > prev).unwrap_or(true);
+        if advanced {
+            // Absorb the mtime now; a transiently-corrupt PNG mid-write is
+            // ignored until the next write rather than retried every poll.
+            self.synced_mtime = Some(mtime);
+            Some(mtime)
+        } else {
+            None
+        }
+    }
+}
+
 /// Draw the fps meter in the top-left: measured frames per second over the
 /// cart's target rate, e.g. `60/60`.
 fn fps_overlay(fb: &mut Framebuffer, measured: f32, target: u32) {
@@ -187,6 +232,7 @@ pub struct Shell {
 
     // Disk watching for external-edit live-reload.
     project_watch: Option<ProjectWatch>,
+    cart_watch: Option<CartWatch>,
 
     // Mouse, shared with editors.
     pub mouse: Mouse,
@@ -237,6 +283,7 @@ impl Shell {
             toast: None,
             wasm_mtime: None,
             project_watch: None,
+            cart_watch: None,
             mouse: Mouse::default(),
             code_ed: CodeEditor::new(),
             sprite_ed: SpriteEditor::new(),
@@ -668,6 +715,7 @@ impl Shell {
         self.say(&format!("created ./{name}"), col::GREEN);
         self.code_ed.set_text(&project.code);
         self.project_watch = Some(ProjectWatch::new(&project));
+        self.cart_watch = None;
         self.loaded = Loaded::Project(project);
         Ok(())
     }
@@ -694,6 +742,8 @@ impl Shell {
                     .unwrap_or("// no source in this cart"),
             );
             self.project_watch = None;
+            let cart_baseline = encode_assets(&cart.assets).unwrap_or_default();
+            self.cart_watch = Some(CartWatch::new(path.clone(), cart_baseline));
             self.loaded = Loaded::Cart { cart, path };
             self.say(&format!("loaded cart: {name}"), col::GREEN);
             if !has_src {
@@ -704,6 +754,7 @@ impl Shell {
             self.code_ed.set_text(&project.code);
             self.say(&format!("loaded {}", project.name), col::GREEN);
             self.project_watch = Some(ProjectWatch::new(&project));
+            self.cart_watch = None;
             self.loaded = Loaded::Project(project);
         }
         Ok(())
@@ -724,6 +775,10 @@ impl Shell {
         // After saving a project, rico8's own write must not look external.
         if let (Loaded::Project(p), Some(w)) = (&self.loaded, &mut self.project_watch) {
             w.sync(p);
+        }
+        // After saving a PNG cart, rico8's own write must not look external.
+        if let (Loaded::Cart { cart, .. }, Some(w)) = (&self.loaded, &mut self.cart_watch) {
+            w.mark_synced(encode_assets(&cart.assets).unwrap_or_default());
         }
         self.say(&message, col::GREEN);
         Ok(())
@@ -948,6 +1003,7 @@ impl Shell {
         if let Loaded::Project(p) = &self.loaded {
             self.project_watch = Some(ProjectWatch::new(p));
         }
+        self.cart_watch = None;
         Ok(())
     }
 
@@ -973,6 +1029,7 @@ impl Shell {
         if let Loaded::Project(p) = &self.loaded {
             self.project_watch = Some(ProjectWatch::new(p));
         }
+        self.cart_watch = None;
         Ok(())
     }
 
@@ -1134,10 +1191,11 @@ impl Shell {
         }
 
         self.poll_project_watch();
+        self.poll_cart_watch();
+        self.check_hot_reload();
 
         match self.mode {
             Mode::Run => {
-                self.check_hot_reload();
                 if self.vm.is_some() {
                     let (logs, result) = {
                         let vm = self.vm.as_mut().unwrap();
@@ -1212,17 +1270,23 @@ impl Shell {
         let Ok(meta) = std::fs::metadata(p.wasm_path()) else {
             return;
         };
-        let Ok(mtime) = meta.modified() else { return };
-        if let Some(prev) = self.wasm_mtime {
-            if mtime > prev {
+        let Ok(mtime) = meta.modified() else {
+            return;
+        };
+        match self.wasm_mtime {
+            Some(prev) if mtime > prev => {
                 self.wasm_mtime = Some(mtime);
-                match self.start_vm_from_loaded() {
-                    Ok(()) => self.say("hot reloaded", col::GREEN),
-                    Err(e) => self.show_error("reload", &e.to_string()),
+                // Only swap the running VM; in other modes the fresh wasm is
+                // simply ready for the next run.
+                if self.mode == Mode::Run {
+                    match self.start_vm_from_loaded() {
+                        Ok(()) => self.say("hot reloaded", col::GREEN),
+                        Err(e) => self.show_error("reload", &e.to_string()),
+                    }
                 }
             }
-        } else {
-            self.wasm_mtime = Some(mtime);
+            Some(_) => {}
+            None => self.wasm_mtime = Some(mtime),
         }
     }
 
@@ -1305,6 +1369,65 @@ impl Shell {
             // Re-run from the console or while already running; stay put if the
             // user is in an editor.
             self.run_after_build = matches!(self.mode, Mode::Run | Mode::Console);
+        }
+    }
+
+    /// Poll a loaded PNG cart's file: on external change re-parse and adopt it
+    /// (when there are no in-console asset edits), else warn about a conflict.
+    fn poll_cart_watch(&mut self) {
+        if !self.frame.is_multiple_of(30) {
+            return;
+        }
+        let (path, in_memory, baseline) = match (&self.loaded, &mut self.cart_watch) {
+            (Loaded::Cart { cart, .. }, Some(w)) => {
+                if w.advanced().is_none() {
+                    return;
+                }
+                (
+                    w.path.clone(),
+                    encode_assets(&cart.assets).unwrap_or_default(),
+                    w.baseline.clone(),
+                )
+            }
+            _ => return,
+        };
+        let new_cart = match cart::load_png(&path) {
+            Ok(c) => c,
+            Err(e) => {
+                self.show_error("reload", &e.to_string());
+                return;
+            }
+        };
+        let disk = encode_assets(&new_cart.assets).unwrap_or_default();
+        match crate::watch::reconcile(&baseline, &disk, &in_memory) {
+            crate::watch::Reconcile::Unchanged => {}
+            crate::watch::Reconcile::Adopt(_) => {
+                self.code_ed.set_text(
+                    new_cart
+                        .source
+                        .as_deref()
+                        .unwrap_or("// no source in this cart"),
+                );
+                if let Some(w) = &mut self.cart_watch {
+                    w.baseline = disk;
+                }
+                self.loaded = Loaded::Cart {
+                    cart: new_cart,
+                    path,
+                };
+                self.say("cart reloaded from disk", col::GREEN);
+                if self.mode == Mode::Run {
+                    if let Err(e) = self.start_vm_from_loaded() {
+                        self.show_error("reload", &e.to_string());
+                    }
+                }
+            }
+            crate::watch::Reconcile::Conflict => {
+                // No latch: each new external write re-warns. The `reload`
+                // command (next task) takes the disk version to resolve this.
+                self.say("cart changed on disk;", col::ORANGE);
+                self.say("you have unsaved edits", col::ORANGE);
+            }
         }
     }
 
@@ -1662,6 +1785,97 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(33));
         }
         assert!(entered_run, "external edit should auto-build and run");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Re-exporting a loaded PNG cart on disk reloads it (assets adopted) when
+    /// there are no in-console edits.
+    #[test]
+    fn external_png_change_reloads_cart() {
+        use rico8_runtime::cart::{self, Cart};
+        let dir = std::env::temp_dir().join(format!("rico8_pngreload_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut shell = test_shell();
+
+        let project_dir = dir.join("game");
+        let project = Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        let png = dir.join("game.png");
+
+        // A valid cart needs the 4-byte wasm magic (plus version); the codec
+        // checks for it on save and load. The VM never runs here.
+        let mut cart = Cart {
+            wasm: b"\0asm\x01\0\0\0".to_vec(),
+            assets: project.assets.clone(),
+            source: Some("// v1".into()),
+        };
+        cart::save_png(&cart, &png).unwrap();
+        shell.cmd_load(&[png.to_str().unwrap()]).expect("load png");
+        let before = shell.cart_name();
+
+        // Re-export with a different cart name, bump mtime.
+        cart.assets.meta.name = "renamed".into();
+        cart::save_png(&cart, &png).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&png)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+
+        for _ in 0..(60 * 30) {
+            shell.tick();
+            if shell.cart_name() != before {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+        assert_eq!(shell.cart_name(), "renamed", "external PNG change adopted");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Saving a PNG cart re-baselines its watcher, so the next poll does not
+    /// mistake rico8's own write for an external change (no false conflict).
+    #[test]
+    fn saving_png_does_not_self_conflict() {
+        use rico8_runtime::{
+            cart::{self, Cart},
+            project::encode_assets,
+        };
+        let dir = std::env::temp_dir().join(format!("rico8_pngsave_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let mut shell = test_shell();
+        let project = Project::create(&dir.join("game"), "game", &shell.sdk_path).unwrap();
+        let png = dir.join("game.png");
+        let cart = Cart {
+            wasm: b"\0asm\x01\0\0\0".to_vec(),
+            assets: project.assets.clone(),
+            source: Some("// v1".into()),
+        };
+        cart::save_png(&cart, &png).unwrap();
+        shell.cmd_load(&[png.to_str().unwrap()]).expect("load png");
+
+        // Edit the loaded cart's assets in-console, then save.
+        if let Some(a) = shell.assets_mut() {
+            a.meta.name = "edited".into();
+        }
+        shell.cmd_save(&[]).expect("save");
+
+        // The watcher baseline must now match the saved in-memory assets.
+        let in_mem = encode_assets(shell.assets().unwrap()).unwrap_or_default();
+        assert_eq!(
+            shell.cart_watch.as_ref().unwrap().baseline,
+            in_mem,
+            "save re-baselined the cart watcher"
+        );
+
+        // Ticking must not flip into a conflict / reload state.
+        for _ in 0..(2 * 30) {
+            shell.tick();
+        }
+        assert_eq!(shell.cart_name(), "edited");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
