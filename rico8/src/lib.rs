@@ -161,14 +161,36 @@ pub struct Context {
 }
 
 impl Context {
-    /// Is a button held down?
-    pub fn btn(&self, b: Button) -> bool {
+    /// Is a button currently held down?
+    pub fn is_button_down(&self, b: Button) -> bool {
         unsafe { ffi::btn(button_index(b)) != 0 }
     }
 
+    /// Alias for [`Context::is_button_down`].
+    pub fn btn(&self, b: Button) -> bool {
+        self.is_button_down(b)
+    }
+
     /// Was a button just pressed? Repeats after a short delay while held.
-    pub fn btnp(&self, b: Button) -> bool {
+    pub fn is_button_pressed(&self, b: Button) -> bool {
         unsafe { ffi::btnp(button_index(b)) != 0 }
+    }
+
+    /// Alias for [`Context::is_button_pressed`].
+    pub fn btnp(&self, b: Button) -> bool {
+        self.is_button_pressed(b)
+    }
+
+    /// Every button currently held down, as a set.
+    pub fn buttons_down(&self) -> BitFlags<Button> {
+        BitFlags::from_bits(unsafe { ffi::btn_mask() } as u8)
+            .expect("btn_mask returned an unknown button bit (rico8 host/SDK ABI mismatch)")
+    }
+
+    /// Every button that fired this frame (with repeat), as a set.
+    pub fn buttons_pressed(&self) -> BitFlags<Button> {
+        BitFlags::from_bits(unsafe { ffi::btnp_mask() } as u8)
+            .expect("btnp_mask returned an unknown button bit (rico8 host/SDK ABI mismatch)")
     }
 
     /// Read a map tile (sprite number; 0 = empty).
@@ -437,6 +459,25 @@ mod tests {
         assert_eq!(button_index(Button::Down), 3);
         assert_eq!(button_index(Button::O), 4);
         assert_eq!(button_index(Button::X), 5);
+    }
+
+    #[test]
+    fn button_aliases_match_primaries() {
+        let ctx = Context { _private: () };
+        for b in [
+            Button::Left,
+            Button::Right,
+            Button::Up,
+            Button::Down,
+            Button::O,
+            Button::X,
+        ] {
+            assert_eq!(ctx.btn(b), ctx.is_button_down(b));
+            assert_eq!(ctx.btnp(b), ctx.is_button_pressed(b));
+        }
+        // Native stubs report nothing held/pressed.
+        assert!(ctx.buttons_down().is_empty());
+        assert!(ctx.buttons_pressed().is_empty());
     }
 
     #[test]
