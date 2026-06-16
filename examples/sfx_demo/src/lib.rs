@@ -29,15 +29,15 @@ impl Game for SfxDemo {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::DARK_PURPLE);
-        gfx.print("sfx soundboard", 36, 8, Color::WHITE);
+        gfx.print("sfx soundboard", 36.0, 8.0, Color::WHITE);
         for (i, (_, sfx, name)) in PADS.iter().enumerate() {
-            let y = 32 + i as i32 * 20;
+            let y = 32.0 + i as f32 * 20.0;
             let hot = self.last == Some(*sfx);
             let bg = if hot { Color::PINK } else { Color::DARK_BLUE };
-            gfx.rect_fill(24, y, 80, 14, bg);
-            gfx.print(name, 28, y + 4, Color::WHITE);
+            gfx.rect_fill(24.0, y, 80.0, 14.0, bg);
+            gfx.print(name, 28.0, y + 4.0, Color::WHITE);
         }
-        gfx.print("press arrow keys", 32, 116, Color::LIGHT_GREY);
+        gfx.print("press arrow keys", 32.0, 116.0, Color::LIGHT_GREY);
     }
 }
 

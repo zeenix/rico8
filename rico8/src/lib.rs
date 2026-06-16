@@ -6,24 +6,24 @@
 //! use rico8::*;
 //!
 //! struct MyGame {
-//!     x: i32,
-//!     y: i32,
+//!     x: f32,
+//!     y: f32,
 //! }
 //!
 //! impl Game for MyGame {
 //!     fn update(&mut self, ctx: &mut Context) {
 //!         if ctx.btn(Button::Right) {
-//!             self.x += 1;
+//!             self.x += 1.0;
 //!         }
 //!     }
 //!
 //!     fn draw(&self, gfx: &mut Graphics) {
 //!         gfx.clear(Color::BLACK);
-//!         gfx.rect_fill(self.x, self.y, 8, 8, Color::WHITE);
+//!         gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::WHITE);
 //!     }
 //! }
 //!
-//! rico8::game!(MyGame { x: 64, y: 64 });
+//! rico8::game!(MyGame { x: 64.0, y: 64.0 });
 //! ```
 //!
 //! Carts are built for `wasm32-unknown-unknown` as a `cdylib` and run in
@@ -242,80 +242,81 @@ impl Graphics {
         self.clear(color)
     }
 
-    /// Offset all subsequent draws by `(-x, -y)`.
-    pub fn camera(&mut self, x: i32, y: i32) {
+    /// Offset all subsequent draws by `(-x, -y)`. Floored to a whole pixel.
+    pub fn camera(&mut self, x: f32, y: f32) {
         unsafe { ffi::camera(x, y) }
     }
 
     /// Restrict drawing to a rectangle in screen space.
-    pub fn clip(&mut self, x: i32, y: i32, w: i32, h: i32) {
+    pub fn clip(&mut self, x: f32, y: f32, w: f32, h: f32) {
         unsafe { ffi::clip(x, y, w, h) }
     }
 
     /// Remove the clip rectangle.
     pub fn clip_reset(&mut self) {
-        unsafe { ffi::clip(0, 0, SCREEN_W, SCREEN_H) }
+        unsafe { ffi::clip(0.0, 0.0, SCREEN_W as f32, SCREEN_H as f32) }
     }
 
-    /// Set one pixel.
-    pub fn pset(&mut self, x: i32, y: i32, color: Color) {
+    /// Set one pixel. The position is floored to a pixel.
+    pub fn pset(&mut self, x: f32, y: f32, color: Color) {
         unsafe { ffi::pset(x, y, color.0 as i32) }
     }
 
     /// Read one pixel (screen space; out of bounds reads 0).
-    pub fn pget(&self, x: i32, y: i32) -> Color {
+    pub fn pget(&self, x: f32, y: f32) -> Color {
         Color::from_index(unsafe { ffi::pget(x, y) } as u8)
     }
 
     /// Line between two points, inclusive.
-    pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Color) {
+    pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, color: Color) {
         unsafe { ffi::line(x0, y0, x1, y1, color.0 as i32) }
     }
 
     /// Rectangle outline at `(x, y)` with size `w x h`.
-    pub fn rect(&mut self, x: i32, y: i32, w: i32, h: i32, color: Color) {
-        if w > 0 && h > 0 {
-            unsafe { ffi::rect(x, y, x + w - 1, y + h - 1, color.0 as i32) }
+    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        if w > 0.0 && h > 0.0 {
+            unsafe { ffi::rect(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
         }
     }
 
     /// Filled rectangle at `(x, y)` with size `w x h`.
-    pub fn rect_fill(&mut self, x: i32, y: i32, w: i32, h: i32, color: Color) {
-        if w > 0 && h > 0 {
-            unsafe { ffi::rectfill(x, y, x + w - 1, y + h - 1, color.0 as i32) }
+    pub fn rect_fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        if w > 0.0 && h > 0.0 {
+            unsafe { ffi::rectfill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
         }
     }
 
     /// Circle outline.
-    pub fn circ(&mut self, x: i32, y: i32, r: i32, color: Color) {
+    pub fn circ(&mut self, x: f32, y: f32, r: f32, color: Color) {
         unsafe { ffi::circ(x, y, r, color.0 as i32) }
     }
 
     /// Filled circle.
-    pub fn circ_fill(&mut self, x: i32, y: i32, r: i32, color: Color) {
+    pub fn circ_fill(&mut self, x: f32, y: f32, r: f32, color: Color) {
         unsafe { ffi::circfill(x, y, r, color.0 as i32) }
     }
 
     /// Print text with the built-in 4x6 font. Returns the x position after
     /// the last glyph.
-    pub fn print(&mut self, text: &str, x: i32, y: i32, color: Color) -> i32 {
+    pub fn print(&mut self, text: &str, x: f32, y: f32, color: Color) -> f32 {
         unsafe { ffi::print(text.as_ptr(), text.len() as u32, x, y, color.0 as i32) }
     }
 
     /// Draw a sprite at `(x, y)`. Color 0 is transparent.
-    pub fn spr(&mut self, sprite: SpriteId, x: i32, y: i32) {
-        unsafe { ffi::spr(sprite.0 as u32, x, y, 1, 1, 0, 0) }
+    pub fn spr(&mut self, sprite: SpriteId, x: f32, y: f32) {
+        unsafe { ffi::spr(sprite.0 as u32, x, y, 1.0, 1.0, 0, 0) }
     }
 
-    /// Draw a `w x h`-sprite block, optionally flipped.
+    /// Draw a `w x h`-sprite block, optionally flipped. `w`/`h` are in sprite
+    /// units and may be fractional: `w = 0.5` draws a 4-pixel-wide slice.
     #[allow(clippy::too_many_arguments)]
     pub fn spr_ext(
         &mut self,
         sprite: SpriteId,
-        x: i32,
-        y: i32,
-        w: u32,
-        h: u32,
+        x: f32,
+        y: f32,
+        w: f32,
+        h: f32,
         flip_x: bool,
         flip_y: bool,
     ) {
@@ -330,8 +331,8 @@ impl Graphics {
         &mut self,
         cel_x: i32,
         cel_y: i32,
-        sx: i32,
-        sy: i32,
+        sx: f32,
+        sy: f32,
         cel_w: i32,
         cel_h: i32,
         layers: u8,

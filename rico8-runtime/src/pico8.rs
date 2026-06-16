@@ -67,8 +67,8 @@ impl Game for Cart {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::BLACK);
-        gfx.print("imported from pico-8", 12, 54, Color::WHITE);
-        gfx.print("write your game here", 16, 64, Color::LIGHT_GREY);
+        gfx.print("imported from pico-8", 12.0, 54.0, Color::WHITE);
+        gfx.print("write your game here", 16.0, 64.0, Color::LIGHT_GREY);
     }
 }
 

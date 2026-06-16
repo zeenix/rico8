@@ -20,24 +20,24 @@ formats are original.
 use rico8::*;
 
 struct MyGame {
-    x: i32,
-    y: i32,
+    x: f32,
+    y: f32,
 }
 
 impl Game for MyGame {
     fn update(&mut self, ctx: &mut Context) {
         if ctx.btn(Button::Right) {
-            self.x += 1;
+            self.x += 1.0;
         }
     }
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::BLACK);
-        gfx.rect_fill(self.x, self.y, 8, 8, Color::WHITE);
+        gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::WHITE);
     }
 }
 
-rico8::game!(MyGame { x: 64, y: 64 });
+rico8::game!(MyGame { x: 64.0, y: 64.0 });
 ```
 
 ## The console
