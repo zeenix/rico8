@@ -325,13 +325,23 @@ impl Graphics {
     }
 
     /// Set one pixel. The position is floored to a pixel.
-    pub fn pset(&mut self, x: f32, y: f32, color: Color) {
+    pub fn set_pixel(&mut self, x: f32, y: f32, color: Color) {
         unsafe { ffi::pset(x, y, color.0 as i32) }
     }
 
+    /// Alias for [`Graphics::set_pixel`].
+    pub fn pset(&mut self, x: f32, y: f32, color: Color) {
+        self.set_pixel(x, y, color)
+    }
+
     /// Read one pixel (screen space; out of bounds reads 0).
-    pub fn pget(&self, x: f32, y: f32) -> Color {
+    pub fn pixel(&self, x: f32, y: f32) -> Color {
         Color::from_index(unsafe { ffi::pget(x, y) } as u8)
+    }
+
+    /// Alias for [`Graphics::pixel`].
+    pub fn pget(&self, x: f32, y: f32) -> Color {
+        self.pixel(x, y)
     }
 
     /// Line between two points, inclusive.
@@ -353,14 +363,29 @@ impl Graphics {
         }
     }
 
+    /// Alias for [`Graphics::rect_fill`].
+    pub fn rectfill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        self.rect_fill(x, y, w, h, color)
+    }
+
     /// Circle outline.
-    pub fn circ(&mut self, x: f32, y: f32, r: f32, color: Color) {
+    pub fn circle(&mut self, x: f32, y: f32, r: f32, color: Color) {
         unsafe { ffi::circ(x, y, r, color.0 as i32) }
     }
 
+    /// Alias for [`Graphics::circle`].
+    pub fn circ(&mut self, x: f32, y: f32, r: f32, color: Color) {
+        self.circle(x, y, r, color)
+    }
+
     /// Filled circle.
-    pub fn circ_fill(&mut self, x: f32, y: f32, r: f32, color: Color) {
+    pub fn circle_fill(&mut self, x: f32, y: f32, r: f32, color: Color) {
         unsafe { ffi::circfill(x, y, r, color.0 as i32) }
+    }
+
+    /// Alias for [`Graphics::circle_fill`].
+    pub fn circfill(&mut self, x: f32, y: f32, r: f32, color: Color) {
+        self.circle_fill(x, y, r, color)
     }
 
     /// Print text with the built-in 4x6 font. Returns the x position after
@@ -370,14 +395,19 @@ impl Graphics {
     }
 
     /// Draw a sprite at `(x, y)`. Color 0 is transparent.
-    pub fn spr(&mut self, sprite: SpriteId, x: f32, y: f32) {
+    pub fn sprite(&mut self, sprite: SpriteId, x: f32, y: f32) {
         unsafe { ffi::spr(sprite.0 as u32, x, y, 1.0, 1.0, 0, 0) }
+    }
+
+    /// Alias for [`Graphics::sprite`].
+    pub fn spr(&mut self, sprite: SpriteId, x: f32, y: f32) {
+        self.sprite(sprite, x, y)
     }
 
     /// Draw a `w x h`-sprite block, optionally flipped. `w`/`h` are in sprite
     /// units and may be fractional: `w = 0.5` draws a 4-pixel-wide slice.
     #[allow(clippy::too_many_arguments)]
-    pub fn spr_ext(
+    pub fn sprite_ext(
         &mut self,
         sprite: SpriteId,
         x: f32,
@@ -391,8 +421,9 @@ impl Graphics {
     }
 
     /// Draw a region of the map: `cel_w x cel_h` tiles starting at tile
-    /// `(cel_x, cel_y)`, at screen position `(sx, sy)`. When `layers` is
-    /// nonzero only tiles with intersecting flags are drawn.
+    /// `(cel_x, cel_y)`, at screen position `(sx, sy)`. With an empty
+    /// `layers` set every tile is drawn; otherwise only tiles whose sprite
+    /// flags intersect `layers`.
     #[allow(clippy::too_many_arguments)]
     pub fn map(
         &mut self,
@@ -402,9 +433,10 @@ impl Graphics {
         sy: f32,
         cel_w: i32,
         cel_h: i32,
-        layers: u8,
+        layers: impl Into<BitFlags<SpriteFlag>>,
     ) {
-        unsafe { ffi::map(cel_x, cel_y, sx, sy, cel_w, cel_h, layers as u32) }
+        let layers = layers.into().bits() as u32;
+        unsafe { ffi::map(cel_x, cel_y, sx, sy, cel_w, cel_h, layers) }
     }
 }
 
@@ -520,5 +552,39 @@ mod tests {
         assert!(mask.contains(Button::Down));
         assert!(mask.contains(Button::X));
         assert!(!mask.contains(Button::Right));
+    }
+
+    #[test]
+    fn map_accepts_flag_set_forms() {
+        let mut gfx = Graphics { _private: () };
+        gfx.map(0, 0, 0.0, 0.0, 16, 16, BitFlags::empty());
+        gfx.map(0, 0, 0.0, 0.0, 16, 16, SpriteFlag::Flag0);
+        gfx.map(
+            0,
+            0,
+            0.0,
+            0.0,
+            16,
+            16,
+            SpriteFlag::Flag0 | SpriteFlag::Flag3,
+        );
+    }
+
+    #[test]
+    fn graphics_aliases_match_primaries() {
+        let mut gfx = Graphics { _private: () };
+        assert_eq!(gfx.pixel(1.0, 1.0), gfx.pget(1.0, 1.0));
+        // Drawing aliases forward to primaries (no-op under native stubs).
+        gfx.set_pixel(0.0, 0.0, Color::RED);
+        gfx.pset(0.0, 0.0, Color::RED);
+        gfx.circle(0.0, 0.0, 4.0, Color::RED);
+        gfx.circ(0.0, 0.0, 4.0, Color::RED);
+        gfx.circle_fill(0.0, 0.0, 4.0, Color::RED);
+        gfx.circfill(0.0, 0.0, 4.0, Color::RED);
+        gfx.rect_fill(0.0, 0.0, 4.0, 4.0, Color::RED);
+        gfx.rectfill(0.0, 0.0, 4.0, 4.0, Color::RED);
+        gfx.sprite(SpriteId(0), 0.0, 0.0);
+        gfx.spr(SpriteId(0), 0.0, 0.0);
+        gfx.sprite_ext(SpriteId(0), 0.0, 0.0, 1.0, 1.0, false, false);
     }
 }
