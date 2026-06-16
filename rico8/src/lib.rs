@@ -12,7 +12,7 @@
 //!
 //! impl Game for MyGame {
 //!     fn update(&mut self, ctx: &mut Context) {
-//!         if ctx.btn(Button::Right) {
+//!         if ctx.is_button_down(Button::Right) {
 //!             self.x += 1.0;
 //!         }
 //!     }
