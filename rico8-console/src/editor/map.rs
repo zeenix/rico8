@@ -13,14 +13,17 @@ use rico8_runtime::{
 };
 
 // --- Layout (see the design spec) -------------------------------------------
-const TOOLBAR_Y: i32 = 8; // tool icons drawn at y 9.
-const VIEW_Y: i32 = 18;
+// Eight map tiles + a 4-row sheet leave 4 px of slack; it is absorbed into the
+// toolbar (same dark-grey fill) so the sheet sits flush against the status bar
+// and the separator sits flush against the sheet — no stray band anywhere.
+const TOOLBAR_Y: i32 = 8; // tool chrome fills y 8..=21; icons drawn at y 9.
+const VIEW_Y: i32 = 22;
 const VIEW_TILES_X: i32 = 16;
 const VIEW_TILES_Y: i32 = 8;
-const VIEW_BOTTOM: i32 = VIEW_Y + VIEW_TILES_Y * 8 - 1; // 81
-const SEP_Y: i32 = 82;
-const SHEET_Y: i32 = 84; // 4 rows of 8 px
-const SHEET_BOTTOM: i32 = SHEET_Y + 4 * 8 - 1; // 115
+const VIEW_BOTTOM: i32 = VIEW_Y + VIEW_TILES_Y * 8 - 1; // 85
+const SEP_Y: i32 = 86;
+const SHEET_Y: i32 = 88; // 4 rows of 8 px, flush with the status bar.
+const SHEET_BOTTOM: i32 = SHEET_Y + 4 * 8 - 1; // 119
 const BRUSH_X: i32 = 88; // 8×8 brush preview
 const PAGE_X: i32 = 104; // four 5×5 page dots
 const PAGE_Y: i32 = 11;
@@ -471,6 +474,8 @@ impl MapEditor {
     fn draw_status(&self, fb: &mut Framebuffer, assets: &Assets) {
         let text = if let Some((_, _, w, h)) = self.selection_in_progress() {
             format!("sel {}x{}        b{:03} pg{}", w, h, self.brush, self.page)
+        } else if let Some(tool) = self.tool_under_cursor() {
+            tool_label(tool).to_string()
         } else {
             match self.hovered_cell() {
                 Some((cx, cy)) => format!(
@@ -485,6 +490,16 @@ impl MapEditor {
             }
         };
         ui::status_bar(fb, &text);
+    }
+
+    /// The tool whose toolbar icon is under the cursor, if any.
+    fn tool_under_cursor(&self) -> Option<Tool> {
+        TOOLS.iter().enumerate().find_map(|(i, (tool, _))| {
+            let x = tool_x(i);
+            let over =
+                self.mx >= x && self.mx <= x + 7 && self.my > TOOLBAR_Y && self.my <= TOOLBAR_Y + 8;
+            over.then_some(*tool)
+        })
     }
 
     /// The cursor's map cell, clamped to the visible view (for drags).
@@ -633,6 +648,18 @@ fn sprite_origin(n: u32) -> (i32, i32) {
         (n as i32 % SPRITES_PER_ROW as i32) * 8,
         (n as i32 / SPRITES_PER_ROW as i32) * 8,
     )
+}
+
+/// The tool's display name and keyboard shortcut, shown in the status bar.
+fn tool_label(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Draw => "draw (d)",
+        Tool::Paste => "paste (t)",
+        Tool::Select => "select (s)",
+        Tool::Pan => "pan (h)",
+        Tool::Fill => "fill (f)",
+        Tool::Circle => "circle (c)",
+    }
 }
 
 /// Two corner cells into a top-left origin and inclusive (w, h).
@@ -954,5 +981,28 @@ mod tests {
         ed.paste_at(&mut a, MAP_W as i32 - 1, 0);
         assert_eq!(a.map.get(MAP_W as i32 - 1, 0), 9, "in-bounds cell pasted");
         assert_eq!(a.map.get(0, 0), 0, "off-map cell skipped, not wrapped");
+    }
+
+    #[test]
+    fn hovering_a_tool_reports_its_label() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        // Hover the Select icon (slot 2) without clicking.
+        let hover = Mouse {
+            x: tool_x(2) + 1,
+            y: TOOLBAR_Y + 2,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        assert_eq!(ed.tool, Tool::Draw, "hovering does not select the tool");
+        assert_eq!(ed.tool_under_cursor(), Some(Tool::Select));
+        assert_eq!(tool_label(Tool::Select), "select (s)");
+    }
+
+    #[test]
+    fn sheet_sits_flush_against_the_status_bar() {
+        // No stray band between the sheet and the status bar (which starts at
+        // HEIGHT - 8); the sheet's last row is the row directly above it.
+        assert_eq!(SHEET_BOTTOM + 1, rico8_runtime::fb::HEIGHT - 8);
     }
 }
