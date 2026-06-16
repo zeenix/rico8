@@ -131,6 +131,76 @@ fn file_mtime(path: &Path) -> Option<SystemTime> {
     fs::metadata(path).and_then(|m| m.modified()).ok()
 }
 
+/// Tracks the newest mtime across a crate's source so any external edit — to
+/// `src/lib.rs` or any other module, or `Cargo.toml` — triggers one rebuild.
+/// (`cargo` itself decides what to recompile; this only answers "did anything
+/// change".)
+pub struct SourceTreeWatch {
+    dir: PathBuf,
+    newest: Option<SystemTime>,
+}
+
+impl SourceTreeWatch {
+    pub fn new(dir: &Path) -> Self {
+        Self {
+            dir: dir.to_path_buf(),
+            newest: newest_source_mtime(dir),
+        }
+    }
+
+    /// True if any watched source file is newer than the last poll. Absorbs the
+    /// new high-water mark so the same change never fires twice.
+    pub fn poll(&mut self) -> bool {
+        let now = newest_source_mtime(&self.dir);
+        match (now, self.newest) {
+            (Some(now), Some(prev)) if now > prev => {
+                self.newest = Some(now);
+                true
+            }
+            (Some(now), None) => {
+                self.newest = Some(now);
+                true
+            }
+            _ => false,
+        }
+    }
+
+    /// Re-baseline to the current tree (after rico8 wrote source itself).
+    pub fn sync(&mut self) {
+        self.newest = newest_source_mtime(&self.dir);
+    }
+}
+
+/// Newest mtime among `dir/src/**/*.rs` and `dir/Cargo.toml`, or `None`.
+fn newest_source_mtime(dir: &Path) -> Option<SystemTime> {
+    let mut newest = file_mtime(&dir.join("Cargo.toml"));
+    visit_rs(&dir.join("src"), &mut |m| {
+        newest = match (newest, m) {
+            (Some(a), b) if b > a => Some(b),
+            (None, b) => Some(b),
+            (cur, _) => cur,
+        };
+    });
+    newest
+}
+
+/// Call `f` with the mtime of every `*.rs` file under `dir`, recursively.
+fn visit_rs(dir: &Path, f: &mut impl FnMut(SystemTime)) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            visit_rs(&path, f);
+        } else if path.extension().is_some_and(|e| e == "rs") {
+            if let Some(m) = file_mtime(&path) {
+                f(m);
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -232,5 +302,30 @@ mod tests {
         w.mark_synced(b"mem".to_vec());
         assert!(!w.in_conflict());
         assert_eq!(w.poll(b"mem"), FileChange::None);
+    }
+
+    #[test]
+    fn source_tree_detects_any_rs_or_cargo_change() {
+        let tmp = TempDir::new("srctree");
+        let dir = &tmp.0;
+        fs::create_dir_all(dir.join("src")).unwrap();
+        fs::write(dir.join("Cargo.toml"), b"[package]\nname=\"g\"\n").unwrap();
+        fs::write(dir.join("src/lib.rs"), b"fn a(){}").unwrap();
+        fs::write(dir.join("src/foo.rs"), b"fn b(){}").unwrap();
+
+        let mut w = SourceTreeWatch::new(dir);
+        assert!(!w.poll(), "no change right after construction");
+
+        // Touch a non-lib module — still a source change.
+        write_newer(&dir.join("src/foo.rs"), b"fn b(){ }");
+        assert!(w.poll(), "foo.rs change detected");
+        assert!(!w.poll(), "absorbed; no repeat");
+
+        // Cargo.toml counts too.
+        write_newer(
+            &dir.join("Cargo.toml"),
+            b"[package]\nname=\"g\"\nedition=\"2021\"\n",
+        );
+        assert!(w.poll(), "Cargo.toml change detected");
     }
 }
