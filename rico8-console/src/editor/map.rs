@@ -152,9 +152,7 @@ impl MapEditor {
         }
     }
 
-    // `_assets` is unused until Task 3 adds the per-tool match; the signature
-    // must stay `&mut Assets` for the shell's `map_ed.tick(&mouse, a)` call.
-    pub fn tick(&mut self, mouse: &Mouse, _assets: &mut Assets) {
+    pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
         self.frame = self.frame.wrapping_add(1);
         self.mx = mouse.x;
         self.my = mouse.y;
@@ -163,7 +161,18 @@ impl MapEditor {
         if mouse.left_pressed && self.handle_chrome_click(mouse) {
             return;
         }
-        // Per-tool map interaction is added in later tasks.
+
+        // Per-tool map interaction.
+        match self.tool {
+            Tool::Draw => {
+                if mouse.left {
+                    if let Some((cx, cy)) = self.hovered_cell() {
+                        assets.map.set(cx, cy, self.brush as u8);
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 
     /// Handle a click on the toolbar, page dots, or sprite sheet. Returns true
@@ -258,6 +267,11 @@ impl MapEditor {
             VIEW_TILES_Y,
             0,
         );
+        if let Some((cx, cy)) = self.hovered_cell() {
+            let sx = (cx - self.cam_x) * 8;
+            let sy = VIEW_Y + (cy - self.cam_y) * 8;
+            fb.rect(sx, sy, sx + 7, sy + 7, col::WHITE);
+        }
     }
 
     fn draw_sheet(&self, fb: &mut Framebuffer, assets: &Assets) {
@@ -359,5 +373,48 @@ mod tests {
                      // Second row, third column of the strip -> 64 + 1*16 + 2 = 82.
         ed.tick(&press(2 * 8 + 1, SHEET_Y + 8 + 1), &mut a);
         assert_eq!(ed.brush, 82);
+    }
+
+    #[test]
+    fn draw_tool_paints_the_hovered_cell() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.brush = 7;
+        // Hover cell (1, 0): x in [8,15], y in [VIEW_Y, VIEW_Y+7].
+        ed.tick(&press(9, VIEW_Y + 1), &mut a);
+        assert_eq!(a.map.get(1, 0), 7);
+    }
+
+    #[test]
+    fn draw_respects_the_camera_offset() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.brush = 5;
+        ed.cam_x = 10;
+        ed.cam_y = 4;
+        let held = Mouse {
+            x: 0,
+            y: VIEW_Y,
+            left: true,
+            ..Default::default()
+        };
+        ed.tick(&held, &mut a);
+        assert_eq!(a.map.get(10, 4), 5);
+    }
+
+    #[test]
+    fn hover_box_outlines_the_cell_under_the_cursor() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        let hover = Mouse {
+            x: 9,
+            y: VIEW_Y + 1,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a);
+        // Cell (1,0) screen rect top-left corner at (8, VIEW_Y).
+        assert_eq!(fb.pget(8, VIEW_Y), col::WHITE);
     }
 }
