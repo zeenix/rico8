@@ -134,6 +134,12 @@ impl MapEditor {
         }
     }
 
+    /// Switch the active tool, abandoning any in-progress drag.
+    fn set_tool(&mut self, tool: Tool) {
+        self.tool = tool;
+        self.drag = Drag::None;
+    }
+
     pub fn key(&mut self, key: Key, _mods: Mods, _assets: &mut Assets) {
         match key {
             Key::Left => self.cam_x = (self.cam_x - 1).max(0),
@@ -142,12 +148,12 @@ impl MapEditor {
             Key::Down => self.cam_y = (self.cam_y + 1).min(MAP_H as i32 - VIEW_TILES_Y),
             Key::PageUp => self.page = (self.page + 3) % 4,
             Key::PageDown => self.page = (self.page + 1) % 4,
-            Key::Char('d') => self.tool = Tool::Draw,
-            Key::Char('t') => self.tool = Tool::Paste,
-            Key::Char('s') => self.tool = Tool::Select,
-            Key::Char('h') => self.tool = Tool::Pan,
-            Key::Char('f') => self.tool = Tool::Fill,
-            Key::Char('c') => self.tool = Tool::Circle,
+            Key::Char('d') => self.set_tool(Tool::Draw),
+            Key::Char('t') => self.set_tool(Tool::Paste),
+            Key::Char('s') => self.set_tool(Tool::Select),
+            Key::Char('h') => self.set_tool(Tool::Pan),
+            Key::Char('f') => self.set_tool(Tool::Fill),
+            Key::Char('c') => self.set_tool(Tool::Circle),
             _ => {}
         }
     }
@@ -171,6 +177,19 @@ impl MapEditor {
                     }
                 }
             }
+            Tool::Select => {
+                if mouse.left_pressed && mouse.y >= VIEW_Y && mouse.y <= VIEW_BOTTOM {
+                    let (cx, cy) = self.clamped_cell();
+                    self.drag = Drag::Selecting { ax: cx, ay: cy };
+                }
+                if !mouse.left {
+                    if let Drag::Selecting { .. } = self.drag {
+                        let (x, y, w, h) = self.selection_in_progress().unwrap();
+                        self.sel = Some(Selection { x, y, w, h });
+                        self.drag = Drag::None;
+                    }
+                }
+            }
             _ => {}
         }
     }
@@ -182,7 +201,7 @@ impl MapEditor {
         for (i, (tool, _)) in TOOLS.iter().enumerate() {
             let x = tool_x(i);
             if m.over(x, TOOLBAR_Y + 1, x + 7, TOOLBAR_Y + 8) {
-                self.tool = *tool;
+                self.set_tool(*tool);
                 return true;
             }
         }
@@ -207,6 +226,7 @@ impl MapEditor {
     pub fn draw(&self, fb: &mut Framebuffer, assets: &Assets) {
         self.draw_toolbar(fb, assets);
         self.draw_view(fb, assets);
+        self.draw_selection(fb);
         fb.rectfill(0, SEP_Y, 127, SEP_Y + 1, col::LIGHT_GREY);
         self.draw_sheet(fb, assets);
         self.draw_status(fb, assets);
@@ -274,6 +294,36 @@ impl MapEditor {
         }
     }
 
+    fn draw_selection(&self, fb: &mut Framebuffer) {
+        let rect = self
+            .selection_in_progress()
+            .or_else(|| self.sel.map(|s| (s.x, s.y, s.w, s.h)));
+        let Some((x, y, w, h)) = rect else { return };
+        let sx = (x - self.cam_x) * 8;
+        let sy = VIEW_Y + (y - self.cam_y) * 8;
+        let (x0, y0, x1, y1) = (sx, sy, sx + w * 8 - 1, sy + h * 8 - 1);
+        let mut i = 0i32;
+        let ant = |fb: &mut Framebuffer, px: i32, py: i32, i: &mut i32| {
+            if (0..=127).contains(&px) && (VIEW_Y..=VIEW_BOTTOM).contains(&py) {
+                let on = ((*i + (self.frame / 4) as i32) / 2) % 2 == 0;
+                fb.pset(px, py, if on { col::WHITE } else { col::BLACK });
+            }
+            *i += 1;
+        };
+        for px in x0..=x1 {
+            ant(fb, px, y0, &mut i);
+        }
+        for py in (y0 + 1)..=y1 {
+            ant(fb, x1, py, &mut i);
+        }
+        for px in (x0..x1).rev() {
+            ant(fb, px, y1, &mut i);
+        }
+        for py in ((y0 + 1)..y1).rev() {
+            ant(fb, x0, py, &mut i);
+        }
+    }
+
     fn draw_sheet(&self, fb: &mut Framebuffer, assets: &Assets) {
         fb.rectfill(0, SHEET_Y, 127, SHEET_BOTTOM, col::DARK_GREY);
         for cy in 0..4i32 {
@@ -300,18 +350,39 @@ impl MapEditor {
     }
 
     fn draw_status(&self, fb: &mut Framebuffer, assets: &Assets) {
-        let text = match self.hovered_cell() {
-            Some((cx, cy)) => format!(
-                "x{:03} y{:03} t{:03} b{:03} pg{}",
-                cx,
-                cy,
-                assets.map.get(cx, cy),
-                self.brush,
-                self.page
-            ),
-            None => format!("b{:03} pg{}", self.brush, self.page),
+        let text = if let Some((_, _, w, h)) = self.selection_in_progress() {
+            format!("sel {}x{}        b{:03} pg{}", w, h, self.brush, self.page)
+        } else {
+            match self.hovered_cell() {
+                Some((cx, cy)) => format!(
+                    "x{:03} y{:03} t{:03} b{:03} pg{}",
+                    cx,
+                    cy,
+                    assets.map.get(cx, cy),
+                    self.brush,
+                    self.page
+                ),
+                None => format!("b{:03} pg{}", self.brush, self.page),
+            }
         };
         ui::status_bar(fb, &text);
+    }
+
+    /// The cursor's map cell, clamped to the visible view (for drags).
+    fn clamped_cell(&self) -> (i32, i32) {
+        let mx = self.mx.clamp(0, 127);
+        let my = self.my.clamp(VIEW_Y, VIEW_BOTTOM);
+        (self.cam_x + mx / 8, self.cam_y + (my - VIEW_Y) / 8)
+    }
+
+    /// The rectangle (x, y, w, h) of an in-progress selection drag, if any.
+    fn selection_in_progress(&self) -> Option<(i32, i32, i32, i32)> {
+        if let Drag::Selecting { ax, ay } = self.drag {
+            let (cx, cy) = self.clamped_cell();
+            Some(normalize_rect(ax, ay, cx, cy))
+        } else {
+            None
+        }
     }
 
     /// The map cell under the cursor, if the cursor is over the view.
@@ -331,6 +402,13 @@ fn sprite_origin(n: u32) -> (i32, i32) {
         (n as i32 % SPRITES_PER_ROW as i32) * 8,
         (n as i32 / SPRITES_PER_ROW as i32) * 8,
     )
+}
+
+/// Two corner cells into a top-left origin and inclusive (w, h).
+fn normalize_rect(ax: i32, ay: i32, bx: i32, by: i32) -> (i32, i32, i32, i32) {
+    let x = ax.min(bx);
+    let y = ay.min(by);
+    (x, y, (ax - bx).abs() + 1, (ay - by).abs() + 1)
 }
 
 #[cfg(test)]
@@ -416,5 +494,64 @@ mod tests {
         ed.draw(&mut fb, &a);
         // Cell (1,0) screen rect top-left corner at (8, VIEW_Y).
         assert_eq!(fb.pget(8, VIEW_Y), col::WHITE);
+    }
+
+    // A held drag frame (button down, no fresh press edge).
+    fn held(x: i32, y: i32) -> Mouse {
+        Mouse {
+            x,
+            y,
+            left: true,
+            ..Default::default()
+        }
+    }
+    // A release frame: the real input keeps the cursor position and only drops
+    // `left` (the shell updates x/y on CursorMoved, not MouseInput), so release at
+    // the drag-end coordinates — NOT off-screen.
+    fn rel(x: i32, y: i32) -> Mouse {
+        Mouse {
+            x,
+            y,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn select_drag_builds_a_normalized_selection() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.tool = Tool::Select;
+        // Press at cell (3,1), drag up-left to cell (1,0), release there.
+        ed.tick(&press(3 * 8 + 1, VIEW_Y + 1 * 8 + 1), &mut a);
+        ed.tick(&held(1 * 8 + 1, VIEW_Y + 1), &mut a);
+        ed.tick(&rel(1 * 8 + 1, VIEW_Y + 1), &mut a);
+        let s = ed.sel.expect("selection set");
+        assert_eq!((s.x, s.y, s.w, s.h), (1, 0, 3, 2));
+    }
+
+    #[test]
+    fn selecting_shows_size_in_status_bar() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.tool = Tool::Select;
+        ed.tick(&press(8 + 1, VIEW_Y + 1), &mut a); // cell (1,0).
+        ed.tick(&held(3 * 8 + 1, VIEW_Y + 8 + 1), &mut a); // drag to (3,1).
+        assert!(matches!(ed.drag, Drag::Selecting { .. }));
+        assert_eq!(ed.selection_in_progress(), Some((1, 0, 3, 2)));
+    }
+
+    #[test]
+    fn switching_tool_abandons_an_in_progress_select_drag() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.tool = Tool::Select;
+        ed.tick(&press(8 + 1, VIEW_Y + 1), &mut a); // start a marquee at cell (1,0).
+        assert!(matches!(ed.drag, Drag::Selecting { .. }));
+        ed.key(Key::Char('d'), Mods::default(), &mut a); // switch tools mid-drag.
+        assert!(matches!(ed.drag, Drag::None), "tool switch clears the drag");
+        // Back in Select with the button up: must not commit a phantom selection.
+        ed.key(Key::Char('s'), Mods::default(), &mut a);
+        ed.tick(&rel(40, VIEW_Y + 40), &mut a);
+        assert!(ed.sel.is_none(), "no phantom selection committed");
     }
 }
