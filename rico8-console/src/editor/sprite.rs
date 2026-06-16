@@ -3,7 +3,7 @@
 
 use crate::{
     shell::{Key, Mods},
-    ui::{self, Mouse},
+    ui::{self, draw_icon8, Icon8, Mouse, ICON_PENCIL},
 };
 use rico8_runtime::{
     assets::{Assets, SPRITES_PER_ROW},
@@ -284,11 +284,6 @@ impl SpriteEditor {
     }
 }
 
-type Icon8 = [u8; 8];
-
-const ICON_PENCIL: Icon8 = [
-    0b00000011, 0b00000111, 0b00001110, 0b00011100, 0b00111000, 0b01110000, 0b11100000, 0b11000000,
-];
 const ICON_ERASER: Icon8 = [
     0b00111100, 0b01111110, 0b11111111, 0b11111111, 0b11111111, 0b01111110, 0b00111100, 0b00000000,
 ];
@@ -298,13 +293,3 @@ const ICON_FILL: Icon8 = [
 const ICON_PICKER: Icon8 = [
     0b00000111, 0b00000111, 0b00001110, 0b00011100, 0b00111000, 0b01110000, 0b01100000, 0b00000000,
 ];
-
-fn draw_icon8(fb: &mut Framebuffer, icon: &Icon8, x: i32, y: i32, color: u8) {
-    for (ry, row) in icon.iter().enumerate() {
-        for rx in 0..8 {
-            if row & (0x80 >> rx) != 0 {
-                fb.pset(x + rx, y + ry as i32, color);
-            }
-        }
-    }
-}
