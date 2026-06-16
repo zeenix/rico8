@@ -874,8 +874,14 @@ impl Shell {
         // Absorb the source-tree high-water mark so the flush below + the build
         // it triggers are not re-detected as an external change next poll.
         w.source_tree.poll();
+        // Bail on a conflict — including a *standing* one from an earlier poll.
+        // A later poll returns `None` once the mtime is absorbed, so the latch
+        // is what keeps `run` from flushing the stale copy over disk until the
+        // user resolves it with `save` (keep mine) or `reload` (take disk).
         if matches!(code_change, FileChange::Conflict)
             || matches!(assets_change, FileChange::Conflict)
+            || w.code.in_conflict()
+            || w.assets.in_conflict()
         {
             return false;
         }
@@ -1916,6 +1922,58 @@ mod tests {
             code.starts_with("// DISK VERSION"),
             "reload took disk; got:\n{code}"
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A conflict (both disk and editor changed) must abort `run` and keep
+    /// aborting on a *second* `run` until resolved — never flushing the stale
+    /// in-console copy over the external edit.
+    #[test]
+    fn run_aborts_on_conflict_and_does_not_clobber() {
+        let dir = std::env::temp_dir().join(format!("rico8_run_conflict_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load");
+
+        // In-console edit: make the in-memory copy dirty.
+        if let Loaded::Project(p) = &mut shell.loaded {
+            p.code = "// IN-CONSOLE EDIT\n".into();
+        }
+        // External edit on disk, mtime bumped so the watcher sees it.
+        let lib = project_dir.join("src/lib.rs");
+        std::fs::write(&lib, "// EXTERNAL EDIT\n").unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&lib)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+
+        // First run: conflict → abort, no build, disk keeps the external edit.
+        shell.cmd_run();
+        assert_eq!(shell.mode, Mode::Console, "first run aborts on conflict");
+        assert!(shell.build.is_none(), "no build started on conflict");
+        assert_eq!(
+            std::fs::read_to_string(&lib).unwrap(),
+            "// EXTERNAL EDIT\n",
+            "disk untouched after the first run"
+        );
+
+        // Second run without resolving: must STILL abort and STILL not clobber.
+        shell.cmd_run();
+        assert_eq!(shell.mode, Mode::Console, "second run still aborts");
+        assert!(shell.build.is_none(), "second run starts no build");
+        assert_eq!(
+            std::fs::read_to_string(&lib).unwrap(),
+            "// EXTERNAL EDIT\n",
+            "disk still untouched after the second run"
+        );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

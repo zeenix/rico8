@@ -112,7 +112,13 @@ impl FileWatch {
             Err(_) => return FileChange::None,
         };
         match reconcile(&self.baseline, &disk, in_memory) {
-            Reconcile::Unchanged => FileChange::None,
+            Reconcile::Unchanged => {
+                // Disk is back in sync with the baseline: any prior conflict is
+                // resolved (only the in-memory copy may still differ, which is a
+                // plain pending edit, not a conflict).
+                self.conflict = false;
+                FileChange::None
+            }
             Reconcile::Adopt(bytes) => {
                 self.baseline = bytes.clone();
                 self.conflict = false;
