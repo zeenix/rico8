@@ -140,6 +140,13 @@ impl MapEditor {
         self.drag = Drag::None;
     }
 
+    /// Abandon any in-progress drag. The shell calls this on an editor switch,
+    /// so a drag left mid-gesture cannot commit a stale selection or move when
+    /// the map editor regains focus with the button already released.
+    pub fn cancel_drag(&mut self) {
+        self.drag = Drag::None;
+    }
+
     pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets) {
         match key {
             Key::Left => self.cam_x = (self.cam_x - 1).max(0),
@@ -918,5 +925,34 @@ mod tests {
         assert_eq!(a.map.get(4, 6), 6, "bottom midpoint on outline");
         // ...and the centre stays empty (outline only).
         assert_eq!(a.map.get(4, 4), 0, "centre not filled");
+    }
+
+    #[test]
+    fn cancel_drag_prevents_a_phantom_selection_on_reentry() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.tool = Tool::Select;
+        ed.tick(&press(8 + 1, VIEW_Y + 1), &mut a); // start a marquee.
+        assert!(matches!(ed.drag, Drag::Selecting { .. }));
+        ed.cancel_drag(); // the shell calls this when the editor loses focus.
+        assert!(matches!(ed.drag, Drag::None));
+        // Button up on re-entry must not commit a stale selection.
+        ed.tick(&rel(40, VIEW_Y + 40), &mut a);
+        assert!(ed.sel.is_none(), "no phantom selection after cancel_drag");
+    }
+
+    #[test]
+    fn paste_skips_cells_past_the_map_edge() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.clip = Some(Clipboard {
+            w: 2,
+            h: 1,
+            tiles: vec![9, 8],
+        });
+        // The left cell lands on the last column; the second cell is off-map.
+        ed.paste_at(&mut a, MAP_W as i32 - 1, 0);
+        assert_eq!(a.map.get(MAP_W as i32 - 1, 0), 9, "in-bounds cell pasted");
+        assert_eq!(a.map.get(0, 0), 0, "off-map cell skipped, not wrapped");
     }
 }

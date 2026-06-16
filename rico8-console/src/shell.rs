@@ -414,6 +414,9 @@ impl Shell {
     }
 
     pub fn switch_editor(&mut self, mode: Mode) {
+        // Abandon any in-progress map-editor drag so it can't commit a stale
+        // selection or move once the editor regains focus.
+        self.map_ed.cancel_drag();
         if self.loaded_none() {
             self.say("no cart loaded. try: new mygame", col::RED);
             self.mode = Mode::Console;
