@@ -15,21 +15,21 @@ struct SpriteMove {
 impl Game for SpriteMove {
     fn update(&mut self, ctx: &mut Context) {
         self.walking = false;
-        if ctx.btn(Button::Left) {
+        if ctx.is_button_down(Button::Left) {
             self.x -= 1.0;
             self.flip = true;
             self.walking = true;
         }
-        if ctx.btn(Button::Right) {
+        if ctx.is_button_down(Button::Right) {
             self.x += 1.0;
             self.flip = false;
             self.walking = true;
         }
-        if ctx.btn(Button::Up) {
+        if ctx.is_button_down(Button::Up) {
             self.y -= 1.0;
             self.walking = true;
         }
-        if ctx.btn(Button::Down) {
+        if ctx.is_button_down(Button::Down) {
             self.y += 1.0;
             self.walking = true;
         }
@@ -47,7 +47,7 @@ impl Game for SpriteMove {
         } else {
             1
         };
-        gfx.spr_ext(SpriteId(frame), self.x, self.y, 1.0, 1.0, self.flip, false);
+        gfx.sprite_ext(SpriteId(frame), self.x, self.y, 1.0, 1.0, self.flip, false);
     }
 }
 

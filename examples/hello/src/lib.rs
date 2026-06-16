@@ -11,16 +11,16 @@ struct Hello {
 
 impl Game for Hello {
     fn update(&mut self, ctx: &mut Context) {
-        if ctx.btn(Button::Left) {
+        if ctx.is_button_down(Button::Left) {
             self.x -= 1.0;
         }
-        if ctx.btn(Button::Right) {
+        if ctx.is_button_down(Button::Right) {
             self.x += 1.0;
         }
-        if ctx.btn(Button::Up) {
+        if ctx.is_button_down(Button::Up) {
             self.y -= 1.0;
         }
-        if ctx.btn(Button::Down) {
+        if ctx.is_button_down(Button::Down) {
             self.y += 1.0;
         }
     }

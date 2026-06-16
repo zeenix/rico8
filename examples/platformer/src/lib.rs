@@ -21,12 +21,12 @@ struct Platformer {
     frame: u32,
 }
 
-const SOLID: u8 = 0;
+const SOLID: SpriteFlag = SpriteFlag::Flag0;
 
 impl Platformer {
     fn solid_at(&self, ctx: &Context, px: i32, py: i32) -> bool {
-        let tile = ctx.mget(px / 8, py / 8);
-        ctx.fget_flag(SpriteId(tile), SOLID)
+        let tile = ctx.map_tile(px / 8, py / 8);
+        ctx.has_sprite_flag(tile, SOLID)
     }
 
     fn collide(&self, ctx: &Context, x: i32, y: i32) -> bool {
@@ -42,17 +42,18 @@ impl Game for Platformer {
     fn update(&mut self, ctx: &mut Context) {
         self.frame += 1;
         // Horizontal movement (pixels per frame).
-        if ctx.btn(Button::Left) {
+        if ctx.is_button_down(Button::Left) {
             self.vx = -1.0;
             self.flip = true;
-        } else if ctx.btn(Button::Right) {
+        } else if ctx.is_button_down(Button::Right) {
             self.vx = 1.0;
             self.flip = false;
         } else {
             self.vx = 0.0;
         }
         // Jump + gravity.
-        if self.grounded && (ctx.btnp(Button::O) || ctx.btnp(Button::Up)) {
+        if self.grounded && (ctx.is_button_pressed(Button::O) || ctx.is_button_pressed(Button::Up))
+        {
             self.vy = -3.25;
             ctx.sfx(SfxId(0));
         }
@@ -76,8 +77,8 @@ impl Game for Platformer {
         // Coins (tile 3): sample the hitbox center.
         let cx = (self.x as i32 + 4) / 8;
         let cy = (self.y as i32 + 4) / 8;
-        if ctx.mget(cx, cy) == 3 {
-            ctx.mset(cx, cy, SpriteId(0));
+        if ctx.map_tile(cx, cy) == SpriteId(3) {
+            ctx.set_map_tile(cx, cy, SpriteId(0));
             self.coins += 1;
             ctx.sfx(SfxId(1));
         }
@@ -88,7 +89,7 @@ impl Game for Platformer {
         // Camera follows the player across the 32-tile-wide level.
         let cam = (self.x - 60.0).clamp(0.0, (32 * 8 - SCREEN_W) as f32);
         gfx.camera(cam, 0.0);
-        gfx.map(0, 0, 0.0, 0.0, 32, 16, 0);
+        gfx.map(0, 0, 0.0, 0.0, 32, 16, BitFlags::empty());
         let frame = if !self.grounded {
             2
         } else if self.vx != 0.0 && (self.frame / 4) % 2 == 0 {
@@ -97,7 +98,7 @@ impl Game for Platformer {
             1
         };
         // Pass the fractional position straight through; the host floors it.
-        gfx.spr_ext(SpriteId(frame), self.x, self.y, 1.0, 1.0, self.flip, false);
+        gfx.sprite_ext(SpriteId(frame), self.x, self.y, 1.0, 1.0, self.flip, false);
         gfx.camera(0.0, 0.0);
         gfx.print(
             &format!(16; "coins {}", self.coins).unwrap(),
