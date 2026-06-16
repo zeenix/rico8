@@ -812,23 +812,21 @@ impl Shell {
         }
         if let FileChange::Adopt(bytes) = code_change {
             let text = String::from_utf8_lossy(&bytes).into_owned();
-            if let Loaded::Project(p) = &mut self.loaded {
-                p.code = text.clone();
-            }
             self.code_ed.set_text(&text);
+            if let Loaded::Project(p) = &mut self.loaded {
+                p.code = text;
+            }
         }
         if let FileChange::Adopt(bytes) = assets_change {
-            match (decode_assets(&bytes), &mut self.loaded) {
-                (Ok(assets), Loaded::Project(p)) => p.assets = assets,
-                (Err(_), _) => {
-                    // Malformed disk file: re-sync the watcher to the current
-                    // in-memory encoding so we do not flush over it.
-                    if let (Loaded::Project(p), Some(w)) = (&self.loaded, &mut self.project_watch) {
-                        w.assets
-                            .mark_synced(encode_assets(&p.assets).unwrap_or_default());
+            match decode_assets(&bytes) {
+                Ok(assets) => {
+                    if let Loaded::Project(p) = &mut self.loaded {
+                        p.assets = assets;
                     }
                 }
-                _ => {}
+                // Malformed disk file: re-sync the watcher to the current
+                // in-memory encoding so we do not flush over it.
+                Err(_) => self.resync_assets_watcher(),
             }
         }
         // Flush any in-console edits that are not yet on disk, so cargo builds
@@ -849,6 +847,16 @@ impl Shell {
             }
         }
         true
+    }
+
+    /// Re-baseline the assets watcher to the current in-memory encoding. Used
+    /// when an external `assets.rico8` is unreadable, so we neither flush over
+    /// it nor keep re-detecting it.
+    fn resync_assets_watcher(&mut self) {
+        if let (Loaded::Project(p), Some(w)) = (&self.loaded, &mut self.project_watch) {
+            w.assets
+                .mark_synced(encode_assets(&p.assets).unwrap_or_default());
+        }
     }
 
     fn start_vm_from_loaded(&mut self) -> Result<()> {
@@ -1125,6 +1133,8 @@ impl Shell {
             }
         }
 
+        self.poll_project_watch();
+
         match self.mode {
             Mode::Run => {
                 self.check_hot_reload();
@@ -1213,6 +1223,88 @@ impl Shell {
             }
         } else {
             self.wasm_mtime = Some(mtime);
+        }
+    }
+
+    /// Poll project watchers and react to external edits: adopt clean changes,
+    /// warn on conflicts, and kick off a rebuild (code/source) or VM reload
+    /// (assets). Runs on a 30-frame cadence; skipped while a build is in flight.
+    fn poll_project_watch(&mut self) {
+        if !self.frame.is_multiple_of(30) || self.build.is_some() {
+            return;
+        }
+        let (code_mem, assets_mem) = match &self.loaded {
+            Loaded::Project(p) => (
+                p.code.clone().into_bytes(),
+                encode_assets(&p.assets).unwrap_or_default(),
+            ),
+            _ => return,
+        };
+        let Some(w) = &mut self.project_watch else {
+            return;
+        };
+        let assets_change = w.assets.poll(&assets_mem);
+        let code_change = w.code.poll(&code_mem);
+        let source_changed = w.source_tree.poll();
+        let code_conflicted = w.code.in_conflict();
+
+        // Assets: no rebuild needed; adopt and reload the running VM.
+        match assets_change {
+            FileChange::Adopt(bytes) => match decode_assets(&bytes) {
+                Ok(assets) => {
+                    if let Loaded::Project(p) = &mut self.loaded {
+                        p.assets = assets;
+                    }
+                    self.say("assets reloaded from disk", col::GREEN);
+                    if self.mode == Mode::Run {
+                        if let Err(e) = self.start_vm_from_loaded() {
+                            self.show_error("reload", &e.to_string());
+                        }
+                    }
+                }
+                // Malformed disk file: re-sync so we do not loop on it.
+                Err(_) => {
+                    self.resync_assets_watcher();
+                    self.say("assets.rico8 on disk is unreadable", col::ORANGE);
+                }
+            },
+            FileChange::Conflict => {
+                self.say("assets.rico8 changed on disk;", col::ORANGE);
+                self.say("you have unsaved edits", col::ORANGE);
+            }
+            FileChange::None => {}
+        }
+
+        // Code: adopt into the editor; build is driven by source_changed below.
+        match code_change {
+            FileChange::Adopt(bytes) => {
+                let text = String::from_utf8_lossy(&bytes).into_owned();
+                self.code_ed.set_text(&text);
+                if let Loaded::Project(p) = &mut self.loaded {
+                    p.code = text;
+                }
+            }
+            FileChange::Conflict => {
+                self.say("src/lib.rs changed on disk;", col::ORANGE);
+                self.say("save or reload to resolve", col::ORANGE);
+            }
+            FileChange::None => {}
+        }
+
+        // Any source change (lib.rs or another module) rebuilds — unless the
+        // mirrored code is in an unresolved conflict (we must not build a state
+        // the user has not chosen).
+        if source_changed && !code_conflicted {
+            let dir = match &self.loaded {
+                Loaded::Project(p) => p.dir.clone(),
+                _ => return,
+            };
+            self.say("source changed, rebuilding...", col::LIGHT_GREY);
+            self.toast("rebuilding...", col::LIGHT_GREY, 1.5);
+            self.build = Some(spawn_build(&dir));
+            // Re-run from the console or while already running; stay put if the
+            // user is in an editor.
+            self.run_after_build = matches!(self.mode, Mode::Run | Mode::Console);
         }
     }
 
@@ -1530,6 +1622,46 @@ mod tests {
         shell.cwd = dir.clone();
         shell.cmd_new(&["game"]).expect("new");
         assert!(shell.project_watch.is_some(), "new should arm the watcher");
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// Editing project source externally while idle at the console triggers an
+    /// automatic build and starts the cart running.
+    #[test]
+    fn external_edit_auto_builds_and_runs() {
+        let dir = std::env::temp_dir().join(format!("rico8_autobuild_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load");
+        assert_eq!(shell.mode, Mode::Console);
+
+        // External edit, mtime bumped so the watcher sees it.
+        let lib = project_dir.join("src/lib.rs");
+        let original = std::fs::read_to_string(&lib).unwrap();
+        std::fs::write(&lib, format!("// auto\n{original}")).unwrap();
+        let later = std::time::SystemTime::now() + std::time::Duration::from_secs(10);
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&lib)
+            .unwrap()
+            .set_modified(later)
+            .unwrap();
+
+        // Drive ticks: poll fires on a 30-frame cadence, then the build runs.
+        let mut entered_run = false;
+        for _ in 0..(180 * 30) {
+            shell.tick();
+            if shell.mode == Mode::Run {
+                entered_run = true;
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(33));
+        }
+        assert!(entered_run, "external edit should auto-build and run");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
