@@ -86,6 +86,8 @@ time (`floor`, not truncation, so motion stays even across `x = 0`).
 | --- | --- | --- |
 | `btn` | `(b: u32) -> i32` | held? buttons: 0 left, 1 right, 2 up, 3 down, 4 O, 5 X |
 | `btnp` | `(b: u32) -> i32` | just pressed? repeats after 15 frames, then every 4 |
+| `btn_mask` | `() -> u32` | held buttons as a bitmask, bit i = button i |
+| `btnp_mask` | `() -> u32` | just-pressed buttons as a bitmask (same repeat as `btnp`) |
 
 ### Audio
 
@@ -106,5 +108,8 @@ time (`floor`, not truncation, so motion stays even across `x = 0`).
 ## Versioning
 
 The ABI is part of the cartridge format contract: carts embed the
-format version (see CART_FORMAT.md), and ABI additions bump it. Within
-version 1, this exact import set is stable.
+format version (see CART_FORMAT.md). Pre-release, the import set is still
+evolving: version 1 grows by addition (newer imports like `btn_mask` and
+`btnp_mask` are part of the current version-1 surface), and a cart only
+needs the imports it actually uses. A future stable release will freeze a
+version's import set and bump the version for any change.

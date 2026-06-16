@@ -251,6 +251,12 @@ impl GameVm {
         link!(linker, "btnp", |c: Caller<'_, HostState>, b: u32| -> i32 {
             c.data().input.btnp(b) as i32
         });
+        link!(linker, "btn_mask", |c: Caller<'_, HostState>| -> i32 {
+            c.data().input.btn_mask() as i32
+        });
+        link!(linker, "btnp_mask", |c: Caller<'_, HostState>| -> i32 {
+            c.data().input.btnp_mask() as i32
+        });
         link!(linker, "spr", |mut c: Caller<'_, HostState>,
                               n: u32,
                               x: f32,

@@ -29,6 +29,8 @@ extern "C" {
     pub fn print(ptr: *const u8, len: u32, x: f32, y: f32, color: i32) -> f32;
     pub fn btn(b: u32) -> i32;
     pub fn btnp(b: u32) -> i32;
+    pub fn btn_mask() -> u32;
+    pub fn btnp_mask() -> u32;
     pub fn spr(n: u32, x: f32, y: f32, w: f32, h: f32, flip_x: i32, flip_y: i32);
     pub fn map(cel_x: i32, cel_y: i32, sx: f32, sy: f32, cel_w: i32, cel_h: i32, layers: u32);
     pub fn mget(x: i32, y: i32) -> i32;
@@ -68,6 +70,12 @@ mod stubs {
         0
     }
     pub unsafe fn btnp(_b: u32) -> i32 {
+        0
+    }
+    pub unsafe fn btn_mask() -> u32 {
+        0
+    }
+    pub unsafe fn btnp_mask() -> u32 {
         0
     }
     pub unsafe fn spr(_n: u32, _x: f32, _y: f32, _w: f32, _h: f32, _flip_x: i32, _flip_y: i32) {}
