@@ -9,6 +9,7 @@ mod editor;
 mod gpu;
 mod shell;
 mod ui;
+mod watch;
 mod webexport;
 
 use anyhow::{anyhow, bail, Context, Result};
