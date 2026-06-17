@@ -32,6 +32,9 @@
 //! palette has 16 fixed colors, `update`/`draw` run at 60 fps (or 30,
 //! if the game sets [`Game::FRAME_RATE`]). The constraints
 //! are the point.
+//!
+//! For formatted on-screen text and debug logs, see the [`printf!`](crate::printf)
+//! and [`logf!`](crate::logf) macros.
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod ffi;
@@ -308,7 +311,8 @@ impl Context {
         }
     }
 
-    /// Log a line to the RICO-8 console (visible after Esc).
+    /// Log a line to the RICO-8 console (visible after Esc). For
+    /// `format!`-style arguments, see [`logf!`](crate::logf).
     pub fn log(&mut self, msg: &str) {
         unsafe { ffi::log(msg.as_ptr(), msg.len() as u32) }
     }
@@ -410,7 +414,8 @@ impl Graphics {
     }
 
     /// Print text with the built-in 4x6 font. Returns the x position after
-    /// the last glyph.
+    /// the last glyph. For `format!`-style arguments, see
+    /// [`printf!`](crate::printf).
     pub fn print(&mut self, text: &str, x: f32, y: f32, color: Color) -> f32 {
         unsafe { ffi::print(text.as_ptr(), text.len() as u32, x, y, color.0 as i32) }
     }
@@ -521,6 +526,63 @@ macro_rules! game {
     };
 }
 
+/// Print formatted text to the screen — like [`Graphics::print`], but with
+/// `format!`-style arguments. Returns the x position after the last glyph.
+///
+/// The text is formatted into a fixed stack buffer: no allocator, no
+/// dependencies. The default buffer holds one screen line (32 characters); a
+/// leading integer-literal `N;` sizes it yourself. Overflow is truncated.
+///
+/// ```ignore
+/// use rico8::*;
+///
+/// fn draw(&self, gfx: &mut Graphics) {
+///     rico8::printf!(gfx, 2.0, 2.0, Color::YELLOW, "coins {}", self.coins);
+///     // A longer line needs a bigger buffer:
+///     rico8::printf!(256; gfx, 0.0, 8.0, Color::WHITE, "pos {} {}", self.x, self.y);
+/// }
+/// ```
+#[macro_export]
+macro_rules! printf {
+    ($cap:literal; $gfx:expr, $x:expr, $y:expr, $color:expr, $($arg:tt)*) => {{
+        let __buf = $crate::__internal::format_args_to_buf::<$cap>(::core::format_args!($($arg)*));
+        $gfx.print(__buf.as_str(), $x, $y, $color)
+    }};
+    ($gfx:expr, $x:expr, $y:expr, $color:expr, $($arg:tt)*) => {{
+        let __buf = $crate::__internal::format_args_to_buf::<{ $crate::__internal::LINE_CAP }>(
+            ::core::format_args!($($arg)*),
+        );
+        $gfx.print(__buf.as_str(), $x, $y, $color)
+    }};
+}
+
+/// Log formatted text to the debug console — like [`Context::log`], but with
+/// `format!`-style arguments.
+///
+/// Same fixed-buffer behavior as [`printf!`]: one screen line by default, an
+/// optional leading integer-literal `N;` for more, overflow truncated.
+///
+/// ```ignore
+/// use rico8::*;
+///
+/// fn update(&mut self, ctx: &mut Context) {
+///     rico8::logf!(ctx, "frame {} pos ({},{})", self.frame, self.x, self.y);
+/// }
+/// ```
+#[macro_export]
+macro_rules! logf {
+    ($cap:literal; $ctx:expr, $($arg:tt)*) => {{
+        let __buf = $crate::__internal::format_args_to_buf::<$cap>(::core::format_args!($($arg)*));
+        $ctx.log(__buf.as_str());
+    }};
+    ($ctx:expr, $($arg:tt)*) => {{
+        let __buf = $crate::__internal::format_args_to_buf::<{ $crate::__internal::LINE_CAP }>(
+            ::core::format_args!($($arg)*),
+        );
+        $ctx.log(__buf.as_str());
+    }};
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -623,5 +685,26 @@ mod tests {
         gfx.sprite(SpriteId(0), 0.0, 0.0);
         gfx.spr(SpriteId(0), 0.0, 0.0);
         gfx.sprite_ext(SpriteId(0), 0.0, 0.0, 1.0, 1.0, false, false);
+    }
+
+    #[test]
+    fn printf_formats_and_returns_cursor() {
+        let mut gfx = Graphics { _private: () };
+        // The native ffi::print stub returns 0.0; this exercises macro
+        // expansion and the f32 return type. String content is covered by the
+        // fmt::tests, since the stub does not capture the text.
+        let cursor: f32 = printf!(gfx, 0.0, 0.0, Color::WHITE, "n={}", 3);
+        assert_eq!(cursor, 0.0);
+        // Capacity-override arm, multi-arg, and a no-arg literal all expand.
+        let _: f32 = printf!(64; gfx, 0.0, 0.0, Color::WHITE, "{}-{}", 1, 2);
+        let _: f32 = printf!(gfx, 0.0, 0.0, Color::WHITE, "literal");
+    }
+
+    #[test]
+    fn logf_formats_and_runs() {
+        let mut ctx = Context { _private: () };
+        logf!(ctx, "frame {}", 9);
+        logf!(128; ctx, "{}-{}", 1, 2);
+        logf!(ctx, "literal");
     }
 }
