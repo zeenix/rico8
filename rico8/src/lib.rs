@@ -12,7 +12,7 @@
 //!
 //! impl Game for MyGame {
 //!     fn update(&mut self, ctx: &mut Context) {
-//!         if ctx.btn(Button::Right) {
+//!         if ctx.is_button_down(Button::Right) {
 //!             self.x += 1.0;
 //!         }
 //!     }
@@ -35,8 +35,11 @@
 #![cfg_attr(not(feature = "std"), no_std)]
 
 pub mod ffi;
+mod flags;
 mod glue;
 
+use crate::flags::bitflag_enum;
+pub use crate::flags::{BitFlag, BitFlags, UnknownBits};
 pub use glue::__internal;
 
 /// The screen is 128x128 pixels.
@@ -102,18 +105,58 @@ impl From<u8> for Color {
     }
 }
 
-/// The six console buttons.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-#[repr(u32)]
-pub enum Button {
-    Left = 0,
-    Right = 1,
-    Up = 2,
-    Down = 3,
-    /// "O" action button — Z, C or N on the keyboard.
-    O = 4,
-    /// "X" action button — X, V or M on the keyboard.
-    X = 5,
+bitflag_enum! {
+    /// The six console buttons.
+    pub enum Button {
+        Left = 1 << 0,
+        Right = 1 << 1,
+        Up = 1 << 2,
+        Down = 1 << 3,
+        /// "O" action button — Z, C or N on the keyboard.
+        O = 1 << 4,
+        /// "X" action button — X, V or M on the keyboard.
+        X = 1 << 5,
+    }
+}
+
+impl Button {
+    /// `Left` and `Up` held together, as a set — `ctx.buttons_down().contains(Button::UP_LEFT)`.
+    pub const UP_LEFT: BitFlags<Button> =
+        // SAFETY: `Left` and `Up` are real `Button` flags, so the combined bits are valid.
+        unsafe { BitFlags::from_bits_unchecked(Button::Left as u8 | Button::Up as u8) };
+    /// `Right` and `Up` held together.
+    pub const UP_RIGHT: BitFlags<Button> =
+        // SAFETY: `Right` and `Up` are real `Button` flags.
+        unsafe { BitFlags::from_bits_unchecked(Button::Right as u8 | Button::Up as u8) };
+    /// `Left` and `Down` held together.
+    pub const DOWN_LEFT: BitFlags<Button> =
+        // SAFETY: `Left` and `Down` are real `Button` flags.
+        unsafe { BitFlags::from_bits_unchecked(Button::Left as u8 | Button::Down as u8) };
+    /// `Right` and `Down` held together.
+    pub const DOWN_RIGHT: BitFlags<Button> =
+        // SAFETY: `Right` and `Down` are real `Button` flags.
+        unsafe { BitFlags::from_bits_unchecked(Button::Right as u8 | Button::Down as u8) };
+}
+
+/// The ABI button index (`0..=5`) for a [`Button`] flag.
+const fn button_index(b: Button) -> u32 {
+    (b as u8).trailing_zeros()
+}
+
+bitflag_enum! {
+    /// One of a sprite's eight flags. The flags carry no fixed meaning — a cart
+    /// assigns its own (e.g. "solid"). Used by [`Context::sprite_flags`] /
+    /// [`Context::set_sprite_flags`] and the [`Graphics::map`] layer filter.
+    pub enum SpriteFlag {
+        Flag0 = 1 << 0,
+        Flag1 = 1 << 1,
+        Flag2 = 1 << 2,
+        Flag3 = 1 << 3,
+        Flag4 = 1 << 4,
+        Flag5 = 1 << 5,
+        Flag6 = 1 << 6,
+        Flag7 = 1 << 7,
+    }
 }
 
 /// A sprite on the 16x16 sprite sheet (`0..=255`).
@@ -137,40 +180,84 @@ pub struct Context {
 }
 
 impl Context {
-    /// Is a button held down?
+    /// Is a button currently held down?
+    pub fn is_button_down(&self, b: Button) -> bool {
+        unsafe { ffi::is_button_down(button_index(b)) != 0 }
+    }
+
+    /// Alias for [`Context::is_button_down`].
     pub fn btn(&self, b: Button) -> bool {
-        unsafe { ffi::btn(b as u32) != 0 }
+        self.is_button_down(b)
     }
 
     /// Was a button just pressed? Repeats after a short delay while held.
-    pub fn btnp(&self, b: Button) -> bool {
-        unsafe { ffi::btnp(b as u32) != 0 }
+    pub fn is_button_pressed(&self, b: Button) -> bool {
+        unsafe { ffi::is_button_pressed(button_index(b)) != 0 }
     }
 
-    /// Read a map tile (sprite number; 0 = empty).
-    pub fn mget(&self, x: i32, y: i32) -> u8 {
-        unsafe { ffi::mget(x, y) as u8 }
+    /// Alias for [`Context::is_button_pressed`].
+    pub fn btnp(&self, b: Button) -> bool {
+        self.is_button_pressed(b)
+    }
+
+    /// Every button currently held down, as a set.
+    pub fn buttons_down(&self) -> BitFlags<Button> {
+        BitFlags::from_bits(unsafe { ffi::buttons_down() } as u8)
+            .expect("buttons_down returned an unknown button bit (rico8 host/SDK ABI mismatch)")
+    }
+
+    /// Every button that fired this frame (with repeat), as a set.
+    pub fn buttons_pressed(&self) -> BitFlags<Button> {
+        BitFlags::from_bits(unsafe { ffi::buttons_pressed() } as u8)
+            .expect("buttons_pressed returned an unknown button bit (rico8 host/SDK ABI mismatch)")
+    }
+
+    /// The sprite number of a map tile (`SpriteId(0)` = empty).
+    pub fn map_tile(&self, x: i32, y: i32) -> SpriteId {
+        SpriteId(unsafe { ffi::map_tile(x, y) } as u8)
+    }
+
+    /// Alias for [`Context::map_tile`].
+    pub fn mget(&self, x: i32, y: i32) -> SpriteId {
+        self.map_tile(x, y)
     }
 
     /// Write a map tile. Changes live in console RAM and are discarded on
     /// reload, like any self-respecting cartridge.
+    pub fn set_map_tile(&mut self, x: i32, y: i32, sprite: SpriteId) {
+        unsafe { ffi::set_map_tile(x, y, sprite.0 as u32) }
+    }
+
+    /// Alias for [`Context::set_map_tile`].
     pub fn mset(&mut self, x: i32, y: i32, sprite: SpriteId) {
-        unsafe { ffi::mset(x, y, sprite.0 as u32) }
+        self.set_map_tile(x, y, sprite)
     }
 
-    /// All eight flags of a sprite as a bitmask.
-    pub fn fget(&self, sprite: SpriteId) -> u8 {
-        unsafe { ffi::fget(sprite.0 as u32) as u8 }
+    /// Every flag set on a sprite.
+    pub fn sprite_flags(&self, sprite: SpriteId) -> BitFlags<SpriteFlag> {
+        BitFlags::from_bits(unsafe { ffi::sprite_flags(sprite.0 as u32) } as u8).expect(
+            "sprite_flags returned an unknown sprite-flag bit (rico8 host/SDK ABI mismatch)",
+        )
     }
 
-    /// True when the sprite has flag `flag` (`0..8`) set.
-    pub fn fget_flag(&self, sprite: SpriteId, flag: u8) -> bool {
-        self.fget(sprite) & (1 << (flag & 7)) != 0
+    /// Alias for [`Context::sprite_flags`].
+    pub fn fget(&self, sprite: SpriteId) -> BitFlags<SpriteFlag> {
+        self.sprite_flags(sprite)
     }
 
-    /// Overwrite a sprite's flag bitmask.
-    pub fn fset(&mut self, sprite: SpriteId, flags: u8) {
-        unsafe { ffi::fset(sprite.0 as u32, flags as u32) }
+    /// Whether a sprite has a particular flag set.
+    pub fn has_sprite_flag(&self, sprite: SpriteId, flag: SpriteFlag) -> bool {
+        self.sprite_flags(sprite).contains(flag)
+    }
+
+    /// Overwrite a sprite's flags.
+    pub fn set_sprite_flags(&mut self, sprite: SpriteId, flags: impl Into<BitFlags<SpriteFlag>>) {
+        unsafe { ffi::set_sprite_flags(sprite.0 as u32, flags.into().bits() as u32) }
+    }
+
+    /// Alias for [`Context::set_sprite_flags`].
+    pub fn fset(&mut self, sprite: SpriteId, flags: impl Into<BitFlags<SpriteFlag>>) {
+        self.set_sprite_flags(sprite, flags)
     }
 
     /// Play a sound effect on a free channel.
@@ -234,7 +321,7 @@ pub struct Graphics {
 impl Graphics {
     /// Fill the screen with a color.
     pub fn clear(&mut self, color: Color) {
-        unsafe { ffi::cls(color.0 as i32) }
+        unsafe { ffi::clear(color.0 as i32) }
     }
 
     /// Alias for [`Graphics::clear`], for fingers that type `cls`.
@@ -258,13 +345,23 @@ impl Graphics {
     }
 
     /// Set one pixel. The position is floored to a pixel.
+    pub fn set_pixel(&mut self, x: f32, y: f32, color: Color) {
+        unsafe { ffi::set_pixel(x, y, color.0 as i32) }
+    }
+
+    /// Alias for [`Graphics::set_pixel`].
     pub fn pset(&mut self, x: f32, y: f32, color: Color) {
-        unsafe { ffi::pset(x, y, color.0 as i32) }
+        self.set_pixel(x, y, color)
     }
 
     /// Read one pixel (screen space; out of bounds reads 0).
+    pub fn pixel(&self, x: f32, y: f32) -> Color {
+        Color::from_index(unsafe { ffi::pixel(x, y) } as u8)
+    }
+
+    /// Alias for [`Graphics::pixel`].
     pub fn pget(&self, x: f32, y: f32) -> Color {
-        Color::from_index(unsafe { ffi::pget(x, y) } as u8)
+        self.pixel(x, y)
     }
 
     /// Line between two points, inclusive.
@@ -282,18 +379,33 @@ impl Graphics {
     /// Filled rectangle at `(x, y)` with size `w x h`.
     pub fn rect_fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
         if w > 0.0 && h > 0.0 {
-            unsafe { ffi::rectfill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
+            unsafe { ffi::rect_fill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
         }
     }
 
+    /// Alias for [`Graphics::rect_fill`].
+    pub fn rectfill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        self.rect_fill(x, y, w, h, color)
+    }
+
     /// Circle outline.
+    pub fn circle(&mut self, x: f32, y: f32, r: f32, color: Color) {
+        unsafe { ffi::circle(x, y, r, color.0 as i32) }
+    }
+
+    /// Alias for [`Graphics::circle`].
     pub fn circ(&mut self, x: f32, y: f32, r: f32, color: Color) {
-        unsafe { ffi::circ(x, y, r, color.0 as i32) }
+        self.circle(x, y, r, color)
     }
 
     /// Filled circle.
-    pub fn circ_fill(&mut self, x: f32, y: f32, r: f32, color: Color) {
-        unsafe { ffi::circfill(x, y, r, color.0 as i32) }
+    pub fn circle_fill(&mut self, x: f32, y: f32, r: f32, color: Color) {
+        unsafe { ffi::circle_fill(x, y, r, color.0 as i32) }
+    }
+
+    /// Alias for [`Graphics::circle_fill`].
+    pub fn circfill(&mut self, x: f32, y: f32, r: f32, color: Color) {
+        self.circle_fill(x, y, r, color)
     }
 
     /// Print text with the built-in 4x6 font. Returns the x position after
@@ -303,14 +415,19 @@ impl Graphics {
     }
 
     /// Draw a sprite at `(x, y)`. Color 0 is transparent.
+    pub fn sprite(&mut self, sprite: SpriteId, x: f32, y: f32) {
+        unsafe { ffi::sprite(sprite.0 as u32, x, y, 1.0, 1.0, 0, 0) }
+    }
+
+    /// Alias for [`Graphics::sprite`].
     pub fn spr(&mut self, sprite: SpriteId, x: f32, y: f32) {
-        unsafe { ffi::spr(sprite.0 as u32, x, y, 1.0, 1.0, 0, 0) }
+        self.sprite(sprite, x, y)
     }
 
     /// Draw a `w x h`-sprite block, optionally flipped. `w`/`h` are in sprite
     /// units and may be fractional: `w = 0.5` draws a 4-pixel-wide slice.
     #[allow(clippy::too_many_arguments)]
-    pub fn spr_ext(
+    pub fn sprite_ext(
         &mut self,
         sprite: SpriteId,
         x: f32,
@@ -320,12 +437,13 @@ impl Graphics {
         flip_x: bool,
         flip_y: bool,
     ) {
-        unsafe { ffi::spr(sprite.0 as u32, x, y, w, h, flip_x as i32, flip_y as i32) }
+        unsafe { ffi::sprite(sprite.0 as u32, x, y, w, h, flip_x as i32, flip_y as i32) }
     }
 
     /// Draw a region of the map: `cel_w x cel_h` tiles starting at tile
-    /// `(cel_x, cel_y)`, at screen position `(sx, sy)`. When `layers` is
-    /// nonzero only tiles with intersecting flags are drawn.
+    /// `(cel_x, cel_y)`, at screen position `(sx, sy)`. With an empty
+    /// `layers` set every tile is drawn; otherwise only tiles whose sprite
+    /// flags intersect `layers`.
     #[allow(clippy::too_many_arguments)]
     pub fn map(
         &mut self,
@@ -335,9 +453,10 @@ impl Graphics {
         sy: f32,
         cel_w: i32,
         cel_h: i32,
-        layers: u8,
+        layers: impl Into<BitFlags<SpriteFlag>>,
     ) {
-        unsafe { ffi::map(cel_x, cel_y, sx, sy, cel_w, cel_h, layers as u32) }
+        let layers = layers.into().bits() as u32;
+        unsafe { ffi::map(cel_x, cel_y, sx, sy, cel_w, cel_h, layers) }
     }
 }
 
@@ -399,4 +518,109 @@ macro_rules! game {
     ($game:ident) => {
         $crate::game!($game = <$game as ::core::default::Default>::default());
     };
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn button_index_matches_abi_order() {
+        assert_eq!(button_index(Button::Left), 0);
+        assert_eq!(button_index(Button::Right), 1);
+        assert_eq!(button_index(Button::Up), 2);
+        assert_eq!(button_index(Button::Down), 3);
+        assert_eq!(button_index(Button::O), 4);
+        assert_eq!(button_index(Button::X), 5);
+    }
+
+    #[test]
+    fn button_aliases_match_primaries() {
+        let ctx = Context { _private: () };
+        for b in [
+            Button::Left,
+            Button::Right,
+            Button::Up,
+            Button::Down,
+            Button::O,
+            Button::X,
+        ] {
+            assert_eq!(ctx.btn(b), ctx.is_button_down(b));
+            assert_eq!(ctx.btnp(b), ctx.is_button_pressed(b));
+        }
+        // Native stubs report nothing held/pressed.
+        assert!(ctx.buttons_down().is_empty());
+        assert!(ctx.buttons_pressed().is_empty());
+    }
+
+    #[test]
+    fn sprite_flag_and_tile_helpers() {
+        let ctx = Context { _private: () };
+        // Native stubs: fget -> 0 (no flags), mget -> 0.
+        assert!(ctx.sprite_flags(SpriteId(1)).is_empty());
+        assert_eq!(ctx.sprite_flags(SpriteId(1)), ctx.fget(SpriteId(1)));
+        assert!(!ctx.has_sprite_flag(SpriteId(1), SpriteFlag::Flag0));
+        assert_eq!(ctx.map_tile(0, 0), SpriteId(0));
+        assert_eq!(ctx.map_tile(0, 0), ctx.mget(0, 0));
+    }
+
+    #[test]
+    fn button_mask_round_trips() {
+        // bits 0, 3, 5 == Left, Down, X
+        let mask = BitFlags::<Button>::from_bits(0b10_1001).unwrap();
+        assert!(mask.contains(Button::Left));
+        assert!(mask.contains(Button::Down));
+        assert!(mask.contains(Button::X));
+        assert!(!mask.contains(Button::Right));
+    }
+
+    #[test]
+    fn diagonal_button_constants() {
+        assert_eq!(Button::UP_LEFT, Button::Left | Button::Up);
+        assert!(Button::UP_LEFT.contains(Button::Left));
+        assert!(Button::UP_LEFT.contains(Button::Up));
+        assert!(!Button::UP_LEFT.contains(Button::Right));
+        // The four diagonals are distinct sets.
+        for (a, b) in [
+            (Button::UP_LEFT, Button::UP_RIGHT),
+            (Button::UP_LEFT, Button::DOWN_LEFT),
+            (Button::DOWN_RIGHT, Button::UP_LEFT),
+        ] {
+            assert_ne!(a, b);
+        }
+    }
+
+    #[test]
+    fn map_accepts_flag_set_forms() {
+        let mut gfx = Graphics { _private: () };
+        gfx.map(0, 0, 0.0, 0.0, 16, 16, BitFlags::empty());
+        gfx.map(0, 0, 0.0, 0.0, 16, 16, SpriteFlag::Flag0);
+        gfx.map(
+            0,
+            0,
+            0.0,
+            0.0,
+            16,
+            16,
+            SpriteFlag::Flag0 | SpriteFlag::Flag3,
+        );
+    }
+
+    #[test]
+    fn graphics_aliases_match_primaries() {
+        let mut gfx = Graphics { _private: () };
+        assert_eq!(gfx.pixel(1.0, 1.0), gfx.pget(1.0, 1.0));
+        // Drawing aliases forward to primaries (no-op under native stubs).
+        gfx.set_pixel(0.0, 0.0, Color::RED);
+        gfx.pset(0.0, 0.0, Color::RED);
+        gfx.circle(0.0, 0.0, 4.0, Color::RED);
+        gfx.circ(0.0, 0.0, 4.0, Color::RED);
+        gfx.circle_fill(0.0, 0.0, 4.0, Color::RED);
+        gfx.circfill(0.0, 0.0, 4.0, Color::RED);
+        gfx.rect_fill(0.0, 0.0, 4.0, 4.0, Color::RED);
+        gfx.rectfill(0.0, 0.0, 4.0, 4.0, Color::RED);
+        gfx.sprite(SpriteId(0), 0.0, 0.0);
+        gfx.spr(SpriteId(0), 0.0, 0.0);
+        gfx.sprite_ext(SpriteId(0), 0.0, 0.0, 1.0, 1.0, false, false);
+    }
 }

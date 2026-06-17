@@ -12,11 +12,11 @@ struct MusicDemo {
 impl Game for MusicDemo {
     fn update(&mut self, ctx: &mut Context) {
         self.t += 1;
-        if ctx.btnp(Button::O) {
+        if ctx.is_button_pressed(Button::O) {
             ctx.music(MusicId(0));
             self.playing = true;
         }
-        if ctx.btnp(Button::X) {
+        if ctx.is_button_pressed(Button::X) {
             ctx.music_stop();
             self.playing = false;
         }

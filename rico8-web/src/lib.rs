@@ -262,9 +262,9 @@ mod tests {
 
     const MOVER: &str = r#"
         (module
-          (import "rico8" "cls" (func $cls (param i32)))
-          (import "rico8" "pset" (func $pset (param f32 f32 i32)))
-          (import "rico8" "btn" (func $btn (param i32) (result i32)))
+          (import "rico8" "clear" (func $cls (param i32)))
+          (import "rico8" "set_pixel" (func $pset (param f32 f32 i32)))
+          (import "rico8" "is_button_down" (func $btn (param i32) (result i32)))
           (global $x (mut i32) (i32.const 10))
           (func (export "rico8_init"))
           (func (export "rico8_update")

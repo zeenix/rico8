@@ -20,7 +20,7 @@ impl Game for SfxDemo {
     fn update(&mut self, ctx: &mut Context) {
         self.t += 1;
         for (btn, sfx, _) in PADS {
-            if ctx.btnp(btn) {
+            if ctx.is_button_pressed(btn) {
                 ctx.sfx(SfxId(sfx));
                 self.last = Some(sfx);
             }

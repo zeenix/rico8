@@ -67,6 +67,29 @@ impl InputState {
         f == 1 || (f > REPEAT_DELAY && (f - REPEAT_DELAY) % REPEAT_EVERY == 1)
     }
 
+    /// Bitmask of all currently-held buttons (bit `i` == button `i`).
+    pub fn btn_mask(&self) -> u32 {
+        let mut mask = 0;
+        for i in 0..BUTTON_COUNT {
+            if self.held[i] {
+                mask |= 1 << i;
+            }
+        }
+        mask
+    }
+
+    /// Bitmask of all buttons that fired this frame, with repeat
+    /// (bit `i` == button `i`), matching `btnp`.
+    pub fn btnp_mask(&self) -> u32 {
+        let mut mask = 0;
+        for i in 0..BUTTON_COUNT {
+            if self.btnp(i as u32) {
+                mask |= 1 << i;
+            }
+        }
+        mask
+    }
+
     /// Clear all held buttons (e.g. when leaving run mode).
     pub fn clear(&mut self) {
         self.held = [false; BUTTON_COUNT];
@@ -114,5 +137,24 @@ mod tests {
         s.set_button(0, true);
         s.tick();
         assert!(s.btnp(0), "fires again after release");
+    }
+
+    #[test]
+    fn btn_mask_sets_held_bits() {
+        let mut s = InputState::default();
+        s.set_button(Button::Left as usize, true);
+        s.set_button(Button::X as usize, true);
+        s.tick();
+        assert_eq!(s.btn_mask(), 0b10_0001); // bit 0 Left, bit 5 X
+    }
+
+    #[test]
+    fn btnp_mask_fires_then_clears() {
+        let mut s = InputState::default();
+        s.set_button(2, true); // Up
+        s.tick();
+        assert_eq!(s.btnp_mask(), 1 << 2);
+        s.tick();
+        assert_eq!(s.btnp_mask(), 0);
     }
 }

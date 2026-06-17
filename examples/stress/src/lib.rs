@@ -23,16 +23,16 @@ struct Stress {
 
 impl Game for Stress {
     fn update(&mut self, ctx: &mut Context) {
-        if ctx.btnp(Button::Up) {
+        if ctx.is_button_pressed(Button::Up) {
             self.n += 1;
         }
-        if ctx.btnp(Button::Down) && self.n > 0 {
+        if ctx.is_button_pressed(Button::Down) && self.n > 0 {
             self.n -= 1;
         }
-        if ctx.btnp(Button::O) {
+        if ctx.is_button_pressed(Button::O) {
             self.mem_on = !self.mem_on;
         }
-        if ctx.btnp(Button::X) {
+        if ctx.is_button_pressed(Button::X) {
             self.cpu_on = !self.cpu_on;
         }
 
