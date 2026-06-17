@@ -384,11 +384,11 @@ pub fn validate(assets: &Assets) -> Result<()> {
         || assets.sfx.len() != SFX_COUNT
         || assets.music.len() != MUSIC_COUNT
     {
-        bail!("cart assets have invalid dimensions");
+        bail!("Cart assets have invalid dimensions");
     }
     if let Some(label) = &assets.label {
         if label.len() != SHEET_W * SHEET_H {
-            bail!("cart label has invalid dimensions");
+            bail!("Cart label has invalid dimensions");
         }
     }
     Ok(())

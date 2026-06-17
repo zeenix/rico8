@@ -280,7 +280,7 @@ impl SpriteEditor {
             fb.rect(x, y, x + 7, y + 7, col::WHITE);
         }
 
-        ui::status_bar(fb, &format!("spr {:03} flags {:08b}", self.sprite, flags));
+        ui::status_bar(fb, &format!("Spr {:03} flags {:08b}", self.sprite, flags));
     }
 }
 

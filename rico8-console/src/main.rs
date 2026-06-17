@@ -76,29 +76,29 @@ fn main() -> Result<()> {
         [path] => run_windowed(Some(path.to_string())),
         _ => {
             print_help();
-            bail!("unrecognized arguments: {args:?}");
+            bail!("Unrecognized arguments: {args:?}");
         }
     }
 }
 
 fn print_help() {
     println!(
-        "rico-8 {} - a fantasy console for rust\n\n\
-         usage:\n\
-         \x20 rico8                      boot the console\n\
-         \x20 rico8 <dir|cart.png>       boot with a cart loaded\n\
-         \x20 rico8 new <dir>            create a project (headless)\n\
-         \x20 rico8 build <dir>          compile a project to wasm (headless)\n\
+        "RICO-8 {} - A fantasy console for Rust\n\n\
+         Usage:\n\
+         \x20 rico8                      Boot the console\n\
+         \x20 rico8 <dir|cart.png>       Boot with a cart loaded\n\
+         \x20 rico8 new <dir>            Create a project (headless)\n\
+         \x20 rico8 build <dir>          Compile a project to wasm (headless)\n\
          \x20 rico8 export <dir> <out.png> [--no-source]\n\
-         \x20                            build + export a png cart (headless)\n\
+         \x20                            Build + export a PNG cart (headless)\n\
          \x20 rico8 extract <cart.png> <dir>\n\
-         \x20                            turn an editable cart into a project\n\
+         \x20                            Turn an editable cart into a project\n\
          \x20 rico8 import-pico8 <cart.p8|.p8.png> [dir]\n\
-         \x20                            import a pico-8 cart's assets into a project\n\
+         \x20                            Import a PICO-8 cart's assets into a project\n\
          \x20                            (dir defaults to the cart's name)\n\
          \x20 rico8 export-web <dir|cart.png> <out.html>\n\
-         \x20                            export a self-contained playable web page\n\
-         \x20 rico8 verify <cart.png>    load a cart and run 60 frames headless",
+         \x20                            Export a self-contained playable web page\n\
+         \x20 rico8 verify <cart.png>    Load a cart and run 60 frames headless",
         shell::VERSION
     );
 }
@@ -110,11 +110,11 @@ fn print_help() {
 fn headless_new(dir: &Path) -> Result<()> {
     let name = dir
         .file_name()
-        .ok_or_else(|| anyhow!("bad directory name"))?
+        .ok_or_else(|| anyhow!("Bad directory name"))?
         .to_string_lossy()
         .into_owned();
     Project::create(dir, &name, &sdk_path())?;
-    println!("created {}", dir.display());
+    println!("Created {}", dir.display());
     Ok(())
 }
 
@@ -125,10 +125,10 @@ fn headless_build(dir: &Path) -> Result<()> {
         for line in &result.errors {
             eprintln!("{line}");
         }
-        bail!("build failed");
+        bail!("Build failed");
     }
     println!(
-        "built {} ({:.1}s)",
+        "Built {} ({:.1}s)",
         project.wasm_path().display(),
         result.duration.as_secs_f32()
     );
@@ -145,16 +145,16 @@ fn headless_export(dir: &Path, out: &Path, include_source: bool) -> Result<()> {
         for line in &result.errors {
             eprintln!("{line}");
         }
-        bail!("build failed");
+        bail!("Build failed");
     }
-    let wasm = std::fs::read(project.wasm_path()).context("reading built wasm")?;
+    let wasm = std::fs::read(project.wasm_path()).context("Reading built wasm")?;
     let cart = Cart {
         wasm,
         assets: project.assets.clone(),
         source: include_source.then(|| project.code.clone()),
     };
     cart::save_png(&cart, out)?;
-    println!("exported {}", out.display());
+    println!("Exported {}", out.display());
     Ok(())
 }
 
@@ -162,12 +162,12 @@ fn headless_extract(png: &Path, dir: &Path) -> Result<()> {
     let cart = cart::load_png(png)?;
     let source = cart
         .source
-        .ok_or_else(|| anyhow!("cart has no embedded source (playable-only cart)"))?;
+        .ok_or_else(|| anyhow!("Cart has no embedded source (playable-only cart)"))?;
     let mut project = Project::create(dir, &cart.assets.meta.name, &sdk_path())?;
     project.code = source;
     project.assets = cart.assets;
     project.save()?;
-    println!("extracted into {}", dir.display());
+    println!("Extracted into {}", dir.display());
     Ok(())
 }
 
@@ -176,7 +176,7 @@ fn headless_extract(png: &Path, dir: &Path) -> Result<()> {
 /// code is ignored.
 fn headless_import_pico8(src: &Path, dir: &Path) -> Result<()> {
     rico8_runtime::pico8::import_project(src, dir, &sdk_path())?;
-    println!("imported {} into {}", src.display(), dir.display());
+    println!("Imported {} into {}", src.display(), dir.display());
     Ok(())
 }
 
@@ -191,9 +191,9 @@ fn headless_export_web(input: &Path, out: &Path) -> Result<()> {
             for line in &result.errors {
                 eprintln!("{line}");
             }
-            bail!("build failed");
+            bail!("Build failed");
         }
-        let wasm = std::fs::read(project.wasm_path()).context("reading built wasm")?;
+        let wasm = std::fs::read(project.wasm_path()).context("Reading built wasm")?;
         Cart {
             wasm,
             assets: project.assets.clone(),
@@ -202,7 +202,7 @@ fn headless_export_web(input: &Path, out: &Path) -> Result<()> {
         }
     };
     webexport::export_html(&cart, out, &webexport::web_crate_dir(&sdk_path()))?;
-    println!("exported {}", out.display());
+    println!("Exported {}", out.display());
     Ok(())
 }
 
@@ -212,15 +212,15 @@ fn headless_verify(png: &Path) -> Result<()> {
     use rico8_runtime::{audio::AudioHandle, vm::GameVm};
     let cart = cart::load_png(png)?;
     let mut vm = GameVm::load(&cart.wasm, &cart.assets, AudioHandle::dummy())
-        .context("loading cart into the vm")?;
+        .context("Loading cart into the VM")?;
     for frame in 0..60 {
         vm.call_update()
             .and_then(|()| vm.call_draw())
-            .map_err(|e| anyhow!("frame {frame}: {e}"))?;
+            .map_err(|e| anyhow!("Frame {frame}: {e}"))?;
     }
     let drew_something = vm.state().fb.pixels().iter().any(|&p| p != 0);
     println!(
-        "ok: {} ran 60 frames{}",
+        "OK: {} ran 60 frames{}",
         cart.assets.meta.name,
         if drew_something {
             ""
@@ -258,7 +258,7 @@ fn headless_snap(project: &Path, outdir: &Path) -> Result<()> {
         let png = encode_screen_png(shell.draw(), 3);
         std::fs::write(outdir.join(format!("{name}.png")), png)?;
     }
-    println!("wrote screenshots to {}", outdir.display());
+    println!("Wrote screenshots to {}", outdir.display());
     Ok(())
 }
 
@@ -358,7 +358,7 @@ impl ApplicationHandler for App {
         let window = match event_loop.create_window(attrs) {
             Ok(w) => Arc::new(w),
             Err(e) => {
-                eprintln!("rico8: could not open a window: {e}");
+                eprintln!("rico8: Could not open a window: {e}");
                 event_loop.exit();
                 return;
             }
@@ -369,7 +369,7 @@ impl ApplicationHandler for App {
                 self.window = Some(window);
             }
             Err(e) => {
-                eprintln!("rico8: graphics init failed: {e:#}");
+                eprintln!("rico8: Graphics init failed: {e:#}");
                 event_loop.exit();
             }
         }
@@ -434,7 +434,7 @@ impl ApplicationHandler for App {
                 let fb = shell.draw();
                 if let Some(g) = &mut self.gpu {
                     if let Err(e) = g.render(fb) {
-                        eprintln!("rico8: render error: {e:#}");
+                        eprintln!("rico8: Render error: {e:#}");
                     }
                 }
             }

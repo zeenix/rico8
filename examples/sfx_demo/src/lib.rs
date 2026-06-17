@@ -10,10 +10,10 @@ struct SfxDemo {
 }
 
 const PADS: [(Button, u8, &str); 4] = [
-    (Button::Left, 0, "jump"),
-    (Button::Right, 1, "coin"),
-    (Button::Up, 2, "laser"),
-    (Button::Down, 3, "hurt"),
+    (Button::Left, 0, "Jump"),
+    (Button::Right, 1, "Coin"),
+    (Button::Up, 2, "Laser"),
+    (Button::Down, 3, "Hurt"),
 ];
 
 impl Game for SfxDemo {
@@ -29,7 +29,7 @@ impl Game for SfxDemo {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::DARK_PURPLE);
-        gfx.print("sfx soundboard", 36.0, 8.0, Color::WHITE);
+        gfx.print("SFX soundboard", 36.0, 8.0, Color::WHITE);
         for (i, (_, sfx, name)) in PADS.iter().enumerate() {
             let y = 32.0 + i as f32 * 20.0;
             let hot = self.last == Some(*sfx);
@@ -37,7 +37,7 @@ impl Game for SfxDemo {
             gfx.rect_fill(24.0, y, 80.0, 14.0, bg);
             gfx.print(name, 28.0, y + 4.0, Color::WHITE);
         }
-        gfx.print("press arrow keys", 32.0, 116.0, Color::LIGHT_GREY);
+        gfx.print("Press arrow keys", 32.0, 116.0, Color::LIGHT_GREY);
     }
 }
 

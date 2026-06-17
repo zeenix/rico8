@@ -117,7 +117,7 @@ pub fn is_cart(bytes: &[u8]) -> bool {
 /// Decode and validate a cart from PNG bytes.
 pub fn decode(bytes: &[u8]) -> Result<Cart> {
     if !bytes.starts_with(&PNG_SIG) {
-        bail!("not a png file");
+        bail!("Not a PNG file");
     }
     let mut rest = &bytes[8..];
     let mut payload = None;
@@ -125,7 +125,7 @@ pub fn decode(bytes: &[u8]) -> Result<Cart> {
         let len = u32::from_be_bytes(rest[0..4].try_into().unwrap()) as usize;
         let ctype: [u8; 4] = rest[4..8].try_into().unwrap();
         if rest.len() < 12 + len {
-            bail!("truncated png chunk");
+            bail!("Truncated PNG chunk");
         }
         let data = &rest[8..8 + len];
         if ctype == CHUNK_TYPE {
@@ -134,7 +134,7 @@ pub fn decode(bytes: &[u8]) -> Result<Cart> {
             h.update(&ctype);
             h.update(data);
             if h.finalize() != crc {
-                bail!("cart data is corrupted (bad checksum)");
+                bail!("Cart data is corrupted (bad checksum)");
             }
             payload = Some(data.to_vec());
         }
@@ -143,20 +143,20 @@ pub fn decode(bytes: &[u8]) -> Result<Cart> {
         }
         rest = &rest[12 + len..];
     }
-    let payload = payload.ok_or_else(|| anyhow!("png has no rico-8 cart data"))?;
+    let payload = payload.ok_or_else(|| anyhow!("PNG has no RICO-8 cart data"))?;
 
     let body = payload
         .strip_prefix(CART_MAGIC.as_slice())
-        .ok_or_else(|| anyhow!("bad cart magic"))?;
+        .ok_or_else(|| anyhow!("Bad cart magic"))?;
     if body.len() < 2 {
-        bail!("truncated cart header");
+        bail!("Truncated cart header");
     }
     let version = u16::from_le_bytes(body[0..2].try_into().unwrap());
     if version != CART_VERSION {
-        bail!("cart format version {version} is not supported (this is version {CART_VERSION})");
+        bail!("Cart format version {version} is not supported (this is version {CART_VERSION})");
     }
     let raw = miniz_oxide::inflate::decompress_to_vec_with_limit(&body[2..], MAX_PAYLOAD)
-        .map_err(|e| anyhow!("cart data is corrupted: {e}"))?;
+        .map_err(|e| anyhow!("Cart data is corrupted: {e}"))?;
     let cart: Cart = postcard::from_bytes(&raw)?;
     validate(&cart)?;
     Ok(cart)
@@ -165,11 +165,11 @@ pub fn decode(bytes: &[u8]) -> Result<Cart> {
 /// Structural validation applied on both save and load.
 fn validate(cart: &Cart) -> Result<()> {
     if !cart.wasm.starts_with(b"\0asm") {
-        bail!("cart payload is not a wasm module");
+        bail!("Cart payload is not a wasm module");
     }
     if cart.wasm.len() > MAX_WASM_SIZE {
         bail!(
-            "cart wasm is {} bytes; the limit is {} (128K)",
+            "Cart wasm is {} bytes; the limit is {} (128K)",
             cart.wasm.len(),
             MAX_WASM_SIZE
         );
@@ -470,7 +470,7 @@ mod tests {
         write_chunk(&mut png, *b"IHDR", &[0; 13]);
         write_chunk(&mut png, *b"IEND", &[]);
         let err = decode(&png).map(|_| ()).unwrap_err().to_string();
-        assert!(err.contains("no rico-8 cart data"), "{err}");
+        assert!(err.contains("no RICO-8 cart data"), "{err}");
     }
 
     #[test]
