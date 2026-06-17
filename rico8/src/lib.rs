@@ -36,6 +36,7 @@
 
 pub mod ffi;
 mod flags;
+mod fmt;
 mod glue;
 
 use crate::flags::bitflag_enum;

@@ -8,6 +8,8 @@ pub mod __internal {
     use super::*;
     use core::cell::UnsafeCell;
 
+    pub use crate::fmt::{format_args_to_buf, FmtBuf, LINE_CAP};
+
     /// Typed storage for the one game instance a cart declares.
     ///
     /// The [`game!`](crate::game) macro creates a `static Slot<G>` for the
