@@ -90,8 +90,8 @@ pub fn error_screen(message: &str) -> Framebuffer {
     let mut fb = Framebuffer::new();
     fb.cls(col::BLACK);
     fb.rectfill(0, 0, WIDTH - 1, 7, col::RED);
-    fb.print("rico-8", 2, 1, col::WHITE);
-    fb.print("** runtime error **", 2, 14, col::RED);
+    fb.print("RICO-8", 2, 1, col::WHITE);
+    fb.print("** Runtime error **", 2, 14, col::RED);
     let mut y = 24;
     for line in message.lines().take(12) {
         let mut rest = line;

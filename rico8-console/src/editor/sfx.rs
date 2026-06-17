@@ -403,12 +403,12 @@ impl SfxEditor {
         ui::arrow_l(fb, 4, 11, col::PINK);
         fb.print(&format!("{:02}", self.sfx), 11, 11, col::WHITE);
         ui::arrow_r(fb, 21, 11, col::PINK);
-        fb.print("spd", 35, 11, col::LIGHT_GREY);
+        fb.print("Spd", 35, 11, col::LIGHT_GREY);
         fb.rectfill(49, 9, 59, 16, col::BLACK);
         fb.print(&format!("{:02}", s.speed), 51, 11, col::WHITE);
         // "loop" with both bounds, or "len" when only the start is set.
         let is_len = s.loop_end == 0 && s.loop_start > 0;
-        fb.print(if is_len { "len" } else { "loop" }, 70, 11, col::LIGHT_GREY);
+        fb.print(if is_len { "Len" } else { "Loop" }, 70, 11, col::LIGHT_GREY);
         fb.rectfill(90, 9, 100, 16, col::BLACK);
         fb.print(&format!("{:02}", s.loop_start), 92, 11, col::WHITE);
         fb.rectfill(104, 9, 114, 16, col::BLACK);
@@ -428,7 +428,7 @@ impl SfxEditor {
                 None
             }
         });
-        fb.print(":pitch", 3, 20, col::LAVENDER);
+        fb.print(":Pitch", 3, 20, col::LAVENDER);
         self.draw_palette(fb);
         ui::blit(fb, 117, 19, &ui::CIRCLE);
 
@@ -458,11 +458,11 @@ impl SfxEditor {
             fb.rectfill(x, vy, x + 2, vy + 1, vc);
         }
 
-        fb.print(":volume", 3, 95, col::LAVENDER);
+        fb.print(":Volume", 3, 95, col::LAVENDER);
         for i in 0..3 {
             fb.line(118 + i * 2, 96, 118 + i * 2, 99, col::DARK_BLUE);
         }
-        ui::status_bar(fb, "tab tracker  drag pitch/vol");
+        ui::status_bar(fb, "Tab tracker  drag pitch/vol");
     }
 
     /// The waveform palette: 8 boxes (graphical glyphs or plain numbers), with
@@ -547,12 +547,12 @@ impl SfxEditor {
             let c = if on { col::ORANGE } else { col::DARK_GREY };
             fb.print(&val, FX_X + 12, y, c);
         }
-        ui::status_bar(fb, &format!("tab pitch  oct {} zsxd..", self.octave));
+        ui::status_bar(fb, &format!("Tab pitch  oct {} zsxd..", self.octave));
     }
 
     fn draw_wave(&self, fb: &mut Framebuffer, assets: &Assets) {
         let s = &assets.sfx[self.sfx];
-        fb.print(":wave", 3, 20, col::LAVENDER);
+        fb.print(":Wave", 3, 20, col::LAVENDER);
         fb.rectfill(0, 27, 127, WAVE_BOT + 1, col::BLACK);
         let mid = (WAVE_TOP + WAVE_BOT) / 2;
         fb.line(2, mid, 125, mid, col::DARK_GREY);
@@ -570,12 +570,12 @@ impl SfxEditor {
         let on = wave.bass;
         fb.rectfill(4, WAVE_BOT + 3, 28, WAVE_BOT + 9, col::BLACK);
         fb.print(
-            "bass",
+            "Bass",
             6,
             WAVE_BOT + 4,
             if on { col::ORANGE } else { col::DARK_GREY },
         );
-        ui::status_bar(fb, "tab pitch  drag to draw wave");
+        ui::status_bar(fb, "Tab pitch  drag to draw wave");
     }
 }
 

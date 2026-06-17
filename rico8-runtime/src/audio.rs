@@ -575,7 +575,7 @@ impl AudioOutput {
                         }
                     }
                 },
-                |err| eprintln!("rico8 audio error: {err}"),
+                |err| eprintln!("RICO-8 audio error: {err}"),
                 None,
             )
             .ok()?;

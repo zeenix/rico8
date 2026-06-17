@@ -27,7 +27,7 @@ impl Game for Hello {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::BLACK);
-        gfx.print("hello, rico-8!", 36.0, 40.0, Color::WHITE);
+        gfx.print("Hello, RICO-8!", 36.0, 40.0, Color::WHITE);
         gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::WHITE);
     }
 }

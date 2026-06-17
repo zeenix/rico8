@@ -16,6 +16,7 @@ use rico8_runtime::{
     audio::AudioHandle,
     cart::{self, Cart},
     fb::Framebuffer,
+    font,
     palette::col,
     project::{decode_assets, encode_assets, Project},
     vm::{GameVm, RuntimeError, UI_FPS},
@@ -305,10 +306,10 @@ impl Shell {
 
     fn boot(&mut self) {
         self.lines.push_back(ConsoleLine::Stripe);
-        self.say(&format!("rico-8 {VERSION}"), col::WHITE);
-        self.say("a fantasy console for rust", col::LIGHT_GREY);
+        self.say(&format!("RICO-8 {VERSION}"), col::WHITE);
+        self.say("A fantasy console for Rust", col::LIGHT_GREY);
         self.say("", col::WHITE);
-        self.say("type help for help", col::LIGHT_GREY);
+        self.say("Type help for help", col::LIGHT_GREY);
         self.say("", col::WHITE);
     }
 
@@ -498,7 +499,7 @@ impl Shell {
         // selection or move once the editor regains focus.
         self.map_ed.cancel_drag();
         if self.loaded_none() {
-            self.say("no cart loaded. try: new mygame", col::RED);
+            self.say("No cart loaded. Try: new mygame", col::RED);
             self.mode = Mode::Console;
             return;
         }
@@ -661,7 +662,7 @@ impl Shell {
                 self.want_exit = true;
                 Ok(())
             }
-            other => Err(anyhow!("syntax error: {other}\ntype help for help")),
+            other => Err(anyhow!("Syntax error: {other}\nType help for help")),
         };
         if let Err(e) = result {
             self.say(&e.to_string(), col::RED);
@@ -674,17 +675,17 @@ impl Shell {
             return;
         }
         for (c, d) in [
-            ("new <name>", "create a project"),
-            ("load <dir|cart.png>", "load a cart"),
-            ("reload", "re-read from disk, drop edits"),
-            ("save", "save project to disk"),
-            ("run", "build + run (esc stops)"),
-            ("export <f.png|f.html>", "export cart (png or web)"),
-            ("import <f.png> <dir>", "cart -> project"),
-            ("import-pico8 <f> [dir]", "pico-8 cart -> project"),
-            ("info", "cart metadata"),
-            ("title/author <text>", "set metadata"),
-            ("code/sprite/map/sfx/music", "editors (esc)"),
+            ("new <name>", "Create a project"),
+            ("load <dir|cart.png>", "Load a cart"),
+            ("reload", "Re-read from disk, drop edits"),
+            ("save", "Save project to disk"),
+            ("run", "Build + run (esc stops)"),
+            ("export <f.png|f.html>", "Export cart (PNG or web)"),
+            ("import <f.png> <dir>", "Cart -> project"),
+            ("import-pico8 <f> [dir]", "PICO-8 cart -> project"),
+            ("info", "Cart metadata"),
+            ("title/author <text>", "Set metadata"),
+            ("code/sprite/map/sfx/music", "Editors (esc)"),
             ("ls, cls, keys, reboot, exit", ""),
         ] {
             self.say(c, col::WHITE);
@@ -696,13 +697,13 @@ impl Shell {
 
     fn cmd_keys(&mut self) {
         for (k, d) in [
-            ("esc", "console <-> editor / stop"),
-            ("ctrl+r", "run cart"),
-            ("ctrl+s", "save + build check"),
-            ("alt+left/right", "switch editor"),
-            ("arrows + z/x", "game buttons"),
-            ("f1", "toggle fps meter"),
-            ("f6", "capture label (running)"),
+            ("esc", "Console <-> editor / stop"),
+            ("ctrl+r", "Run cart"),
+            ("ctrl+s", "Save + build check"),
+            ("alt+left/right", "Switch editor"),
+            ("arrows + z/x", "Game buttons"),
+            ("f1", "Toggle FPS meter"),
+            ("f6", "Capture label (running)"),
         ] {
             self.say(&format!("{k:14} {d}"), col::LIGHT_GREY);
         }
@@ -710,11 +711,11 @@ impl Shell {
 
     fn cmd_new(&mut self, args: &[&str]) -> Result<()> {
         let Some(name) = args.first() else {
-            bail!("usage: new <name>");
+            bail!("Usage: new <name>");
         };
         let dir = self.cwd.join(name);
         let project = Project::create(&dir, name, &self.sdk_path)?;
-        self.say(&format!("created ./{name}"), col::GREEN);
+        self.say(&format!("Created ./{name}"), col::GREEN);
         self.code_ed.set_text(&project.code);
         self.project_watch = Some(ProjectWatch::new(&project));
         self.cart_watch = None;
@@ -731,7 +732,7 @@ impl Shell {
 
     fn cmd_load(&mut self, args: &[&str]) -> Result<()> {
         let Some(path) = args.first() else {
-            bail!("usage: load <dir|cart.png>");
+            bail!("Usage: load <dir|cart.png>");
         };
         let path = self.cwd.join(path);
         if path.extension().is_some_and(|e| e == "png") {
@@ -741,20 +742,20 @@ impl Shell {
             self.code_ed.set_text(
                 cart.source
                     .as_deref()
-                    .unwrap_or("// no source in this cart"),
+                    .unwrap_or("// No source in this cart"),
             );
             self.project_watch = None;
             let cart_baseline = encode_assets(&cart.assets).unwrap_or_default();
             self.cart_watch = Some(CartWatch::new(path.clone(), cart_baseline));
             self.loaded = Loaded::Cart { cart, path };
-            self.say(&format!("loaded cart: {name}"), col::GREEN);
+            self.say(&format!("Loaded cart: {name}"), col::GREEN);
             if !has_src {
-                self.say("(playable cart, no source)", col::LIGHT_GREY);
+                self.say("(Playable cart, no source)", col::LIGHT_GREY);
             }
         } else {
             let project = Project::load(&path)?;
             self.code_ed.set_text(&project.code);
-            self.say(&format!("loaded {}", project.name), col::GREEN);
+            self.say(&format!("Loaded {}", project.name), col::GREEN);
             self.project_watch = Some(ProjectWatch::new(&project));
             self.cart_watch = None;
             self.loaded = Loaded::Project(project);
@@ -766,7 +767,7 @@ impl Shell {
     /// Resolves a conflict in favour of the external version.
     fn cmd_reload(&mut self) -> Result<()> {
         let path = match &self.loaded {
-            Loaded::None => bail!("nothing loaded"),
+            Loaded::None => bail!("Nothing loaded"),
             Loaded::Project(p) => p.dir.clone(),
             Loaded::Cart { path, .. } => path.clone(),
         };
@@ -776,14 +777,14 @@ impl Shell {
 
     fn cmd_save(&mut self, _args: &[&str]) -> Result<()> {
         let message = match &mut self.loaded {
-            Loaded::None => bail!("nothing to save"),
+            Loaded::None => bail!("Nothing to save"),
             Loaded::Project(p) => {
                 p.save()?;
-                "saved".to_string()
+                "Saved".to_string()
             }
             Loaded::Cart { cart, path } => {
                 cart::save_png(cart, path)?;
-                format!("saved {}", path.display())
+                format!("Saved {}", path.display())
             }
         };
         // After saving a project, rico8's own write must not look external.
@@ -808,7 +809,7 @@ impl Shell {
             self.toast(&msg, col::RED, 3.0);
             return;
         }
-        self.toast("saved", col::GREEN, 1.5);
+        self.toast("Saved", col::GREEN, 1.5);
         if self.build.is_none() {
             if let Loaded::Project(p) = &self.loaded {
                 let dir = p.dir.clone();
@@ -822,7 +823,7 @@ impl Shell {
         self.audio.stop_all();
         self.vm = None;
         match &self.loaded {
-            Loaded::None => self.say("no cart loaded", col::RED),
+            Loaded::None => self.say("No cart loaded", col::RED),
             Loaded::Cart { .. } => match self.start_vm_from_loaded() {
                 Ok(()) => {}
                 Err(e) => self.show_error("boot", &e.to_string()),
@@ -830,20 +831,20 @@ impl Shell {
             Loaded::Project(p) => {
                 let dir = p.dir.clone();
                 if self.build.is_some() {
-                    self.say("already compiling...", col::ORANGE);
-                    self.toast("already building...", col::ORANGE, 1.5);
+                    self.say("Already compiling...", col::ORANGE);
+                    self.toast("Already building...", col::ORANGE, 1.5);
                     return;
                 }
                 // Pick up external edits and flush in-console edits without
                 // clobbering either. Abort the run on an unresolved conflict.
                 if !self.reconcile_for_build() {
-                    self.say("disk & editor both changed", col::ORANGE);
-                    self.say("save or reload to resolve", col::ORANGE);
-                    self.toast("conflict: save or reload", col::ORANGE, 3.0);
+                    self.say("Disk & editor both changed", col::ORANGE);
+                    self.say("Save or reload to resolve", col::ORANGE);
+                    self.toast("Conflict: save or reload", col::ORANGE, 3.0);
                     return;
                 }
                 self.mode = Mode::Console;
-                self.say("compiling...", col::LIGHT_GREY);
+                self.say("Compiling...", col::LIGHT_GREY);
                 self.build = Some(spawn_build(&dir));
                 self.run_after_build = true;
             }
@@ -936,12 +937,12 @@ impl Shell {
 
     fn start_vm_from_loaded(&mut self) -> Result<()> {
         let (wasm, assets) = match &self.loaded {
-            Loaded::None => bail!("no cart loaded"),
+            Loaded::None => bail!("No cart loaded"),
             Loaded::Cart { cart, .. } => (cart.wasm.clone(), cart.assets.clone()),
             Loaded::Project(p) => {
                 let path = p.wasm_path();
                 let wasm = std::fs::read(&path)
-                    .map_err(|_| anyhow!("cart not built yet ({})", path.display()))?;
+                    .map_err(|_| anyhow!("Cart not built yet ({})", path.display()))?;
                 self.wasm_mtime = std::fs::metadata(&path).and_then(|m| m.modified()).ok();
                 (wasm, p.assets.clone())
             }
@@ -969,20 +970,20 @@ impl Shell {
         if file.ends_with(".html") {
             // Web export: one self-contained playable page.
             let cart = self.make_cart(false)?;
-            self.say("exporting for web...", col::LIGHT_GREY);
+            self.say("Exporting for web...", col::LIGHT_GREY);
             let web_dir = crate::webexport::web_crate_dir(&self.sdk_path);
             crate::webexport::export_html(&cart, &out, &web_dir)?;
         } else {
             let cart = self.make_cart(include_source)?;
             cart::save_png(&cart, &out)?;
         }
-        self.say(&format!("exported {file}"), col::GREEN);
+        self.say(&format!("Exported {file}"), col::GREEN);
         Ok(())
     }
 
     fn make_cart(&self, include_source: bool) -> Result<Cart> {
         match &self.loaded {
-            Loaded::None => bail!("no cart loaded"),
+            Loaded::None => bail!("No cart loaded"),
             Loaded::Cart { cart, .. } => Ok(Cart {
                 wasm: cart.wasm.clone(),
                 assets: cart.assets.clone(),
@@ -994,7 +995,7 @@ impl Shell {
             }),
             Loaded::Project(p) => {
                 let wasm = std::fs::read(p.wasm_path())
-                    .map_err(|_| anyhow!("cart not built yet. type run first"))?;
+                    .map_err(|_| anyhow!("Cart not built yet. Type run first"))?;
                 Ok(Cart {
                     wasm,
                     assets: p.assets.clone(),
@@ -1006,18 +1007,18 @@ impl Shell {
 
     fn cmd_import(&mut self, args: &[&str]) -> Result<()> {
         let (Some(png), Some(dir)) = (args.first(), args.get(1)) else {
-            bail!("usage: import <cart.png> <dir>");
+            bail!("Usage: import <cart.png> <dir>");
         };
         let cart = cart::load_png(&self.cwd.join(png))?;
         let Some(source) = &cart.source else {
-            bail!("cart has no source (playable-only)");
+            bail!("Cart has no source (playable-only)");
         };
         let dir = self.cwd.join(dir);
         let mut project = Project::create(&dir, &cart.assets.meta.name, &self.sdk_path)?;
         project.code = source.clone();
         project.assets = cart.assets.clone();
         project.save()?;
-        self.say(&format!("imported into {}", dir.display()), col::GREEN);
+        self.say(&format!("Imported into {}", dir.display()), col::GREEN);
         self.code_ed.set_text(&project.code);
         self.loaded = Loaded::Project(project);
         if let Loaded::Project(p) = &self.loaded {
@@ -1031,7 +1032,7 @@ impl Shell {
     /// map, sound and music transfer; the cart's Lua code is ignored.
     fn cmd_import_pico8(&mut self, args: &[&str]) -> Result<()> {
         let Some(src) = args.first() else {
-            bail!("usage: import-pico8 <cart.p8|cart.p8.png> [dir]");
+            bail!("Usage: import-pico8 <cart.p8|cart.p8.png> [dir]");
         };
         let src = self.cwd.join(src);
         // The destination defaults to the cart's name when omitted.
@@ -1041,7 +1042,7 @@ impl Shell {
         };
         let project = rico8_runtime::pico8::import_project(&src, &dir, &self.sdk_path)?;
         self.say(
-            &format!("imported assets into {}", dir.display()),
+            &format!("Imported assets into {}", dir.display()),
             col::GREEN,
         );
         self.code_ed.set_text(&project.code);
@@ -1055,7 +1056,7 @@ impl Shell {
 
     fn cmd_info(&mut self) {
         match self.assets() {
-            None => self.say("no cart loaded", col::RED),
+            None => self.say("No cart loaded", col::RED),
             Some(a) => {
                 let (name, author, version) = (
                     a.meta.name.clone(),
@@ -1063,19 +1064,19 @@ impl Shell {
                     a.meta.version.clone(),
                 );
                 let label = if a.label.is_some() {
-                    "captured"
+                    "Captured"
                 } else {
-                    "default"
+                    "Default"
                 };
                 let kind = match &self.loaded {
-                    Loaded::Project(p) => format!("project {}", p.dir.display()),
-                    Loaded::Cart { path, .. } => format!("cart {}", path.display()),
+                    Loaded::Project(p) => format!("Project {}", p.dir.display()),
+                    Loaded::Cart { path, .. } => format!("Cart {}", path.display()),
                     Loaded::None => unreachable!(),
                 };
-                self.say(&format!("title:   {name}"), col::WHITE);
-                self.say(&format!("author:  {author}"), col::WHITE);
-                self.say(&format!("version: {version}"), col::WHITE);
-                self.say(&format!("label:   {label}"), col::LIGHT_GREY);
+                self.say(&format!("Title:   {name}"), col::WHITE);
+                self.say(&format!("Author:  {author}"), col::WHITE);
+                self.say(&format!("Version: {version}"), col::WHITE);
+                self.say(&format!("Label:   {label}"), col::LIGHT_GREY);
                 self.say(&kind, col::LIGHT_GREY);
             }
         }
@@ -1106,14 +1107,14 @@ impl Shell {
 
     fn cmd_meta(&mut self, args: &[&str], set: impl FnOnce(&mut Assets, String)) -> Result<()> {
         if args.is_empty() {
-            bail!("missing text");
+            bail!("Missing text");
         }
         let value = args.join(" ");
         match self.assets_mut() {
-            None => bail!("no cart loaded"),
+            None => bail!("No cart loaded"),
             Some(a) => {
                 set(a, value);
-                self.say("ok", col::GREEN);
+                self.say("OK", col::GREEN);
                 Ok(())
             }
         }
@@ -1127,7 +1128,7 @@ impl Shell {
         }
         // A brief on-screen camera flash, plus a console line for the record.
         self.capture_flash = CAPTURE_FLASH_FRAMES;
-        self.say("label captured", col::GREEN);
+        self.say("Label captured", col::GREEN);
     }
 
     fn stop_run(&mut self, message: &str) {
@@ -1142,7 +1143,7 @@ impl Shell {
     fn show_error(&mut self, phase: &str, message: &str) {
         self.stop_run("");
         self.say("", col::WHITE);
-        self.say(&format!("** error in {phase} **"), col::RED);
+        self.say(&format!("** Error in {phase} **"), col::RED);
         for line in message.lines().take(12) {
             self.say(line, col::ORANGE);
         }
@@ -1174,7 +1175,7 @@ impl Shell {
             if let Some(result) = job.poll() {
                 self.build = None;
                 if result.success {
-                    let msg = format!("build ok ({:.1}s)", result.duration.as_secs_f32());
+                    let msg = format!("Build ok ({:.1}s)", result.duration.as_secs_f32());
                     self.say(&msg, col::GREEN);
                     self.toast(&msg, col::GREEN, 2.0);
                     for w in &result.warnings {
@@ -1194,7 +1195,7 @@ impl Shell {
                         .filter(|l| l.starts_with("error"))
                         .count();
                     self.toast(
-                        &format!("build failed ({n} errors) - press esc"),
+                        &format!("Build failed ({n} errors) - press esc"),
                         col::RED,
                         5.0,
                     );
@@ -1300,7 +1301,7 @@ impl Shell {
                 // simply ready for the next run.
                 if self.mode == Mode::Run {
                     match self.start_vm_from_loaded() {
-                        Ok(()) => self.say("hot reloaded", col::GREEN),
+                        Ok(()) => self.say("Hot reloaded", col::GREEN),
                         Err(e) => self.show_error("reload", &e.to_string()),
                     }
                 }
@@ -1339,7 +1340,7 @@ impl Shell {
                     if let Loaded::Project(p) = &mut self.loaded {
                         p.assets = assets;
                     }
-                    self.say("assets reloaded from disk", col::GREEN);
+                    self.say("Assets reloaded from disk", col::GREEN);
                     if self.mode == Mode::Run {
                         if let Err(e) = self.start_vm_from_loaded() {
                             self.show_error("reload", &e.to_string());
@@ -1354,7 +1355,7 @@ impl Shell {
             },
             FileChange::Conflict => {
                 self.say("assets.rico8 changed on disk;", col::ORANGE);
-                self.say("you have unsaved edits", col::ORANGE);
+                self.say("You have unsaved edits", col::ORANGE);
             }
             FileChange::None => {}
         }
@@ -1370,7 +1371,7 @@ impl Shell {
             }
             FileChange::Conflict => {
                 self.say("src/lib.rs changed on disk;", col::ORANGE);
-                self.say("save or reload to resolve", col::ORANGE);
+                self.say("Save or reload to resolve", col::ORANGE);
             }
             FileChange::None => {}
         }
@@ -1383,8 +1384,8 @@ impl Shell {
                 Loaded::Project(p) => p.dir.clone(),
                 _ => return,
             };
-            self.say("source changed, rebuilding...", col::LIGHT_GREY);
-            self.toast("rebuilding...", col::LIGHT_GREY, 1.5);
+            self.say("Source changed, rebuilding...", col::LIGHT_GREY);
+            self.toast("Rebuilding...", col::LIGHT_GREY, 1.5);
             self.build = Some(spawn_build(&dir));
             // Re-run from the console or while already running; stay put if the
             // user is in an editor.
@@ -1426,7 +1427,7 @@ impl Shell {
                     new_cart
                         .source
                         .as_deref()
-                        .unwrap_or("// no source in this cart"),
+                        .unwrap_or("// No source in this cart"),
                 );
                 if let Some(w) = &mut self.cart_watch {
                     w.baseline = disk;
@@ -1435,7 +1436,7 @@ impl Shell {
                     cart: new_cart,
                     path,
                 };
-                self.say("cart reloaded from disk", col::GREEN);
+                self.say("Cart reloaded from disk", col::GREEN);
                 if self.mode == Mode::Run {
                     if let Err(e) = self.start_vm_from_loaded() {
                         self.show_error("reload", &e.to_string());
@@ -1445,8 +1446,8 @@ impl Shell {
             crate::watch::Reconcile::Conflict => {
                 // No latch: each new external write re-warns. The `reload`
                 // command (next task) takes the disk version to resolve this.
-                self.say("cart changed on disk;", col::ORANGE);
-                self.say("you have unsaved edits", col::ORANGE);
+                self.say("Cart changed on disk;", col::ORANGE);
+                self.say("You have unsaved edits", col::ORANGE);
             }
         }
     }
@@ -1545,7 +1546,7 @@ impl Shell {
     fn draw_toast(&mut self) {
         let msg = if self.build.is_some() {
             let dots = ".".repeat(1 + (self.frame as usize / 10) % 3);
-            Some((format!("building{dots}"), col::ORANGE))
+            Some((format!("Building{dots}"), col::ORANGE))
         } else {
             match &self.toast {
                 Some((text, color, expires)) if self.frame < *expires => {
@@ -1566,7 +1567,9 @@ impl Shell {
     fn draw_console(&mut self) {
         self.fb.reset_state();
         self.fb.cls(col::BLACK);
-        let rows = 20usize;
+        // Lines fit between the top margin and the bottom status line, scaled
+        // to the font's line height.
+        let rows = ((120 - 2) / font::GLYPH_H) as usize;
 
         // Gather visible lines: history tail + prompt line.
         let total = self.lines.len();
@@ -1585,21 +1588,22 @@ impl Shell {
                     }
                 }
             }
-            y += 6;
+            y += font::GLYPH_H;
         }
 
         // Prompt with blinking cursor (skipped while compiling).
         if self.build.is_some() {
             let dots = ".".repeat(1 + (self.frame as usize / 10) % 3);
             self.fb
-                .print(&format!("compiling{dots}"), 2, y, col::ORANGE);
+                .print(&format!("Compiling{dots}"), 2, y, col::ORANGE);
             return;
         }
         let prompt = format!("> {}", self.input);
         self.fb.print(&prompt, 2, y, PROMPT_COL);
         if (self.frame / 8).is_multiple_of(2) {
             let cx = 2 + (2 + self.cursor as i32) * 4;
-            self.fb.rectfill(cx, y, cx + 3, y + 4, col::RED);
+            self.fb
+                .rectfill(cx, y, cx + 3, y + font::GLYPH_H - 2, col::RED);
         }
     }
 }
@@ -1645,7 +1649,7 @@ mod tests {
         // Saved to disk, toast shown, build started.
         let code = std::fs::read_to_string(project_dir.join("src/lib.rs")).unwrap();
         assert!(code.starts_with("//x\n"), "edit was saved");
-        assert_eq!(shell.toast.as_ref().unwrap().0, "saved");
+        assert_eq!(shell.toast.as_ref().unwrap().0, "Saved");
         assert!(shell.build.is_some(), "background build spawned");
 
         // While building, the editor bottom bar shows progress.
@@ -1662,7 +1666,7 @@ mod tests {
         }
         assert!(shell.build.is_none(), "build finished in time");
         let (text, color, _) = shell.toast.as_ref().unwrap();
-        assert!(text.starts_with("build ok"), "got: {text}");
+        assert!(text.starts_with("Build ok"), "got: {text}");
         assert_eq!(*color, col::GREEN);
         assert!(
             shell.mode == Mode::Code,
@@ -1702,7 +1706,7 @@ mod tests {
             std::thread::sleep(std::time::Duration::from_millis(33));
         }
         let (text, color, _) = shell.toast.as_ref().unwrap();
-        assert!(text.starts_with("build failed"), "got: {text}");
+        assert!(text.starts_with("Build failed"), "got: {text}");
         assert_eq!(*color, col::RED);
         std::fs::remove_dir_all(&dir).unwrap();
     }

@@ -473,7 +473,7 @@ impl MapEditor {
 
     fn draw_status(&self, fb: &mut Framebuffer, assets: &Assets) {
         let text = if let Some((_, _, w, h)) = self.selection_in_progress() {
-            format!("sel {}x{}        b{:03} pg{}", w, h, self.brush, self.page)
+            format!("Sel {}x{}        b{:03} pg{}", w, h, self.brush, self.page)
         } else if let Some(tool) = self.tool_under_cursor() {
             tool_label(tool).to_string()
         } else {
@@ -653,12 +653,12 @@ fn sprite_origin(n: u32) -> (i32, i32) {
 /// The tool's display name and keyboard shortcut, shown in the status bar.
 fn tool_label(tool: Tool) -> &'static str {
     match tool {
-        Tool::Draw => "draw (d)",
-        Tool::Paste => "paste (t)",
-        Tool::Select => "select (s)",
-        Tool::Pan => "pan (h)",
-        Tool::Fill => "fill (f)",
-        Tool::Circle => "circle (c)",
+        Tool::Draw => "Draw (d)",
+        Tool::Paste => "Paste (t)",
+        Tool::Select => "Select (s)",
+        Tool::Pan => "Pan (h)",
+        Tool::Fill => "Fill (f)",
+        Tool::Circle => "Circle (c)",
     }
 }
 
@@ -996,7 +996,7 @@ mod tests {
         ed.tick(&hover, &mut a);
         assert_eq!(ed.tool, Tool::Draw, "hovering does not select the tool");
         assert_eq!(ed.tool_under_cursor(), Some(Tool::Select));
-        assert_eq!(tool_label(Tool::Select), "select (s)");
+        assert_eq!(tool_label(Tool::Select), "Select (s)");
     }
 
     #[test]

@@ -1,16 +1,17 @@
-//! The code editor: 31 columns of Rust in a 4x6 pixel font, with the
+//! The code editor: 31 columns of Rust in a 4x7 pixel font, with the
 //! classic immediate cursor feel. Not an IDE — a place to type games.
 
 use crate::{
     shell::{Key, Mods},
     ui::{self, Mouse},
 };
-use rico8_runtime::{fb::Framebuffer, palette::col};
+use rico8_runtime::{fb::Framebuffer, font, palette::col};
 
-/// Visible text geometry.
+/// Visible text geometry. The row count is derived from the font's line height
+/// so the text never overruns the status bar (the bottom 8 rows of the screen).
 const AREA_X: i32 = 1;
 const AREA_Y: i32 = 9;
-const ROWS: usize = 18;
+const ROWS: usize = ((120 - AREA_Y) / font::GLYPH_H) as usize;
 const COLS: usize = 31;
 
 /// Syntax colors, chosen from the fixed palette.
@@ -336,9 +337,9 @@ impl CodeEditor {
     pub fn tick(&mut self, mouse: &Mouse, code: &str) {
         self.set_text(code);
         self.frame += 1;
-        let in_area = mouse.y >= AREA_Y && mouse.y < AREA_Y + (ROWS as i32) * 6;
+        let in_area = mouse.y >= AREA_Y && mouse.y < AREA_Y + (ROWS as i32) * font::GLYPH_H;
         if (mouse.left_pressed || mouse.left) && in_area {
-            let l = (self.scroll_y as i32 + (mouse.y - AREA_Y) / 6).max(0) as usize;
+            let l = (self.scroll_y as i32 + (mouse.y - AREA_Y) / font::GLYPH_H).max(0) as usize;
             let c = (self.scroll_x as i32 + (mouse.x - AREA_X) / 4).max(0) as usize;
             if mouse.left_pressed {
                 self.anchor = None;
@@ -381,7 +382,7 @@ impl CodeEditor {
         for row in 0..ROWS {
             let li = self.scroll_y + row;
             let Some(line) = lines.get(li) else { break };
-            let y = AREA_Y + row as i32 * 6;
+            let y = AREA_Y + row as i32 * font::GLYPH_H;
 
             // Selection background.
             if let Some(((l0, c0), (l1, c1))) = sel {
@@ -398,7 +399,7 @@ impl CodeEditor {
                             AREA_X + s as i32 * 4,
                             y - 1,
                             (AREA_X + e as i32 * 4 - 1).min(127),
-                            y + 4,
+                            y + font::GLYPH_H - 2,
                             col::DARK_BLUE,
                         );
                     }
@@ -425,9 +426,9 @@ impl CodeEditor {
             if (0..ROWS as i32).contains(&cy) && (0..=COLS as i32).contains(&cx) {
                 fb.rectfill(
                     AREA_X + cx * 4,
-                    AREA_Y + cy * 6 - 1,
+                    AREA_Y + cy * font::GLYPH_H - 1,
                     AREA_X + cx * 4 + 3,
-                    AREA_Y + cy * 6 + 4,
+                    AREA_Y + cy * font::GLYPH_H + font::GLYPH_H - 2,
                     col::RED,
                 );
             }
@@ -436,7 +437,7 @@ impl CodeEditor {
         ui::status_bar(
             fb,
             &format!(
-                "line {}/{} col {}",
+                "Line {}/{} col {}",
                 self.line + 1,
                 lines.len(),
                 self.col + 1

@@ -101,7 +101,7 @@ pub struct RuntimeError {
 
 impl std::fmt::Display for RuntimeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "runtime error in {}:\n{}", self.phase, self.message)
+        write!(f, "Runtime error in {}:\n{}", self.phase, self.message)
     }
 }
 
@@ -158,7 +158,7 @@ impl GameVm {
         let mut config = Config::default();
         config.consume_fuel(true);
         let engine = Engine::new(&config);
-        let module = Module::new(&engine, wasm).map_err(|e| anyhow!("invalid cart wasm: {e}"))?;
+        let module = Module::new(&engine, wasm).map_err(|e| anyhow!("Invalid cart wasm: {e}"))?;
 
         audio.load(assets.sfx.clone(), assets.music.clone());
         let mut store = Store::new(&engine, HostState::new(assets, audio));
@@ -358,27 +358,27 @@ impl GameVm {
 
         store
             .set_fuel(FUEL_PER_CALL)
-            .map_err(|e| anyhow!("fuel setup: {e}"))?;
+            .map_err(|e| anyhow!("Fuel setup: {e}"))?;
         let instance = linker
             .instantiate_and_start(&mut store, &module)
             .map_err(|e| {
                 let s = e.to_string();
                 if s.contains("resource limiter denied") {
-                    anyhow!("cart needs more than 128K of memory to start")
+                    anyhow!("Cart needs more than 128K of memory to start")
                 } else {
-                    anyhow!("cart does not match the RICO-8 ABI: {e}")
+                    anyhow!("Cart does not match the RICO-8 ABI: {e}")
                 }
             })?;
 
         let init = instance
             .get_typed_func::<(), ()>(&store, "rico8_init")
-            .map_err(|e| anyhow!("cart is missing rico8_init: {e}"))?;
+            .map_err(|e| anyhow!("Cart is missing rico8_init: {e}"))?;
         let update = instance
             .get_typed_func::<(), ()>(&store, "rico8_update")
-            .map_err(|e| anyhow!("cart is missing rico8_update: {e}"))?;
+            .map_err(|e| anyhow!("Cart is missing rico8_update: {e}"))?;
         let draw = instance
             .get_typed_func::<(), ()>(&store, "rico8_draw")
-            .map_err(|e| anyhow!("cart is missing rico8_draw: {e}"))?;
+            .map_err(|e| anyhow!("Cart is missing rico8_draw: {e}"))?;
 
         let mut vm = Self {
             store,

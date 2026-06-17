@@ -43,9 +43,9 @@ impl Game for MapDemo {
         };
         gfx.map(0, 0, 0.0, 0.0, 32, 16, layers);
         gfx.camera(0.0, 0.0);
-        gfx.print("arrows scroll, x: layers", 4.0, 2.0, Color::WHITE);
+        gfx.print("Arrows scroll, X: layers", 4.0, 2.0, Color::WHITE);
         if self.solid_only {
-            gfx.print("solid tiles only", 4.0, 120.0, Color::ORANGE);
+            gfx.print("Solid tiles only", 4.0, 120.0, Color::ORANGE);
         }
     }
 }

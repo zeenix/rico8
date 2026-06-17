@@ -65,14 +65,13 @@ impl Game for Stress {
             let y = ((i * 13) % 128) as f32;
             gfx.rect_fill(x, y, 6.0, 6.0, Color::from_index((i % 15 + 1) as u8));
         }
-        gfx.print("STRESS", 2.0, 2.0, Color::WHITE);
+        gfx.print("Stress", 2.0, 2.0, Color::WHITE);
         let mut label = String::from("N=");
         push_int(&mut label, self.n);
         gfx.print(&label, 2.0, 10.0, Color::YELLOW);
-        // The 4x6 font has no lowercase glyphs, so on/off must not rely on
-        // letter case. Spell it out, and color it too.
+        // Spell on/off out and color it too, so state reads at a glance.
         gfx.print(
-            if self.mem_on { "MEM ON" } else { "MEM OFF" },
+            if self.mem_on { "Mem on" } else { "Mem off" },
             2.0,
             18.0,
             if self.mem_on {
@@ -82,7 +81,7 @@ impl Game for Stress {
             },
         );
         gfx.print(
-            if self.cpu_on { "CPU ON" } else { "CPU OFF" },
+            if self.cpu_on { "CPU on" } else { "CPU off" },
             2.0,
             26.0,
             if self.cpu_on {

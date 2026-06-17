@@ -84,9 +84,9 @@ pub fn draw_tab_bar(fb: &mut Framebuffer, active: Mode) {
     // The SFX/music editors draw their own top-left chrome (the pitch/tracker
     // mode buttons), so leave their title blank here.
     let title = match active {
-        Mode::Code => "code",
-        Mode::Sprite => "sprite",
-        Mode::Map => "map",
+        Mode::Code => "Code",
+        Mode::Sprite => "Sprite",
+        Mode::Map => "Map",
         _ => "",
     };
     fb.print(title, 2, 1, col::DARK_PURPLE);

@@ -48,7 +48,7 @@ impl Game for MyGame {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::DARK_BLUE);
-        gfx.print("hello, rico-8!", 36.0, 48.0, Color::WHITE);
+        gfx.print("Hello, RICO-8!", 36.0, 48.0, Color::WHITE);
         gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::PINK);
     }
 }
@@ -143,10 +143,11 @@ panic = "abort"
 
     /// Load an existing project directory.
     pub fn load(dir: &Path) -> Result<Self> {
-        let manifest = fs::read_to_string(dir.join("Cargo.toml"))
-            .with_context(|| format!("{} is not a rico8 project (no Cargo.toml)", dir.display()))?;
+        let manifest = fs::read_to_string(dir.join("Cargo.toml")).with_context(|| {
+            format!("{} is not a RICO-8 project (no Cargo.toml)", dir.display())
+        })?;
         let name = parse_crate_name(&manifest)
-            .ok_or_else(|| anyhow!("could not find package name in Cargo.toml"))?;
+            .ok_or_else(|| anyhow!("Could not find package name in Cargo.toml"))?;
         let code = fs::read_to_string(dir.join("src/lib.rs")).unwrap_or_default();
         let assets = match fs::read(dir.join("assets.rico8")) {
             Ok(bytes) => decode_assets(&bytes)?,
@@ -198,7 +199,7 @@ pub fn decode_assets(bytes: &[u8]) -> Result<Assets> {
         .ok_or_else(|| anyhow!("assets.rico8 header is truncated"))?;
     if version != ASSETS_VERSION {
         bail!(
-            "assets.rico8 is format version {version}, but this rico-8 needs \
+            "assets.rico8 is format version {version}, but this RICO-8 needs \
              version {ASSETS_VERSION}; recreate or re-import the cart"
         );
     }

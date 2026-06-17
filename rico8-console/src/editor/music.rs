@@ -175,7 +175,7 @@ impl MusicEditor {
         let steps = audio.channel_step();
 
         // --- Pattern strip ---
-        fb.print("pattern", 4, 13, col::LIGHT_GREY);
+        fb.print("Pattern", 4, 13, col::LIGHT_GREY);
         ui::arrow_l(fb, 35, 13, col::PINK);
         let first = self.first_pattern();
         for i in 0..5 {
@@ -247,7 +247,7 @@ impl MusicEditor {
             }
         }
 
-        ui::status_bar(fb, "spc play  pgup/dn pat  x ch");
+        ui::status_bar(fb, "Spc play  pgup/dn pat  x ch");
     }
 }
 

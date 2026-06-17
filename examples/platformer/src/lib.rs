@@ -96,7 +96,7 @@ impl Game for Platformer {
         // Pass the fractional position straight through; the host floors it.
         gfx.sprite_ext(SpriteId(frame), self.x, self.y, 1.0, 1.0, self.flip, false);
         gfx.camera(0.0, 0.0);
-        rico8::printf!(gfx, 2.0, 2.0, Color::YELLOW, "coins {}", self.coins);
+        rico8::printf!(gfx, 2.0, 2.0, Color::YELLOW, "Coins {}", self.coins);
     }
 }
 

@@ -40,7 +40,7 @@ impl Game for SpriteMove {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::DARK_BLUE);
-        gfx.print("arrows to walk", 36.0, 4.0, Color::LIGHT_GREY);
+        gfx.print("Arrows to walk", 36.0, 4.0, Color::LIGHT_GREY);
         // Sprites 1 and 2 are the two walk frames.
         let frame = if self.walking && (self.frame / 4) % 2 == 0 {
             2

@@ -67,8 +67,8 @@ impl Game for Cart {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::BLACK);
-        gfx.print("imported from pico-8", 12.0, 54.0, Color::WHITE);
-        gfx.print("write your game here", 16.0, 64.0, Color::LIGHT_GREY);
+        gfx.print("Imported from PICO-8", 12.0, 54.0, Color::WHITE);
+        gfx.print("Write your game here", 16.0, 64.0, Color::LIGHT_GREY);
     }
 }
 
@@ -88,9 +88,9 @@ pub fn parse_bytes(bytes: &[u8]) -> Result<Assets> {
         parse_png(bytes)
     } else {
         let text = std::str::from_utf8(bytes)
-            .map_err(|_| anyhow!("not a pico-8 cartridge (neither a png nor utf-8 .p8 text)"))?;
+            .map_err(|_| anyhow!("Not a PICO-8 cartridge (neither a PNG nor UTF-8 .p8 text)"))?;
         if !(text.contains("__gfx__") || text.contains("__lua__") || text.starts_with("pico-8")) {
-            bail!("not a pico-8 cartridge (missing the pico-8 header and sections)");
+            bail!("Not a PICO-8 cartridge (missing the PICO-8 header and sections)");
         }
         parse_text(text)
     }
@@ -335,14 +335,14 @@ fn parse_png(bytes: &[u8]) -> Result<Assets> {
 fn rom_from_png(bytes: &[u8]) -> Result<Vec<u8>> {
     let (w, h, rgba) = decode_png_rgba(bytes)?;
     if w != PICO8_PNG_W || h != PICO8_PNG_H {
-        bail!("not a pico-8 cart png (expected {PICO8_PNG_W}x{PICO8_PNG_H}, got {w}x{h})");
+        bail!("Not a PICO-8 cart PNG (expected {PICO8_PNG_W}x{PICO8_PNG_H}, got {w}x{h})");
     }
     let mut rom: Vec<u8> = rgba
         .chunks_exact(4)
         .map(|p| ((p[3] & 3) << 6) | ((p[0] & 3) << 4) | ((p[1] & 3) << 2) | (p[2] & 3))
         .collect();
     if rom.len() < ROM_LEN {
-        bail!("pico-8 cart png is too small to hold a rom");
+        bail!("PICO-8 cart PNG is too small to hold a ROM");
     }
     rom.truncate(ROM_LEN);
     Ok(rom)
@@ -724,7 +724,7 @@ mod tests {
         assert_eq!(project.name, "ported");
         assert_eq!(project.assets.meta.name, "celeste");
         assert_eq!(project.assets.sprites.get(2, 0), 0xa);
-        assert!(project.code.contains("imported from pico-8"));
+        assert!(project.code.contains("Imported from PICO-8"));
         // Only assets are imported; no Lua is preserved.
         assert!(!dir.join("pico8.lua").exists());
 
