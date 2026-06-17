@@ -119,6 +119,25 @@ bitflag_enum! {
     }
 }
 
+impl Button {
+    /// `Left` and `Up` held together, as a set — `ctx.buttons_down().contains(Button::UP_LEFT)`.
+    pub const UP_LEFT: BitFlags<Button> =
+        // SAFETY: `Left` and `Up` are real `Button` flags, so the combined bits are valid.
+        unsafe { BitFlags::from_bits_unchecked(Button::Left as u8 | Button::Up as u8) };
+    /// `Right` and `Up` held together.
+    pub const UP_RIGHT: BitFlags<Button> =
+        // SAFETY: `Right` and `Up` are real `Button` flags.
+        unsafe { BitFlags::from_bits_unchecked(Button::Right as u8 | Button::Up as u8) };
+    /// `Left` and `Down` held together.
+    pub const DOWN_LEFT: BitFlags<Button> =
+        // SAFETY: `Left` and `Down` are real `Button` flags.
+        unsafe { BitFlags::from_bits_unchecked(Button::Left as u8 | Button::Down as u8) };
+    /// `Right` and `Down` held together.
+    pub const DOWN_RIGHT: BitFlags<Button> =
+        // SAFETY: `Right` and `Down` are real `Button` flags.
+        unsafe { BitFlags::from_bits_unchecked(Button::Right as u8 | Button::Down as u8) };
+}
+
 /// The ABI button index (`0..=5`) for a [`Button`] flag.
 const fn button_index(b: Button) -> u32 {
     (b as u8).trailing_zeros()
@@ -553,6 +572,22 @@ mod tests {
         assert!(mask.contains(Button::Down));
         assert!(mask.contains(Button::X));
         assert!(!mask.contains(Button::Right));
+    }
+
+    #[test]
+    fn diagonal_button_constants() {
+        assert_eq!(Button::UP_LEFT, Button::Left | Button::Up);
+        assert!(Button::UP_LEFT.contains(Button::Left));
+        assert!(Button::UP_LEFT.contains(Button::Up));
+        assert!(!Button::UP_LEFT.contains(Button::Right));
+        // The four diagonals are distinct sets.
+        for (a, b) in [
+            (Button::UP_LEFT, Button::UP_RIGHT),
+            (Button::UP_LEFT, Button::DOWN_LEFT),
+            (Button::DOWN_RIGHT, Button::UP_LEFT),
+        ] {
+            assert_ne!(a, b);
+        }
     }
 
     #[test]

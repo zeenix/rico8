@@ -38,6 +38,25 @@ where
         }
     }
 
+    /// A set from raw bits, without checking they are valid flags of `T`.
+    ///
+    /// `const`, for predefined combinations known at compile time (e.g. the
+    /// diagonal button pairs). Prefer [`from_bits`](Self::from_bits) whenever
+    /// the bits are not statically known to be valid.
+    ///
+    /// # Safety
+    ///
+    /// `bits` must contain only valid flag bits of `T`, that is
+    /// `bits & !T::ALL_BITS == 0`. The check is skipped, so any other bit
+    /// yields a set whose bits do not all name a real flag — the invariant the
+    /// rest of the type is written against.
+    pub(crate) const unsafe fn from_bits_unchecked(bits: u8) -> Self {
+        Self {
+            bits,
+            _marker: PhantomData,
+        }
+    }
+
     /// A set from raw bits, or [`UnknownBits`] if any bit is not a valid flag.
     ///
     /// An unrecognized bit is reported rather than silently dropped: it means
