@@ -18,6 +18,27 @@ colors — stay `i32`/`u32`. Colors are palette indices `0..16` (masked with
 `0x0f`).
 Out-of-range coordinates are safe everywhere: draws clip, reads return 0.
 
+Pass full-precision positions straight through — there's no need to
+pre-snap with the PICO-8 `flr(x) + 0.5` idiom. RICO-8 floors the camera
+when you set it and subtracts it as a whole-pixel integer, so a draw lands
+at `floor(world) − floor(camera)`. PICO-8 instead keeps a fractional camera
+and rasterizes `flr(world − camera)`: there an object's own fraction and
+the camera's fraction interact, so as either moves an object's rounding can
+flip by a pixel while its neighbours don't — two rigidly-spaced sprites
+drift a pixel apart and back. That is the "cobblestone" shimmer; `flr(x) +
+0.5` papers over it by giving every object the *same* fraction (0.5) so
+they all flip together.
+
+RICO-8's camera is already whole-pixel, which is the same coherence the
+`+ 0.5` trick buys — but global and automatic. The cross-term is gone: the
+on-screen distance between any two world objects is `floor(w₁) − floor(w₂)`,
+independent of the camera, so sprites and tiles shift together in whole
+pixels and never drift apart (diagonal movement included). The trade-off is
+deliberate: the camera moves in whole pixels, so there is no sub-pixel
+camera scroll. A cart that wants smooth scrolling and is willing to manage
+the snapping itself can keep the camera at `(0, 0)` and offset world
+positions by hand.
+
 (Why not narrower integer types for positions? WebAssembly function
 signatures only have `i32`/`i64`/`f32`/`f64` — there is no `i8`/`u8`/`i16`
 at the ABI boundary — and positions are deliberately unbounded, drawn
