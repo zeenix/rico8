@@ -7,7 +7,6 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-heapless = "0.9"
 rico8 = { path = "../../rico8", default-features = false }
 
 # Standalone workspace: example carts build independently of the
