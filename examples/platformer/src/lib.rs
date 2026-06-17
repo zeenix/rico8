@@ -3,8 +3,6 @@
 
 #![no_std]
 
-use heapless::format;
-
 use rico8::*;
 
 struct Platformer {
@@ -90,9 +88,7 @@ impl Game for Platformer {
         let cam = (self.x - 60.0).clamp(0.0, (32 * 8 - SCREEN_W) as f32);
         gfx.camera(cam, 0.0);
         gfx.map(0, 0, 0.0, 0.0, 32, 16, BitFlags::empty());
-        let frame = if !self.grounded {
-            2
-        } else if self.vx != 0.0 && (self.frame / 4) % 2 == 0 {
+        let frame = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
             2
         } else {
             1
@@ -100,12 +96,7 @@ impl Game for Platformer {
         // Pass the fractional position straight through; the host floors it.
         gfx.sprite_ext(SpriteId(frame), self.x, self.y, 1.0, 1.0, self.flip, false);
         gfx.camera(0.0, 0.0);
-        gfx.print(
-            &format!(16; "coins {}", self.coins).unwrap(),
-            2.0,
-            2.0,
-            Color::YELLOW,
-        );
+        rico8::printf!(gfx, 2.0, 2.0, Color::YELLOW, "coins {}", self.coins);
     }
 }
 
