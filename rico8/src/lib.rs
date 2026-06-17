@@ -163,7 +163,7 @@ pub struct Context {
 impl Context {
     /// Is a button currently held down?
     pub fn is_button_down(&self, b: Button) -> bool {
-        unsafe { ffi::btn(button_index(b)) != 0 }
+        unsafe { ffi::is_button_down(button_index(b)) != 0 }
     }
 
     /// Alias for [`Context::is_button_down`].
@@ -173,7 +173,7 @@ impl Context {
 
     /// Was a button just pressed? Repeats after a short delay while held.
     pub fn is_button_pressed(&self, b: Button) -> bool {
-        unsafe { ffi::btnp(button_index(b)) != 0 }
+        unsafe { ffi::is_button_pressed(button_index(b)) != 0 }
     }
 
     /// Alias for [`Context::is_button_pressed`].
@@ -183,19 +183,19 @@ impl Context {
 
     /// Every button currently held down, as a set.
     pub fn buttons_down(&self) -> BitFlags<Button> {
-        BitFlags::from_bits(unsafe { ffi::btn_mask() } as u8)
-            .expect("btn_mask returned an unknown button bit (rico8 host/SDK ABI mismatch)")
+        BitFlags::from_bits(unsafe { ffi::buttons_down() } as u8)
+            .expect("buttons_down returned an unknown button bit (rico8 host/SDK ABI mismatch)")
     }
 
     /// Every button that fired this frame (with repeat), as a set.
     pub fn buttons_pressed(&self) -> BitFlags<Button> {
-        BitFlags::from_bits(unsafe { ffi::btnp_mask() } as u8)
-            .expect("btnp_mask returned an unknown button bit (rico8 host/SDK ABI mismatch)")
+        BitFlags::from_bits(unsafe { ffi::buttons_pressed() } as u8)
+            .expect("buttons_pressed returned an unknown button bit (rico8 host/SDK ABI mismatch)")
     }
 
     /// The sprite number of a map tile (`SpriteId(0)` = empty).
     pub fn map_tile(&self, x: i32, y: i32) -> SpriteId {
-        SpriteId(unsafe { ffi::mget(x, y) } as u8)
+        SpriteId(unsafe { ffi::map_tile(x, y) } as u8)
     }
 
     /// Alias for [`Context::map_tile`].
@@ -206,7 +206,7 @@ impl Context {
     /// Write a map tile. Changes live in console RAM and are discarded on
     /// reload, like any self-respecting cartridge.
     pub fn set_map_tile(&mut self, x: i32, y: i32, sprite: SpriteId) {
-        unsafe { ffi::mset(x, y, sprite.0 as u32) }
+        unsafe { ffi::set_map_tile(x, y, sprite.0 as u32) }
     }
 
     /// Alias for [`Context::set_map_tile`].
@@ -216,8 +216,9 @@ impl Context {
 
     /// Every flag set on a sprite.
     pub fn sprite_flags(&self, sprite: SpriteId) -> BitFlags<SpriteFlag> {
-        BitFlags::from_bits(unsafe { ffi::fget(sprite.0 as u32) } as u8)
-            .expect("fget returned an unknown sprite-flag bit (rico8 host/SDK ABI mismatch)")
+        BitFlags::from_bits(unsafe { ffi::sprite_flags(sprite.0 as u32) } as u8).expect(
+            "sprite_flags returned an unknown sprite-flag bit (rico8 host/SDK ABI mismatch)",
+        )
     }
 
     /// Alias for [`Context::sprite_flags`].
@@ -232,7 +233,7 @@ impl Context {
 
     /// Overwrite a sprite's flags.
     pub fn set_sprite_flags(&mut self, sprite: SpriteId, flags: impl Into<BitFlags<SpriteFlag>>) {
-        unsafe { ffi::fset(sprite.0 as u32, flags.into().bits() as u32) }
+        unsafe { ffi::set_sprite_flags(sprite.0 as u32, flags.into().bits() as u32) }
     }
 
     /// Alias for [`Context::set_sprite_flags`].
@@ -301,7 +302,7 @@ pub struct Graphics {
 impl Graphics {
     /// Fill the screen with a color.
     pub fn clear(&mut self, color: Color) {
-        unsafe { ffi::cls(color.0 as i32) }
+        unsafe { ffi::clear(color.0 as i32) }
     }
 
     /// Alias for [`Graphics::clear`], for fingers that type `cls`.
@@ -326,7 +327,7 @@ impl Graphics {
 
     /// Set one pixel. The position is floored to a pixel.
     pub fn set_pixel(&mut self, x: f32, y: f32, color: Color) {
-        unsafe { ffi::pset(x, y, color.0 as i32) }
+        unsafe { ffi::set_pixel(x, y, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::set_pixel`].
@@ -336,7 +337,7 @@ impl Graphics {
 
     /// Read one pixel (screen space; out of bounds reads 0).
     pub fn pixel(&self, x: f32, y: f32) -> Color {
-        Color::from_index(unsafe { ffi::pget(x, y) } as u8)
+        Color::from_index(unsafe { ffi::pixel(x, y) } as u8)
     }
 
     /// Alias for [`Graphics::pixel`].
@@ -359,7 +360,7 @@ impl Graphics {
     /// Filled rectangle at `(x, y)` with size `w x h`.
     pub fn rect_fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
         if w > 0.0 && h > 0.0 {
-            unsafe { ffi::rectfill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
+            unsafe { ffi::rect_fill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
         }
     }
 
@@ -370,7 +371,7 @@ impl Graphics {
 
     /// Circle outline.
     pub fn circle(&mut self, x: f32, y: f32, r: f32, color: Color) {
-        unsafe { ffi::circ(x, y, r, color.0 as i32) }
+        unsafe { ffi::circle(x, y, r, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::circle`].
@@ -380,7 +381,7 @@ impl Graphics {
 
     /// Filled circle.
     pub fn circle_fill(&mut self, x: f32, y: f32, r: f32, color: Color) {
-        unsafe { ffi::circfill(x, y, r, color.0 as i32) }
+        unsafe { ffi::circle_fill(x, y, r, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::circle_fill`].
@@ -396,7 +397,7 @@ impl Graphics {
 
     /// Draw a sprite at `(x, y)`. Color 0 is transparent.
     pub fn sprite(&mut self, sprite: SpriteId, x: f32, y: f32) {
-        unsafe { ffi::spr(sprite.0 as u32, x, y, 1.0, 1.0, 0, 0) }
+        unsafe { ffi::sprite(sprite.0 as u32, x, y, 1.0, 1.0, 0, 0) }
     }
 
     /// Alias for [`Graphics::sprite`].
@@ -417,7 +418,7 @@ impl Graphics {
         flip_x: bool,
         flip_y: bool,
     ) {
-        unsafe { ffi::spr(sprite.0 as u32, x, y, w, h, flip_x as i32, flip_y as i32) }
+        unsafe { ffi::sprite(sprite.0 as u32, x, y, w, h, flip_x as i32, flip_y as i32) }
     }
 
     /// Draw a region of the map: `cel_w x cel_h` tiles starting at tile

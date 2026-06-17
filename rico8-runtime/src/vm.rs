@@ -165,7 +165,7 @@ impl GameVm {
         store.limiter(|state| &mut state.limits);
         let mut linker = <Linker<HostState>>::new(&engine);
 
-        link!(linker, "cls", |mut c: Caller<'_, HostState>, col: i32| {
+        link!(linker, "clear", |mut c: Caller<'_, HostState>, col: i32| {
             c.data_mut().fb.cls(col as u8)
         });
         link!(linker, "camera", |mut c: Caller<'_, HostState>,
@@ -180,15 +180,16 @@ impl GameVm {
                                h: f32| {
             c.data_mut().fb.clip(px(x), px(y), px(w), px(h))
         });
-        link!(linker, "pset", |mut c: Caller<'_, HostState>,
-                               x: f32,
-                               y: f32,
-                               col: i32| {
-            c.data_mut().fb.pset(px(x), px(y), col as u8)
-        });
-        link!(linker, "pget", |c: Caller<'_, HostState>,
-                               x: f32,
-                               y: f32|
+        link!(
+            linker,
+            "set_pixel",
+            |mut c: Caller<'_, HostState>, x: f32, y: f32, col: i32| {
+                c.data_mut().fb.pset(px(x), px(y), col as u8)
+            }
+        );
+        link!(linker, "pixel", |c: Caller<'_, HostState>,
+                                x: f32,
+                                y: f32|
          -> i32 {
             c.data().fb.pget(px(x), px(y)) as i32
         });
@@ -214,23 +215,23 @@ impl GameVm {
         });
         link!(
             linker,
-            "rectfill",
+            "rect_fill",
             |mut c: Caller<'_, HostState>, x0: f32, y0: f32, x1: f32, y1: f32, col: i32| {
                 c.data_mut()
                     .fb
                     .rectfill(px(x0), px(y0), px(x1), px(y1), col as u8)
             }
         );
-        link!(linker, "circ", |mut c: Caller<'_, HostState>,
-                               x: f32,
-                               y: f32,
-                               r: f32,
-                               col: i32| {
-            c.data_mut().fb.circ(px(x), px(y), px(r), col as u8)
-        });
         link!(
             linker,
-            "circfill",
+            "circle",
+            |mut c: Caller<'_, HostState>, x: f32, y: f32, r: f32, col: i32| {
+                c.data_mut().fb.circ(px(x), px(y), px(r), col as u8)
+            }
+        );
+        link!(
+            linker,
+            "circle_fill",
             |mut c: Caller<'_, HostState>, x: f32, y: f32, r: f32, col: i32| {
                 c.data_mut().fb.circfill(px(x), px(y), px(r), col as u8)
             }
@@ -245,29 +246,39 @@ impl GameVm {
             let s = read_guest_str(&c, ptr, len);
             c.data_mut().fb.print(&s, px(x), px(y), col as u8) as f32
         });
-        link!(linker, "btn", |c: Caller<'_, HostState>, b: u32| -> i32 {
+        link!(linker, "is_button_down", |c: Caller<'_, HostState>,
+                                         b: u32|
+         -> i32 {
             c.data().input.btn(b) as i32
         });
-        link!(linker, "btnp", |c: Caller<'_, HostState>, b: u32| -> i32 {
+        link!(linker, "is_button_pressed", |c: Caller<'_, HostState>,
+                                            b: u32|
+         -> i32 {
             c.data().input.btnp(b) as i32
         });
-        link!(linker, "btn_mask", |c: Caller<'_, HostState>| -> i32 {
+        link!(linker, "buttons_down", |c: Caller<'_, HostState>| -> i32 {
             c.data().input.btn_mask() as i32
         });
-        link!(linker, "btnp_mask", |c: Caller<'_, HostState>| -> i32 {
-            c.data().input.btnp_mask() as i32
-        });
-        link!(linker, "spr", |mut c: Caller<'_, HostState>,
-                              n: u32,
-                              x: f32,
-                              y: f32,
-                              w: f32,
-                              h: f32,
-                              flip_x: i32,
-                              flip_y: i32| {
-            let HostState { fb, sprites, .. } = c.data_mut();
-            fb.spr(sprites, n, px(x), px(y), w, h, flip_x != 0, flip_y != 0);
-        });
+        link!(
+            linker,
+            "buttons_pressed",
+            |c: Caller<'_, HostState>| -> i32 { c.data().input.btnp_mask() as i32 }
+        );
+        link!(
+            linker,
+            "sprite",
+            |mut c: Caller<'_, HostState>,
+             n: u32,
+             x: f32,
+             y: f32,
+             w: f32,
+             h: f32,
+             flip_x: i32,
+             flip_y: i32| {
+                let HostState { fb, sprites, .. } = c.data_mut();
+                fb.spr(sprites, n, px(x), px(y), w, h, flip_x != 0, flip_y != 0);
+            }
+        );
         link!(linker, "map", |mut c: Caller<'_, HostState>,
                               cel_x: i32,
                               cel_y: i32,
@@ -291,26 +302,32 @@ impl GameVm {
                 layers as u8,
             );
         });
-        link!(linker, "mget", |c: Caller<'_, HostState>,
-                               x: i32,
-                               y: i32|
+        link!(linker, "map_tile", |c: Caller<'_, HostState>,
+                                   x: i32,
+                                   y: i32|
          -> i32 {
             c.data().map.get(x, y) as i32
         });
-        link!(linker, "mset", |mut c: Caller<'_, HostState>,
-                               x: i32,
-                               y: i32,
-                               v: u32| {
-            c.data_mut().map.set(x, y, v as u8)
-        });
-        link!(linker, "fget", |c: Caller<'_, HostState>, n: u32| -> i32 {
+        link!(
+            linker,
+            "set_map_tile",
+            |mut c: Caller<'_, HostState>, x: i32, y: i32, v: u32| {
+                c.data_mut().map.set(x, y, v as u8)
+            }
+        );
+        link!(linker, "sprite_flags", |c: Caller<'_, HostState>,
+                                       n: u32|
+         -> i32 {
             c.data().sprites.flags(n) as i32
         });
-        link!(linker, "fset", |mut c: Caller<'_, HostState>,
-                               n: u32,
-                               flags: u32| {
-            c.data_mut().sprites.flags[(n as usize) % crate::assets::SPRITE_COUNT] = flags as u8;
-        });
+        link!(
+            linker,
+            "set_sprite_flags",
+            |mut c: Caller<'_, HostState>, n: u32, flags: u32| {
+                c.data_mut().sprites.flags[(n as usize) % crate::assets::SPRITE_COUNT] =
+                    flags as u8;
+            }
+        );
         link!(linker, "sfx", |c: Caller<'_, HostState>,
                               n: i32,
                               channel: i32| {
@@ -450,10 +467,10 @@ mod tests {
     /// A minimal hand-written cart exercising the ABI from WAT.
     const TEST_CART: &str = r#"
         (module
-          (import "rico8" "cls" (func $cls (param i32)))
-          (import "rico8" "pset" (func $pset (param f32 f32 i32)))
-          (import "rico8" "pget" (func $pget (param f32 f32) (result i32)))
-          (import "rico8" "btn" (func $btn (param i32) (result i32)))
+          (import "rico8" "clear" (func $cls (param i32)))
+          (import "rico8" "set_pixel" (func $pset (param f32 f32 i32)))
+          (import "rico8" "pixel" (func $pget (param f32 f32) (result i32)))
+          (import "rico8" "is_button_down" (func $btn (param i32) (result i32)))
           (import "rico8" "print" (func $print (param i32 i32 f32 f32 i32) (result f32)))
           (import "rico8" "log" (func $log (param i32 i32)))
           (memory (export "memory") 1)
@@ -553,14 +570,18 @@ mod tests {
 
         vm.call_update().unwrap();
         vm.call_draw().unwrap();
-        assert_eq!(vm.state().fb.pget(5, 7), 8, "pset through ABI");
+        assert_eq!(vm.state().fb.pget(5, 7), 8, "set_pixel through ABI");
         assert_eq!(vm.state().fb.pget(0, 0), 7, "print drew a glyph pixel");
 
         // Hold right; update should move the pixel.
         vm.state_mut().input.set_button(1, true);
         vm.call_update().unwrap();
         vm.call_draw().unwrap();
-        assert_eq!(vm.state().fb.pget(6, 7), 8, "btn(right) moved pixel");
+        assert_eq!(
+            vm.state().fb.pget(6, 7),
+            8,
+            "is_button_down(right) moved pixel"
+        );
     }
 
     #[test]

@@ -11,7 +11,7 @@ people working on the console itself, alternate SDKs, or curiosity.
 integer.** Coordinates (`x`/`y`), extents (`w`/`h`, radius) and the camera
 are `f32`: the host **floors** each to a pixel at draw time, so a cart can
 hold sub-pixel state (smooth motion, no shimmer crossing `x = 0`) without
-rounding itself. `spr`'s `w`/`h` are also `f32` — they measure sprite cells
+rounding itself. `sprite`'s `w`/`h` are also `f32` — they measure sprite cells
 and may be fractional (`w = 0.5` draws a 4-pixel slice). Indices and counts
 — sprite/tile numbers, map cel coordinates, flags, buttons, channels,
 colors — stay `i32`/`u32`. Colors are palette indices `0..16` (masked with
@@ -54,16 +54,16 @@ omits it still runs.
 
 | function | signature | notes |
 | --- | --- | --- |
-| `cls` | `(color: i32)` | fill the screen |
+| `clear` | `(color: i32)` | fill the screen |
 | `camera` | `(x: f32, y: f32)` | offset subsequent draws by `(-x, -y)`; floored |
 | `clip` | `(x, y, w, h: f32)` | restrict drawing; `clip(0,0,128,128)` resets |
-| `pset` | `(x, y: f32, color: i32)` | set one pixel |
-| `pget` | `(x, y: f32) -> i32` | read one pixel (screen space) |
+| `set_pixel` | `(x, y: f32, color: i32)` | set one pixel |
+| `pixel` | `(x, y: f32) -> i32` | read one pixel (screen space) |
 | `line` | `(x0, y0, x1, y1: f32, color: i32)` | inclusive endpoints |
 | `rect` | `(x0, y0, x1, y1: f32, color: i32)` | outline, inclusive corners |
-| `rectfill` | `(x0, y0, x1, y1: f32, color: i32)` | filled |
-| `circ` | `(x, y, r: f32, color: i32)` | outline |
-| `circfill` | `(x, y, r: f32, color: i32)` | filled |
+| `rect_fill` | `(x0, y0, x1, y1: f32, color: i32)` | filled |
+| `circle` | `(x, y, r: f32, color: i32)` | outline |
+| `circle_fill` | `(x, y, r: f32, color: i32)` | filled |
 | `print` | `(ptr: u32, len: u32, x, y: f32, color: i32) -> f32` | UTF-8 text from guest memory; returns the x position after the last glyph |
 
 Every `f32` coordinate/extent is floored to a pixel by the host at draw
@@ -73,21 +73,21 @@ time (`floor`, not truncation, so motion stays even across `x = 0`).
 
 | function | signature | notes |
 | --- | --- | --- |
-| `spr` | `(n: u32, x, y: f32, w, h: f32, flip_x, flip_y: i32)` | draw a `w x h`-sprite block (fractional `w`/`h` draw a partial slice); color 0 is transparent |
+| `sprite` | `(n: u32, x, y: f32, w, h: f32, flip_x, flip_y: i32)` | draw a `w x h`-sprite block (fractional `w`/`h` draw a partial slice); color 0 is transparent |
 | `map` | `(cel_x, cel_y: i32, sx, sy: f32, cel_w, cel_h: i32, layers: u32)` | draw map tiles; nonzero `layers` draws only tiles whose sprite flags intersect the mask |
-| `mget` | `(x, y: i32) -> i32` | read a map tile |
-| `mset` | `(x, y: i32, v: u32)` | write a map tile (RAM only; discarded on reload) |
-| `fget` | `(n: u32) -> i32` | sprite flag bitmask |
-| `fset` | `(n: u32, flags: u32)` | overwrite sprite flags |
+| `map_tile` | `(x, y: i32) -> i32` | read a map tile |
+| `set_map_tile` | `(x, y: i32, v: u32)` | write a map tile (RAM only; discarded on reload) |
+| `sprite_flags` | `(n: u32) -> i32` | sprite flag bitmask |
+| `set_sprite_flags` | `(n: u32, flags: u32)` | overwrite sprite flags |
 
 ### Input
 
 | function | signature | notes |
 | --- | --- | --- |
-| `btn` | `(b: u32) -> i32` | held? buttons: 0 left, 1 right, 2 up, 3 down, 4 O, 5 X |
-| `btnp` | `(b: u32) -> i32` | just pressed? repeats after 15 frames, then every 4 |
-| `btn_mask` | `() -> u32` | held buttons as a bitmask, bit i = button i |
-| `btnp_mask` | `() -> u32` | just-pressed buttons as a bitmask (same repeat as `btnp`) |
+| `is_button_down` | `(b: u32) -> i32` | held? buttons: 0 left, 1 right, 2 up, 3 down, 4 O, 5 X |
+| `is_button_pressed` | `(b: u32) -> i32` | just pressed? repeats after 15 frames, then every 4 |
+| `buttons_down` | `() -> u32` | held buttons as a bitmask, bit i = button i |
+| `buttons_pressed` | `() -> u32` | just-pressed buttons as a bitmask (same repeat as `is_button_pressed`) |
 
 ### Audio
 
@@ -107,9 +107,7 @@ time (`floor`, not truncation, so motion stays even across `x = 0`).
 
 ## Versioning
 
-The ABI is part of the cartridge format contract: carts embed the
-format version (see CART_FORMAT.md). Pre-release, the import set is still
-evolving: version 1 grows by addition (newer imports like `btn_mask` and
-`btnp_mask` are part of the current version-1 surface), and a cart only
-needs the imports it actually uses. A future stable release will freeze a
-version's import set and bump the version for any change.
+The ABI is part of the cartridge format contract: carts embed the format
+version (see CART_FORMAT.md). Version 1's import set grows by addition — a
+newer import like `buttons_down` is part of the version-1 surface — and a cart
+only needs the imports it actually uses.
