@@ -32,8 +32,20 @@ integer scale that fits the window, letterboxed, nearest-filtered.
 That is what makes the UI incapable of looking native: there is no
 other way to put pixels on screen.
 
+The framebuffer rasterizes at a device `scale`: 1 on headless targets and
+in tests; the largest integer magnification that fits the window on every
+play backend (console, SDL player, web). Carts still address a logical 128×128
+screen and every coordinate in the ABI (`spr`, `sspr`, `map`, `camera`, `clip`,
+`pget`/`pset`) remains in those logical units. Draw positions are floored in
+*device* space rather than logical space, so a cart that advances a sprite by a
+fraction of a pixel each frame gets smooth sub-pixel motion: the sprite moves
+one screen pixel at a time (each `scale×scale` block) rather than jumping by a
+whole logical pixel.
+
 This also makes the whole console testable headless: tests and the
 `verify`/`snap` subcommands drive the same framebuffer with no window.
+Because headless runs at `scale = 1`, logical and device coordinates coincide
+and existing test goldens remain valid unchanged.
 
 ## The SDK (`rico8`)
 
