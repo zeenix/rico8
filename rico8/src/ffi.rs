@@ -41,6 +41,9 @@ extern "C" {
     pub fn music(n: i32);
     pub fn time() -> f32;
     pub fn rnd() -> f32;
+    pub fn seed_rng(seed: u32);
+    pub fn sprite_pixel(x: i32, y: i32) -> i32;
+    pub fn set_sprite_pixel(x: i32, y: i32, color: i32);
     pub fn log(ptr: *const u8, len: u32);
     pub fn panic(ptr: *const u8, len: u32);
 }
@@ -105,6 +108,11 @@ mod stubs {
     pub unsafe fn rnd() -> f32 {
         0.0
     }
+    pub unsafe fn seed_rng(_seed: u32) {}
+    pub unsafe fn sprite_pixel(_x: i32, _y: i32) -> i32 {
+        0
+    }
+    pub unsafe fn set_sprite_pixel(_x: i32, _y: i32, _color: i32) {}
     pub unsafe fn log(_ptr: *const u8, _len: u32) {}
     pub unsafe fn panic(_ptr: *const u8, _len: u32) {}
 }

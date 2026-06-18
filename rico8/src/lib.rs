@@ -239,6 +239,26 @@ impl Context {
         self.set_map_tile(x, y, sprite)
     }
 
+    /// Read a pixel from the sprite sheet (out of bounds reads color 0).
+    pub fn sprite_pixel(&self, x: i32, y: i32) -> Color {
+        Color::from_index(unsafe { ffi::sprite_pixel(x, y) } as u8)
+    }
+
+    /// Alias for [`Context::sprite_pixel`].
+    pub fn sget(&self, x: i32, y: i32) -> Color {
+        self.sprite_pixel(x, y)
+    }
+
+    /// Write a pixel on the sprite sheet. RAM only, discarded on reload.
+    pub fn set_sprite_pixel(&mut self, x: i32, y: i32, color: Color) {
+        unsafe { ffi::set_sprite_pixel(x, y, color.0 as i32) }
+    }
+
+    /// Alias for [`Context::set_sprite_pixel`].
+    pub fn sset(&mut self, x: i32, y: i32, color: Color) {
+        self.set_sprite_pixel(x, y, color)
+    }
+
     /// Every flag set on a sprite.
     pub fn sprite_flags(&self, sprite: SpriteId) -> BitFlags<SpriteFlag> {
         BitFlags::from_bits(unsafe { ffi::sprite_flags(sprite.0 as u32) } as u8).expect(
@@ -311,6 +331,16 @@ impl Context {
         } else {
             (self.rnd(max as f32) as i32).min(max - 1)
         }
+    }
+
+    /// Seed the random sequence for deterministic runs.
+    pub fn seed_rng(&mut self, seed: u32) {
+        unsafe { ffi::seed_rng(seed) }
+    }
+
+    /// Alias for [`Context::seed_rng`].
+    pub fn srand(&mut self, seed: u32) {
+        self.seed_rng(seed)
     }
 
     /// Log a line to the RICO-8 console (visible after Esc). For
@@ -708,5 +738,17 @@ mod tests {
         logf!(ctx, "frame {}", 9);
         logf!(128; ctx, "{}-{}", 1, 2);
         logf!(ctx, "literal");
+    }
+
+    #[test]
+    fn context_sheet_and_rng_aliases() {
+        let mut ctx = Context { _private: () };
+        ctx.seed_rng(1);
+        ctx.srand(1);
+        ctx.set_sprite_pixel(0, 0, Color::RED);
+        ctx.sset(0, 0, Color::RED);
+        // Native stubs read 0.
+        assert_eq!(ctx.sprite_pixel(0, 0), Color::from_index(0));
+        assert_eq!(ctx.sprite_pixel(0, 0), ctx.sget(0, 0));
     }
 }
