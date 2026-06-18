@@ -32,6 +32,9 @@ pub struct Framebuffer {
     fill_pattern: u16,
     fill_secondary: u8,
     fill_transparent: bool,
+    pen_color: u8,
+    cursor_x: i32,
+    cursor_y: i32,
 }
 
 impl Default for Framebuffer {
@@ -53,6 +56,9 @@ impl Framebuffer {
             fill_pattern: 0,
             fill_secondary: 0,
             fill_transparent: false,
+            pen_color: 6,
+            cursor_x: 0,
+            cursor_y: 0,
         }
     }
 
@@ -100,6 +106,9 @@ impl Framebuffer {
         self.fill_pattern = 0;
         self.fill_secondary = 0;
         self.fill_transparent = false;
+        self.pen_color = 6;
+        self.cursor_x = 0;
+        self.cursor_y = 0;
     }
 
     /// Make a palette color transparent (or opaque) for sprite draws.
@@ -368,6 +377,26 @@ impl Framebuffer {
             cx += font::GLYPH_W;
         }
         cx
+    }
+
+    /// Set the persistent pen color used by `print_pen`.
+    pub fn set_pen_color(&mut self, color: u8) {
+        self.pen_color = color & 0x0f;
+    }
+
+    /// Set the persistent text cursor used by `print_pen`.
+    pub fn set_cursor(&mut self, x: i32, y: i32) {
+        self.cursor_x = x;
+        self.cursor_y = y;
+    }
+
+    /// Print at the cursor in the pen color, then advance the cursor one line
+    /// down. Returns the x position after the last glyph.
+    pub fn print_pen(&mut self, text: &str) -> i32 {
+        let (x, y) = (self.cursor_x, self.cursor_y);
+        let end = self.print(text, x, y, self.pen_color);
+        self.cursor_y = y + font::GLYPH_H;
+        end
     }
 
     /// Draw sprite `n` (and `w x h` neighbors) from a sheet. Color 0 is
@@ -705,5 +734,33 @@ mod tests {
             "flip puts the source-left pixel on the right"
         );
         assert_eq!(fb.pget(0, 0), 9);
+    }
+
+    #[test]
+    fn print_pen_matches_print_at_cursor() {
+        let mut a = Framebuffer::new();
+        let mut b = Framebuffer::new();
+        a.set_pen_color(9);
+        a.set_cursor(10, 20);
+        let end_a = a.print_pen("hi");
+        let end_b = b.print("hi", 10, 20, 9);
+        assert_eq!(end_a, end_b);
+        assert_eq!(
+            a.pixels(),
+            b.pixels(),
+            "print_pen draws identically to print"
+        );
+    }
+
+    #[test]
+    fn print_pen_advances_cursor_one_line() {
+        let mut fb = Framebuffer::new();
+        fb.set_cursor(5, 5);
+        fb.print_pen("x");
+        fb.print_pen("y");
+        let mut expect = Framebuffer::new();
+        expect.print("x", 5, 5, 6); // default pen color is 6
+        expect.print("y", 5, 5 + font::GLYPH_H, 6);
+        assert_eq!(fb.pixels(), expect.pixels());
     }
 }
