@@ -200,7 +200,7 @@ pub fn encode_screen_png(fb: &crate::fb::Framebuffer, scale: usize) -> Vec<u8> {
     ihdr.extend([8, 6, 0, 0, 0]);
     write_chunk(&mut png, *b"IHDR", &ihdr);
 
-    let pixels = fb.pixels();
+    let pixels = fb.logical_pixels();
     let mut raw = Vec::with_capacity(h * (1 + w * 4));
     for y in 0..h {
         raw.push(0);

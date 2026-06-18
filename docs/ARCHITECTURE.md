@@ -38,9 +38,10 @@ play backend (console, SDL player, web). Carts still address a logical 128×128
 screen and every coordinate in the ABI (`spr`, `sspr`, `map`, `camera`, `clip`,
 `pget`/`pset`) remains in those logical units. Draw positions are floored in
 *device* space rather than logical space, so a cart that advances a sprite by a
-fraction of a pixel each frame gets smooth sub-pixel motion: the sprite moves
-one screen pixel at a time (each `scale×scale` block) rather than jumping by a
-whole logical pixel.
+fraction of a pixel each frame gets smooth sub-pixel motion: the sprite's position
+advances by a single device pixel — a fraction of a logical pixel — each step,
+rather than jumping a whole logical pixel at once, while its pixels stay chunky
+`scale×scale` blocks.
 
 This also makes the whole console testable headless: tests and the
 `verify`/`snap` subcommands drive the same framebuffer with no window.

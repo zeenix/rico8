@@ -98,8 +98,8 @@ impl Framebuffer {
         HEIGHT * self.scale
     }
 
-    /// Switch supersample scale, reallocating the device buffer. The caller must
-    /// redraw the frame afterwards (no content is preserved).
+    /// Switch the device scale, reallocating the device buffer when the scale changes.
+    /// Camera and clip are always reset, so the caller must redraw afterwards.
     pub fn set_scale(&mut self, scale: i32) {
         let scale = scale.max(1);
         if scale != self.scale {
