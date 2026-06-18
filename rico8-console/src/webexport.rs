@@ -199,7 +199,8 @@ document.getElementById("cartimg").src = "data:image/png;base64," + CART_B64;
 
 const canvas = document.getElementById("screen");
 const ctx2d = canvas.getContext("2d");
-const image = new ImageData(SCREEN, SCREEN);
+let dw = SCREEN, dh = SCREEN;
+let image = new ImageData(SCREEN, SCREEN);
 
 // Same physical keys as the desktop console.
 const KEYMAP = {
@@ -230,6 +231,12 @@ async function boot() {
     return;
   }
   fps = wasm.rico8_web_fps();
+  const scale = Math.max(1, Math.min(8, Math.round(
+      (canvas.clientWidth || 512) * (window.devicePixelRatio || 1) / SCREEN)));
+  wasm.rico8_web_set_scale(scale);
+  dw = wasm.rico8_web_fb_width(); dh = wasm.rico8_web_fb_height();
+  canvas.width = dw; canvas.height = dh;
+  image = new ImageData(dw, dh);
 
   addEventListener("keydown", (e) => key(e, 1));
   addEventListener("keyup", (e) => key(e, 0));
@@ -323,7 +330,7 @@ function frame(now) {
   }
   const ptr = wasm.rico8_web_fb_ptr();
   if (ptr !== 0) {
-    image.data.set(new Uint8Array(wasm.memory.buffer, ptr, SCREEN * SCREEN * 4));
+    image.data.set(new Uint8Array(wasm.memory.buffer, ptr, dw * dh * 4));
     ctx2d.putImageData(image, 0, 0);
   }
   pumpAudio();

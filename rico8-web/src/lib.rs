@@ -21,9 +21,12 @@
 //! rico8_web_error_ptr/len()            UTF-8 error text after a failure
 //! rico8_web_set_button(b, down)        buttons 0..6, like the ABI
 //! rico8_web_tick() -> 0|1              one logical frame; 1 = cart error
-//! rico8_web_fb_ptr() -> ptr            128*128*4 RGBA, valid after tick
+//! rico8_web_fb_ptr() -> ptr            dw*dh*4 RGBA, valid after tick
 //! rico8_web_audio_render(n) -> n       render mono f32 samples @ 44100
 //! rico8_web_audio_ptr() -> ptr         the rendered samples
+//! rico8_web_set_scale(s)               set device scale (>= 1); call after load
+//! rico8_web_fb_width() -> u32          framebuffer width in device pixels
+//! rico8_web_fb_height() -> u32         framebuffer height in device pixels
 //! ```
 
 use rico8_runtime::{
@@ -40,13 +43,12 @@ pub const SAMPLE_RATE: u32 = 44100;
 /// Maximum samples per `rico8_web_audio_render` call.
 pub const AUDIO_CHUNK_MAX: usize = 4096;
 
-const FB_BYTES: usize = (WIDTH * HEIGHT * 4) as usize;
-
 pub struct Player {
     vm: Option<GameVm>,
     audio: AudioHandle,
     rgba: Vec<u8>,
     audio_buf: Vec<f32>,
+    scale: i32,
     errored: bool,
 }
 
@@ -55,11 +57,13 @@ impl Player {
     pub fn load(png: &[u8]) -> Result<Player, String> {
         let cart = cart::decode(png).map_err(|e| e.to_string())?;
         let audio = AudioHandle::dummy();
+        let scale = 1;
         let mut player = Player {
             vm: None,
             audio: audio.clone(),
-            rgba: vec![0; FB_BYTES],
+            rgba: vec![0; (WIDTH * scale * HEIGHT * scale * 4) as usize],
             audio_buf: vec![0.0; AUDIO_CHUNK_MAX],
+            scale,
             errored: false,
         };
         match GameVm::load(&cart.wasm, &cart.assets, audio) {
@@ -69,6 +73,26 @@ impl Player {
             }
             Err(e) => Err(e.to_string()),
         }
+    }
+
+    /// Set the device scale; the page calls this after load based on canvas size.
+    pub fn set_scale(&mut self, scale: i32) {
+        let scale = scale.max(1);
+        self.scale = scale;
+        if let Some(vm) = &mut self.vm {
+            vm.state_mut().fb.set_scale(scale);
+        }
+        self.rgba = vec![0; (self.fb_width() * self.fb_height() * 4) as usize];
+    }
+
+    /// The framebuffer width in device pixels (`WIDTH * scale`).
+    pub fn fb_width(&self) -> i32 {
+        WIDTH * self.scale
+    }
+
+    /// The framebuffer height in device pixels (`HEIGHT * scale`).
+    pub fn fb_height(&self) -> i32 {
+        HEIGHT * self.scale
     }
 
     /// The cart's logical frame rate (30 or 60); 30 if no cart is loaded.
@@ -107,7 +131,7 @@ impl Player {
     fn fail(&mut self, message: &str) {
         self.errored = true;
         self.audio.stop_all();
-        error_screen(message).write_rgba(&mut self.rgba);
+        error_screen(message, self.scale).write_rgba(&mut self.rgba);
     }
 
     pub fn rgba(&self) -> &[u8] {
@@ -133,8 +157,8 @@ impl Player {
 }
 
 /// The shared error screen plus a web-specific footer hint.
-fn error_screen(message: &str) -> Framebuffer {
-    let mut fb = rico8_runtime::ui::error_screen(message, 1);
+fn error_screen(message: &str, scale: i32) -> Framebuffer {
+    let mut fb = rico8_runtime::ui::error_screen(message, scale);
     fb.print("press f5 to restart", 2, HEIGHT - 7, col::LIGHT_GREY);
     fb
 }
@@ -245,6 +269,32 @@ pub extern "C" fn rico8_web_audio_ptr() -> *const f32 {
     }
 }
 
+/// Set the device-pixel scale; call after a successful `rico8_web_load`.
+#[no_mangle]
+pub extern "C" fn rico8_web_set_scale(s: u32) {
+    if let Some(p) = get(&PLAYER) {
+        p.set_scale(s as i32);
+    }
+}
+
+/// The framebuffer width in device pixels; valid after `rico8_web_load`.
+#[no_mangle]
+pub extern "C" fn rico8_web_fb_width() -> u32 {
+    get(&PLAYER)
+        .as_ref()
+        .map(|p| p.fb_width() as u32)
+        .unwrap_or(WIDTH as u32)
+}
+
+/// The framebuffer height in device pixels; valid after `rico8_web_load`.
+#[no_mangle]
+pub extern "C" fn rico8_web_fb_height() -> u32 {
+    get(&PLAYER)
+        .as_ref()
+        .map(|p| p.fb_height() as u32)
+        .unwrap_or(HEIGHT as u32)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -329,5 +379,15 @@ mod tests {
         unsafe { std::ptr::copy_nonoverlapping(b"oops".as_ptr(), ptr, 4) };
         assert_eq!(rico8_web_load(), 1);
         assert!(rico8_web_error_len() > 0);
+    }
+
+    #[test]
+    fn set_scale_resizes_and_renders_sub_pixel() {
+        let png = test_cart_png(MOVER);
+        let mut p = Player::load(&png).unwrap();
+        p.set_scale(4);
+        assert_eq!(p.fb_width(), 128 * 4);
+        assert_eq!(p.rgba().len(), (128 * 4 * 128 * 4 * 4) as usize);
+        assert!(p.tick());
     }
 }
