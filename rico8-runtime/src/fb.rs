@@ -401,6 +401,39 @@ impl Framebuffer {
         }
     }
 
+    /// Draw a sheet rectangle `(sx,sy,sw,sh)` stretched into a screen rectangle
+    /// `(dx,dy,dw,dh)` with nearest-neighbor sampling. Honors per-color
+    /// transparency and the draw palette.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sspr(
+        &mut self,
+        sheet: &SpriteSheet,
+        sx: i32,
+        sy: i32,
+        sw: i32,
+        sh: i32,
+        dx: i32,
+        dy: i32,
+        dw: i32,
+        dh: i32,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
+        if sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 {
+            return;
+        }
+        for py in 0..dh {
+            for px in 0..dw {
+                let fx = if flip_x { dw - 1 - px } else { px };
+                let fy = if flip_y { dh - 1 - py } else { py };
+                let c = sheet.get(sx + fx * sw / dw, sy + fy * sh / dh);
+                if ((self.transparent >> c) & 1) == 0 {
+                    self.pset(dx + px, dy + py, c);
+                }
+            }
+        }
+    }
+
     /// Draw a region of the tile map. `layers` is a flag mask: when nonzero,
     /// only tiles whose flags intersect the mask are drawn. Tile 0 is empty.
     #[allow(clippy::too_many_arguments)]
@@ -634,5 +667,43 @@ mod tests {
         fb.set_fill_pattern(0, 0, false);
         fb.rectfill(0, 0, 3, 3, 7);
         assert_eq!(fb.pget(2, 2), 7);
+    }
+
+    #[test]
+    fn sspr_upscales_with_nearest_neighbor() {
+        let mut fb = Framebuffer::new();
+        let mut sheet = SpriteSheet::default();
+        sheet.set(0, 0, 8); // single red source pixel
+        fb.sspr(&sheet, 0, 0, 1, 1, 10, 10, 4, 4, false, false);
+        assert_eq!(fb.pget(10, 10), 8);
+        assert_eq!(
+            fb.pget(13, 13),
+            8,
+            "the whole 4x4 block is the source pixel"
+        );
+    }
+
+    #[test]
+    fn sspr_respects_transparency() {
+        let mut fb = Framebuffer::new();
+        let sheet = SpriteSheet::default(); // all color 0
+        fb.cls(3);
+        fb.sspr(&sheet, 0, 0, 2, 2, 0, 0, 4, 4, false, false);
+        assert_eq!(fb.pget(1, 1), 3, "color 0 is transparent by default");
+    }
+
+    #[test]
+    fn sspr_flips_horizontally() {
+        let mut fb = Framebuffer::new();
+        let mut sheet = SpriteSheet::default();
+        sheet.set(0, 0, 8);
+        sheet.set(1, 0, 9);
+        fb.sspr(&sheet, 0, 0, 2, 1, 0, 0, 2, 1, true, false);
+        assert_eq!(
+            fb.pget(1, 0),
+            8,
+            "flip puts the source-left pixel on the right"
+        );
+        assert_eq!(fb.pget(0, 0), 9);
     }
 }
