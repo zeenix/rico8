@@ -205,18 +205,24 @@ impl SpriteEditor {
             col::BLACK,
         );
         let (ox, oy) = self.sheet_origin();
-        for py in 0..8 {
-            for px in 0..8 {
-                let c = assets.sprites.get(ox + px, oy + py);
-                fb.rectfill(
-                    CANVAS.0 + px * 8,
-                    CANVAS.1 + py * 8,
-                    CANVAS.0 + px * 8 + 7,
-                    CANVAS.1 + py * 8 + 7,
-                    c,
-                );
-            }
-        }
+        // Magnify the 8x8 sprite onto the 64x64 canvas. The artist edits every
+        // pixel, so color 0 must show as black here rather than being treated as
+        // transparent for this blit.
+        fb.set_transparent_color(0, false);
+        fb.sspr(
+            &assets.sprites,
+            ox,
+            oy,
+            8,
+            8,
+            CANVAS.0,
+            CANVAS.1,
+            64,
+            64,
+            false,
+            false,
+        );
+        fb.reset_transparency();
 
         // Palette grid.
         for c in 0u8..16 {
