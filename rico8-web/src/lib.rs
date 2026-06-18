@@ -134,7 +134,7 @@ impl Player {
 
 /// The shared error screen plus a web-specific footer hint.
 fn error_screen(message: &str) -> Framebuffer {
-    let mut fb = rico8_runtime::ui::error_screen(message);
+    let mut fb = rico8_runtime::ui::error_screen(message, 1);
     fb.print("press f5 to restart", 2, HEIGHT - 7, col::LIGHT_GREY);
     fb
 }

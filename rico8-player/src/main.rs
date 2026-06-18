@@ -147,6 +147,24 @@ struct App {
     joy_start: Option<u8>,
     /// Run only this many frames, then exit (CI smoke mode).
     smoke: Option<u32>,
+    /// Device-pixel scale used for cart framebuffers (see `player_scale`).
+    scale: i32,
+}
+
+/// Device-pixel scale for the handheld canvas, capped to protect the RGB20S.
+///
+/// Reads `RICO8_MAX_SCALE` from the environment (default 3). Only the cheap
+/// block-fill path scales, not per-pixel logic, so 2–3 is usually fine on
+/// low-power handhelds. Scale 1 is always the minimum.
+fn player_scale(canvas: &sdl2::render::WindowCanvas) -> i32 {
+    let max = std::env::var("RICO8_MAX_SCALE")
+        .ok()
+        .and_then(|s| s.parse().ok())
+        .unwrap_or(3);
+    let (w, h) = canvas
+        .output_size()
+        .unwrap_or((WIDTH as u32, HEIGHT as u32));
+    ((w.min(h) as i32) / WIDTH).clamp(1, max)
 }
 
 impl App {
@@ -166,10 +184,14 @@ impl App {
             Ok(c) => c,
             Err(_) => window2.into_canvas().build().map_err(|e| e.to_string())?,
         };
-        // Square logical screen; SDL letterboxes and scales with the
-        // nearest-neighbor hint below.
+        // Square logical screen at the device scale; SDL letterboxes and
+        // scales with the nearest-neighbor hint below. A scale > 1 gives
+        // the cart framebuffer room for sub-pixel motion without zigzag.
         sdl2::hint::set("SDL_RENDER_SCALE_QUALITY", "0");
-        canvas.set_logical_size(WIDTH as u32, HEIGHT as u32).ok();
+        let scale = player_scale(&canvas);
+        canvas
+            .set_logical_size((WIDTH * scale) as u32, (HEIGHT * scale) as u32)
+            .ok();
 
         // Open every connected controller (the handheld's built-ins
         // enumerate as one). Extra mappings can be supplied for exotic
@@ -245,6 +267,7 @@ impl App {
             joy_select: env_button("RICO8_SELECT"),
             joy_start: env_button("RICO8_START"),
             smoke,
+            scale,
         })
     }
 
@@ -283,13 +306,15 @@ impl App {
         })
     }
 
-    fn present(&mut self, fb: &Framebuffer, rgba: &mut [u8]) -> Result<()> {
+    fn present(&mut self, fb: &Framebuffer, rgba: &mut Vec<u8>) -> Result<()> {
+        let (dw, dh) = (fb.device_width() as u32, fb.device_height() as u32);
+        rgba.resize((dw * dh * 4) as usize, 0);
         fb.write_rgba(rgba);
         let creator = self.canvas.texture_creator();
         let mut tex = creator
-            .create_texture_streaming(PixelFormatEnum::ABGR8888, WIDTH as u32, HEIGHT as u32)
+            .create_texture_streaming(PixelFormatEnum::ABGR8888, dw, dh)
             .map_err(|e| anyhow!("texture: {e}"))?;
-        tex.update(None, rgba, WIDTH as usize * 4)
+        tex.update(None, rgba, (dw * 4) as usize)
             .map_err(|e| anyhow!("texture update: {e}"))?;
         self.canvas.set_draw_color(sdl2::pixels::Color::BLACK);
         self.canvas.clear();
@@ -305,9 +330,9 @@ impl App {
     /// instead of silently bouncing to the picker.
     fn show_error(&mut self, message: &str) -> Result<Flow> {
         eprintln!("rico8-player: {}", message.replace('\n', ": "));
-        let mut fb = ui::error_screen(message);
+        let mut fb = ui::error_screen(message, self.scale);
         fb.print("select/b: back", 2, HEIGHT - 7, col::LIGHT_GREY);
-        let mut rgba = vec![0u8; WIDTH as usize * HEIGHT as usize * 4];
+        let mut rgba = Vec::new();
         self.audio.stop_all();
         let mut next = Instant::now();
         let mut shown = 0u32;
@@ -353,13 +378,18 @@ impl App {
             Ok(vm) => Some(vm),
             Err(e) => return self.show_error(&format!("boot failed\n{e}")),
         };
+        // Set the cart's framebuffer scale before the first frame so carts
+        // benefit from sub-pixel motion immediately on load.
+        if let Some(vm) = vm.as_mut() {
+            vm.state_mut().fb.set_scale(self.scale);
+        }
         // Carts run at their selected rate (30 or 60); the picker and error
         // screens stay at 30.
         let fps = vm.as_ref().map(GameVm::fps).unwrap_or(UI_FPS);
         let frame = frame_duration(fps);
         eprintln!("rico8-player: running {}", path.display());
         let mut error_fb: Option<Framebuffer> = None;
-        let mut rgba = vec![0u8; WIDTH as usize * HEIGHT as usize * 4];
+        let mut rgba = Vec::new();
         let mut next = Instant::now();
         let mut frames = 0u32;
         let mut select_held = false;
@@ -509,7 +539,7 @@ impl App {
             if let Some(v) = vm.as_mut() {
                 if let Err(e) = v.call_update().and_then(|()| v.call_draw()) {
                     eprintln!("rico8-player: runtime error: {e}");
-                    let mut fb = ui::error_screen(&e.to_string());
+                    let mut fb = ui::error_screen(&e.to_string(), self.scale);
                     fb.print("hold o+x to exit", 2, HEIGHT - 7, col::LIGHT_GREY);
                     error_fb = Some(fb);
                     self.audio.stop_all();
@@ -573,7 +603,7 @@ impl App {
     fn picker_loop(&mut self, dir: &Path, carts: &[PathBuf]) -> Result<Option<PathBuf>> {
         let mut sel = 0usize;
         let mut frame = 0u32;
-        let mut rgba = vec![0u8; WIDTH as usize * HEIGHT as usize * 4];
+        let mut rgba = Vec::new();
         let mut next = Instant::now();
         loop {
             for event in self.events.poll_iter() {

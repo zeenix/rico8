@@ -85,9 +85,13 @@ const CURSOR_OUTLINE: Icon = [
 /// The console's friendly runtime-error screen, shared by every
 /// frontend (desktop, web, handheld) so a crashed cart looks the same
 /// everywhere.
-pub fn error_screen(message: &str) -> Framebuffer {
+///
+/// `scale` is the device-pixel scale factor; pass `1` for the web player
+/// and the picker, pass the device scale for the SDL handheld player so the
+/// error screen fills the physical screen at the same resolution as carts.
+pub fn error_screen(message: &str, scale: i32) -> Framebuffer {
     use crate::fb::{HEIGHT, WIDTH};
-    let mut fb = Framebuffer::new();
+    let mut fb = Framebuffer::with_scale(scale);
     fb.cls(col::BLACK);
     fb.rectfill(0, 0, WIDTH - 1, 7, col::RED);
     fb.print("RICO-8", 2, 1, col::WHITE);
