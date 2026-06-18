@@ -258,6 +258,9 @@ pub struct Shell {
 
     /// Frames remaining of the camera-flash overlay shown after an F6 capture.
     capture_flash: u32,
+
+    /// Display magnification applied to the framebuffers (1 = logical 128²).
+    scale: i32,
 }
 
 const TEXT_COLS: usize = 31;
@@ -299,6 +302,7 @@ impl Shell {
             fps_t0: Instant::now(),
             fps_val: 0.0,
             capture_flash: 0,
+            scale: 1,
         };
         shell.boot();
         shell
@@ -1122,7 +1126,8 @@ impl Shell {
 
     fn capture_label(&mut self) {
         let Some(vm) = &self.vm else { return };
-        let pixels = vm.state().fb.pixels().to_vec();
+        // Use logical_pixels so the label is always 128² regardless of scale.
+        let pixels = vm.state().fb.logical_pixels();
         if let Some(a) = self.assets_mut() {
             a.label = Some(pixels);
         }
@@ -1151,6 +1156,13 @@ impl Shell {
 
     fn runtime_error(&mut self, e: RuntimeError) {
         self.show_error(e.phase, &e.message);
+    }
+
+    /// Set the display magnification. The scale is applied lazily to each
+    /// framebuffer before the next draw. The logical 128² coordinate space
+    /// for carts and the UI is unchanged.
+    pub fn set_scale(&mut self, scale: i32) {
+        self.scale = scale.max(1);
     }
 
     // -----------------------------------------------------------------
@@ -1220,6 +1232,9 @@ impl Shell {
                 if self.vm.is_some() {
                     let (logs, result) = {
                         let vm = self.vm.as_mut().unwrap();
+                        if vm.state().fb.scale() != self.scale {
+                            vm.state_mut().fb.set_scale(self.scale);
+                        }
                         let logs = std::mem::take(&mut vm.state_mut().logs);
                         let r = vm.call_update().and_then(|()| vm.call_draw());
                         (logs, r)
@@ -1472,6 +1487,10 @@ impl Shell {
 
     pub fn draw(&mut self) -> &Framebuffer {
         self.meter_fps();
+        // Keep the shell framebuffer's scale in sync before drawing into it.
+        if self.fb.scale() != self.scale {
+            self.fb.set_scale(self.scale);
+        }
         match self.mode {
             Mode::Run => {
                 if self.show_fps {

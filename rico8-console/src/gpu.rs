@@ -1,12 +1,18 @@
-//! GPU presentation: upload the 128x128 indexed framebuffer as an RGBA
-//! texture and blit it with nearest-neighbor filtering at the largest
-//! integer scale that fits, letterboxed in black. The GPU does nothing
-//! clever on purpose — every pixel is decided by the software rasterizer.
+//! GPU presentation: upload the framebuffer as an RGBA texture and blit it
+//! 1:1 (device pixels), letterboxed in black. At `scale > 1` the device
+//! buffer is `(128·scale)²` and is presented without further GPU scaling,
+//! giving smooth sub-pixel motion at the display's native resolution.
 
 use anyhow::{anyhow, Result};
 use rico8_runtime::fb::{Framebuffer, HEIGHT, WIDTH};
 use std::sync::Arc;
 use winit::window::Window;
+
+/// The largest integer that maps 128 logical pixels into `w × h` physical pixels.
+/// Returns at least 1.
+pub fn scale_for(w: u32, h: u32) -> i32 {
+    ((w / WIDTH as u32).min(h / HEIGHT as u32) as i32).max(1)
+}
 
 const SHADER: &str = r#"
 @group(0) @binding(0) var screen_tex: texture_2d<f32>;
@@ -61,8 +67,13 @@ pub struct Gpu {
     queue: wgpu::Queue,
     config: wgpu::SurfaceConfiguration,
     pipeline: wgpu::RenderPipeline,
+    bgl: wgpu::BindGroupLayout,
+    sampler: wgpu::Sampler,
     bind_group: wgpu::BindGroup,
     texture: wgpu::Texture,
+    /// Device dimensions of the current texture (`WIDTH * scale × HEIGHT * scale`).
+    tex_dw: u32,
+    tex_dh: u32,
     rgba: Vec<u8>,
     viewport: Viewport,
 }
@@ -103,30 +114,10 @@ impl Gpu {
         config.present_mode = wgpu::PresentMode::AutoVsync;
         surface.configure(&device, &config);
 
-        let texture = device.create_texture(&wgpu::TextureDescriptor {
-            label: Some("rico8 screen"),
-            size: wgpu::Extent3d {
-                width: WIDTH as u32,
-                height: HEIGHT as u32,
-                depth_or_array_layers: 1,
-            },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: wgpu::TextureFormat::Rgba8UnormSrgb,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let sampler = device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Nearest,
             min_filter: wgpu::FilterMode::Nearest,
             ..Default::default()
-        });
-
-        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
-            label: Some("rico8 blit"),
-            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
         let bgl = device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
             label: None,
@@ -149,6 +140,23 @@ impl Gpu {
                 },
             ],
         });
+        // Start with a logical-sized texture; it is recreated lazily on first render.
+        let (tex_dw, tex_dh) = (WIDTH as u32, HEIGHT as u32);
+        let texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rico8 screen"),
+            size: wgpu::Extent3d {
+                width: tex_dw,
+                height: tex_dh,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: None,
             layout: &bgl,
@@ -162,6 +170,11 @@ impl Gpu {
                     resource: wgpu::BindingResource::Sampler(&sampler),
                 },
             ],
+        });
+
+        let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
+            label: Some("rico8 blit"),
+            source: wgpu::ShaderSource::Wgsl(SHADER.into()),
         });
         let layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
@@ -200,9 +213,13 @@ impl Gpu {
             queue,
             config,
             pipeline,
+            bgl,
+            sampler,
             bind_group,
             texture,
-            rgba: vec![0; WIDTH as usize * HEIGHT as usize * 4],
+            tex_dw,
+            tex_dh,
+            rgba: vec![0; (tex_dw * tex_dh) as usize * 4],
             viewport: Viewport::default(),
         })
     }
@@ -219,14 +236,61 @@ impl Gpu {
         self.viewport
     }
 
-    fn compute_viewport(&mut self) {
+    /// Recreate the texture and its bind group if the device dimensions changed.
+    fn ensure_texture(&mut self, dw: u32, dh: u32) {
+        if dw == self.tex_dw && dh == self.tex_dh {
+            return;
+        }
+        self.tex_dw = dw;
+        self.tex_dh = dh;
+        self.rgba.resize((dw * dh) as usize * 4, 0);
+        self.texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("rico8 screen"),
+            size: wgpu::Extent3d {
+                width: dw,
+                height: dh,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::Rgba8UnormSrgb,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        let view = self
+            .texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+        self.bind_group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&self.sampler),
+                },
+            ],
+        });
+    }
+
+    /// Compute the viewport for device-sized content `(dw, dh)` centered in
+    /// the window. The device content is placed 1:1 (one device pixel per
+    /// physical pixel) with letterbox padding.
+    fn compute_viewport(&mut self, dw: u32, dh: u32) {
         let (sw, sh) = (self.config.width as f32, self.config.height as f32);
-        // Largest integer scale that fits; fall back to fractional fit on
-        // windows smaller than 128 px.
-        let scale = (sw / WIDTH as f32).min(sh / HEIGHT as f32);
-        let scale = if scale >= 1.0 { scale.floor() } else { scale };
-        let w = WIDTH as f32 * scale;
-        let h = HEIGHT as f32 * scale;
+        let (dw, dh) = (dw as f32, dh as f32);
+        // 1:1 placement; fall back to fractional fit on tiny windows.
+        let scale = if sw >= dw && sh >= dh {
+            1.0_f32
+        } else {
+            (sw / dw).min(sh / dh)
+        };
+        let w = dw * scale;
+        let h = dh * scale;
         self.viewport = Viewport {
             x: ((sw - w) / 2.0).floor(),
             y: ((sh - h) / 2.0).floor(),
@@ -236,6 +300,9 @@ impl Gpu {
     }
 
     pub fn render(&mut self, fb: &Framebuffer) -> Result<()> {
+        let dw = fb.device_width() as u32;
+        let dh = fb.device_height() as u32;
+        self.ensure_texture(dw, dh);
         fb.write_rgba(&mut self.rgba);
         self.queue.write_texture(
             wgpu::TexelCopyTextureInfo {
@@ -247,12 +314,12 @@ impl Gpu {
             &self.rgba,
             wgpu::TexelCopyBufferLayout {
                 offset: 0,
-                bytes_per_row: Some(WIDTH as u32 * 4),
+                bytes_per_row: Some(dw * 4),
                 rows_per_image: None,
             },
             wgpu::Extent3d {
-                width: WIDTH as u32,
-                height: HEIGHT as u32,
+                width: dw,
+                height: dh,
                 depth_or_array_layers: 1,
             },
         );
@@ -293,7 +360,7 @@ impl Gpu {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
-            self.compute_viewport();
+            self.compute_viewport(dw, dh);
             let vp = self.viewport;
             pass.set_viewport(vp.x, vp.y, vp.w, vp.h, 0.0, 1.0);
             pass.set_pipeline(&self.pipeline);

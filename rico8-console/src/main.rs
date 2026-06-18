@@ -365,6 +365,9 @@ impl ApplicationHandler for App {
         };
         match gpu::Gpu::new(window.clone(), event_loop.owned_display_handle()) {
             Ok(g) => {
+                let size = window.inner_size();
+                self.shell
+                    .set_scale(gpu::scale_for(size.width, size.height));
                 self.gpu = Some(g);
                 self.window = Some(window);
             }
@@ -382,6 +385,8 @@ impl ApplicationHandler for App {
                 if let Some(g) = &mut self.gpu {
                     g.resize(size.width, size.height);
                 }
+                self.shell
+                    .set_scale(gpu::scale_for(size.width, size.height));
             }
             WindowEvent::ModifiersChanged(m) => {
                 let s = m.state();

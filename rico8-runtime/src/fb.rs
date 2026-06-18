@@ -116,6 +116,20 @@ impl Framebuffer {
         &self.pixels
     }
 
+    /// The logical 128² screen as palette indices (top-left device pixel of each
+    /// logical block), for thumbnails and snapshots. At `scale = 1` this equals
+    /// `pixels()`.
+    pub fn logical_pixels(&self) -> Vec<u8> {
+        let dw = self.device_width();
+        let mut out = Vec::with_capacity((WIDTH * HEIGHT) as usize);
+        for y in 0..HEIGHT {
+            for x in 0..WIDTH {
+                out.push(self.pixels[((y * self.scale) * dw + x * self.scale) as usize]);
+            }
+        }
+        out
+    }
+
     /// Expand the indexed framebuffer into an RGBA8 buffer for GPU upload.
     pub fn write_rgba(&self, out: &mut [u8]) {
         for (i, &c) in self.pixels.iter().enumerate() {
@@ -869,6 +883,26 @@ mod tests {
         assert_eq!(fb.device_width(), WIDTH);
         assert_eq!(fb.device_height(), HEIGHT);
         assert_eq!(fb.pixels().len(), (WIDTH * HEIGHT) as usize);
+    }
+
+    #[test]
+    fn logical_pixels_at_scale_one_matches_pixels() {
+        let mut fb = Framebuffer::new();
+        fb.pset(5, 10, 7);
+        assert_eq!(
+            fb.logical_pixels(),
+            fb.pixels(),
+            "at scale=1 logical_pixels equals pixels"
+        );
+    }
+
+    #[test]
+    fn logical_pixels_at_scale_two_has_logical_size() {
+        let mut fb = Framebuffer::with_scale(2);
+        fb.pset(0, 0, 9);
+        let lp = fb.logical_pixels();
+        assert_eq!(lp.len(), (WIDTH * HEIGHT) as usize, "always 128² entries");
+        assert_eq!(lp[0], 9, "top-left logical pixel reports the drawn color");
     }
 
     #[test]
