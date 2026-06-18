@@ -248,6 +248,62 @@ impl Framebuffer {
         }
     }
 
+    /// Ellipse outline within the inclusive bounding box `(x0,y0)-(x1,y1)`.
+    pub fn oval(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u8) {
+        self.oval_impl(x0, y0, x1, y1, color, false);
+    }
+
+    /// Filled ellipse within the inclusive bounding box `(x0,y0)-(x1,y1)`.
+    pub fn ovalfill(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u8) {
+        self.oval_impl(x0, y0, x1, y1, color, true);
+    }
+
+    fn oval_impl(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u8, fill: bool) {
+        let (xa, xb) = (x0.min(x1), x0.max(x1));
+        let (ya, yb) = (y0.min(y1), y0.max(y1));
+        let cx = (xa + xb) as f32 / 2.0;
+        let cy = (ya + yb) as f32 / 2.0;
+        let a = (xb - xa) as f32 / 2.0;
+        let b = (yb - ya) as f32 / 2.0;
+        if fill {
+            for y in ya..=yb {
+                let dy = if b > 0.0 { (y as f32 - cy) / b } else { 0.0 };
+                let s = 1.0 - dy * dy;
+                if s < 0.0 {
+                    continue;
+                }
+                let dx = a * s.sqrt();
+                let left = (cx - dx).round() as i32;
+                let right = (cx + dx).round() as i32;
+                for x in left..=right {
+                    self.raw_pset(x - self.camera_x, y - self.camera_y, color);
+                }
+            }
+        } else {
+            // Plot the extremes along each axis so the outline has no gaps.
+            for y in ya..=yb {
+                let dy = if b > 0.0 { (y as f32 - cy) / b } else { 0.0 };
+                let s = 1.0 - dy * dy;
+                if s < 0.0 {
+                    continue;
+                }
+                let dx = a * s.sqrt();
+                self.pset((cx - dx).round() as i32, y, color);
+                self.pset((cx + dx).round() as i32, y, color);
+            }
+            for x in xa..=xb {
+                let dx = if a > 0.0 { (x as f32 - cx) / a } else { 0.0 };
+                let s = 1.0 - dx * dx;
+                if s < 0.0 {
+                    continue;
+                }
+                let dy = b * s.sqrt();
+                self.pset(x, (cy - dy).round() as i32, color);
+                self.pset(x, (cy + dy).round() as i32, color);
+            }
+        }
+    }
+
     /// Print text with the built-in font. Returns the x position after the
     /// last character.
     pub fn print(&mut self, text: &str, x: i32, y: i32, color: u8) -> i32 {
@@ -485,5 +541,21 @@ mod tests {
         fb.write_rgba(&mut out);
         assert_eq!(&out[0..4], &palette::rgba(12), "pixel uploaded as blue");
         assert_eq!(fb.pget(0, 0), 8, "stored index is unchanged");
+    }
+
+    #[test]
+    fn ovalfill_fills_center_not_corner() {
+        let mut fb = Framebuffer::new();
+        fb.ovalfill(0, 0, 10, 6, 7);
+        assert_eq!(fb.pget(5, 3), 7, "center filled");
+        assert_eq!(fb.pget(0, 0), 0, "bounding-box corner stays empty");
+    }
+
+    #[test]
+    fn oval_outline_is_hollow() {
+        let mut fb = Framebuffer::new();
+        fb.oval(0, 0, 10, 10, 7);
+        assert_eq!(fb.pget(5, 0), 7, "top of the outline is set");
+        assert_eq!(fb.pget(5, 5), 0, "center is hollow");
     }
 }
