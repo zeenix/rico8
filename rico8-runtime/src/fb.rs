@@ -15,12 +15,20 @@ pub const WIDTH: i32 = 128;
 /// Virtual screen height in pixels.
 pub const HEIGHT: i32 = 128;
 
+/// Identity color map: index `i` maps to color `i`.
+const IDENTITY_PALETTE: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15];
+/// Default transparency mask: only color 0 is transparent.
+const DEFAULT_TRANSPARENT: u16 = 0x0001;
+
 /// The virtual screen: one byte per pixel, each a palette index in `0..16`.
 pub struct Framebuffer {
     pixels: Vec<u8>,
     camera_x: i32,
     camera_y: i32,
     clip: (i32, i32, i32, i32),
+    draw_pal: [u8; 16],
+    display_pal: [u8; 16],
+    transparent: u16,
 }
 
 impl Default for Framebuffer {
@@ -36,6 +44,9 @@ impl Framebuffer {
             camera_x: 0,
             camera_y: 0,
             clip: (0, 0, WIDTH, HEIGHT),
+            draw_pal: IDENTITY_PALETTE,
+            display_pal: IDENTITY_PALETTE,
+            transparent: DEFAULT_TRANSPARENT,
         }
     }
 
@@ -47,6 +58,7 @@ impl Framebuffer {
     /// Expand the indexed framebuffer into an RGBA8 buffer for GPU upload.
     pub fn write_rgba(&self, out: &mut [u8]) {
         for (i, &c) in self.pixels.iter().enumerate() {
+            let c = self.display_pal[(c & 0x0f) as usize];
             out[i * 4..i * 4 + 4].copy_from_slice(&palette::rgba(c));
         }
     }
@@ -76,6 +88,40 @@ impl Framebuffer {
         self.camera_x = 0;
         self.camera_y = 0;
         self.clip_reset();
+        self.draw_pal = IDENTITY_PALETTE;
+        self.display_pal = IDENTITY_PALETTE;
+        self.transparent = DEFAULT_TRANSPARENT;
+    }
+
+    /// Make a palette color transparent (or opaque) for sprite draws.
+    pub fn set_transparent_color(&mut self, color: u8, transparent: bool) {
+        let bit = 1u16 << (color & 0x0f);
+        if transparent {
+            self.transparent |= bit;
+        } else {
+            self.transparent &= !bit;
+        }
+    }
+
+    /// Reset transparency to the default (only color 0 transparent).
+    pub fn reset_transparency(&mut self) {
+        self.transparent = DEFAULT_TRANSPARENT;
+    }
+
+    /// Remap a draw-palette color: later draws of `from` are written as `to`.
+    pub fn remap_color(&mut self, from: u8, to: u8) {
+        self.draw_pal[(from & 0x0f) as usize] = to & 0x0f;
+    }
+
+    /// Remap a display-palette color: `from` is shown as `to` at upload time.
+    pub fn remap_display_color(&mut self, from: u8, to: u8) {
+        self.display_pal[(from & 0x0f) as usize] = to & 0x0f;
+    }
+
+    /// Reset both the draw and display palettes to identity.
+    pub fn reset_palette(&mut self) {
+        self.draw_pal = IDENTITY_PALETTE;
+        self.display_pal = IDENTITY_PALETTE;
     }
 
     /// Fill the whole screen with a color. Does not touch camera/clip.
@@ -87,7 +133,8 @@ impl Framebuffer {
     fn raw_pset(&mut self, x: i32, y: i32, color: u8) {
         let (cx0, cy0, cx1, cy1) = self.clip;
         if x >= cx0 && x < cx1 && y >= cy0 && y < cy1 {
-            self.pixels[(y * WIDTH + x) as usize] = color & 0x0f;
+            let c = self.draw_pal[(color & 0x0f) as usize] & 0x0f;
+            self.pixels[(y * WIDTH + x) as usize] = c;
         }
     }
 
@@ -249,7 +296,7 @@ impl Framebuffer {
                 let sx = if flip_x { pw - 1 - px } else { px };
                 let sy = if flip_y { ph - 1 - py } else { py };
                 let c = sheet.sprite_pixel(n, sx, sy);
-                if c != 0 {
+                if ((self.transparent >> c) & 1) == 0 {
                     self.pset(x + px, y + py, c);
                 }
             }
@@ -375,5 +422,68 @@ mod tests {
         assert_eq!(fb.pget(3, 4), 7, "left half is drawn");
         assert_eq!(fb.pget(4, 4), 0, "right half is untouched");
         assert_eq!(fb.pget(7, 7), 0, "bottom-right corner is untouched");
+    }
+
+    #[test]
+    fn transparency_mask_controls_sprite_pixels() {
+        let mut fb = Framebuffer::new();
+        let mut sheet = SpriteSheet::default();
+        for y in 0..8 {
+            for x in 0..8 {
+                sheet.set(x, y, 8); // a solid red sprite
+            }
+        }
+        // Default: nonzero colors draw.
+        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        assert_eq!(fb.pget(1, 1), 8);
+        // Make red transparent: redrawing over green leaves green showing.
+        fb.cls(3);
+        fb.set_transparent_color(8, true);
+        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        assert_eq!(fb.pget(1, 1), 3, "red made transparent");
+        // reset_transparency restores the default; red draws again.
+        fb.reset_transparency();
+        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        assert_eq!(fb.pget(1, 1), 8);
+    }
+
+    #[test]
+    fn color_zero_can_be_made_opaque() {
+        let mut fb = Framebuffer::new();
+        let sheet = SpriteSheet::default(); // all color 0
+        fb.cls(7);
+        fb.set_transparent_color(0, false);
+        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        assert_eq!(fb.pget(3, 3), 0, "color 0 now drawn over white");
+    }
+
+    #[test]
+    fn draw_palette_remaps_writes() {
+        let mut fb = Framebuffer::new();
+        fb.remap_color(8, 12); // draw red as blue
+        fb.pset(5, 5, 8);
+        assert_eq!(fb.pget(5, 5), 12);
+        fb.reset_palette();
+        fb.pset(6, 6, 8);
+        assert_eq!(fb.pget(6, 6), 8);
+    }
+
+    #[test]
+    fn cls_ignores_draw_palette() {
+        let mut fb = Framebuffer::new();
+        fb.remap_color(0, 8);
+        fb.cls(0);
+        assert_eq!(fb.pget(10, 10), 0, "cls clears to the literal color");
+    }
+
+    #[test]
+    fn display_palette_remaps_at_upload() {
+        let mut fb = Framebuffer::new();
+        fb.pset(0, 0, 8); // red stored
+        fb.remap_display_color(8, 12); // show red as blue
+        let mut out = vec![0u8; (WIDTH * HEIGHT * 4) as usize];
+        fb.write_rgba(&mut out);
+        assert_eq!(&out[0..4], &palette::rgba(12), "pixel uploaded as blue");
+        assert_eq!(fb.pget(0, 0), 8, "stored index is unchanged");
     }
 }
