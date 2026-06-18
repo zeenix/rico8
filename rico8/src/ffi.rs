@@ -46,6 +46,28 @@ extern "C" {
     pub fn set_sprite_pixel(x: i32, y: i32, color: i32);
     pub fn log(ptr: *const u8, len: u32);
     pub fn panic(ptr: *const u8, len: u32);
+    pub fn set_transparent_color(color: i32, transparent: i32);
+    pub fn reset_transparency();
+    pub fn remap_color(from: i32, to: i32, mode: i32);
+    pub fn reset_palette();
+    pub fn sprite_stretch(
+        sx: i32,
+        sy: i32,
+        sw: i32,
+        sh: i32,
+        dx: f32,
+        dy: f32,
+        dw: f32,
+        dh: f32,
+        flip_x: i32,
+        flip_y: i32,
+    );
+    pub fn ellipse(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
+    pub fn ellipse_fill(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
+    pub fn set_fill_pattern(pattern: i32, secondary: i32, transparent: i32);
+    pub fn set_pen_color(color: i32);
+    pub fn set_cursor(x: f32, y: f32);
+    pub fn print_pen(ptr: *const u8, len: u32) -> f32;
 }
 
 // Host-target stubs so the SDK (and carts) also type-check, document and
@@ -115,6 +137,32 @@ mod stubs {
     pub unsafe fn set_sprite_pixel(_x: i32, _y: i32, _color: i32) {}
     pub unsafe fn log(_ptr: *const u8, _len: u32) {}
     pub unsafe fn panic(_ptr: *const u8, _len: u32) {}
+    pub unsafe fn set_transparent_color(_color: i32, _transparent: i32) {}
+    pub unsafe fn reset_transparency() {}
+    pub unsafe fn remap_color(_from: i32, _to: i32, _mode: i32) {}
+    pub unsafe fn reset_palette() {}
+    #[allow(clippy::too_many_arguments)]
+    pub unsafe fn sprite_stretch(
+        _sx: i32,
+        _sy: i32,
+        _sw: i32,
+        _sh: i32,
+        _dx: f32,
+        _dy: f32,
+        _dw: f32,
+        _dh: f32,
+        _flip_x: i32,
+        _flip_y: i32,
+    ) {
+    }
+    pub unsafe fn ellipse(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
+    pub unsafe fn ellipse_fill(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
+    pub unsafe fn set_fill_pattern(_pattern: i32, _secondary: i32, _transparent: i32) {}
+    pub unsafe fn set_pen_color(_color: i32) {}
+    pub unsafe fn set_cursor(_x: f32, _y: f32) {}
+    pub unsafe fn print_pen(_ptr: *const u8, _len: u32) -> f32 {
+        0.0
+    }
 }
 
 #[cfg(not(target_arch = "wasm32"))]

@@ -381,6 +381,46 @@ impl Graphics {
         unsafe { ffi::clip(0.0, 0.0, SCREEN_W as f32, SCREEN_H as f32) }
     }
 
+    /// Make a palette color transparent (or opaque) for sprite draws.
+    pub fn set_transparent_color(&mut self, color: Color, transparent: bool) {
+        unsafe { ffi::set_transparent_color(color.0 as i32, transparent as i32) }
+    }
+
+    /// Alias for [`Graphics::set_transparent_color`].
+    pub fn palt(&mut self, color: Color, transparent: bool) {
+        self.set_transparent_color(color, transparent)
+    }
+
+    /// Reset sprite transparency to the default (only color 0 transparent).
+    pub fn reset_transparency(&mut self) {
+        unsafe { ffi::reset_transparency() }
+    }
+
+    /// Remap a draw color: later draws of `from` are written as `to`.
+    pub fn remap_color(&mut self, from: Color, to: Color) {
+        unsafe { ffi::remap_color(from.0 as i32, to.0 as i32, 0) }
+    }
+
+    /// Alias for [`Graphics::remap_color`].
+    pub fn pal(&mut self, from: Color, to: Color) {
+        self.remap_color(from, to)
+    }
+
+    /// Remap a display color: `from` is shown as `to` across the whole screen.
+    pub fn remap_display_color(&mut self, from: Color, to: Color) {
+        unsafe { ffi::remap_color(from.0 as i32, to.0 as i32, 1) }
+    }
+
+    /// Alias for [`Graphics::remap_display_color`].
+    pub fn pal_display(&mut self, from: Color, to: Color) {
+        self.remap_display_color(from, to)
+    }
+
+    /// Reset both the draw and display palettes to identity.
+    pub fn reset_palette(&mut self) {
+        unsafe { ffi::reset_palette() }
+    }
+
     /// Set one pixel. The position is floored to a pixel.
     pub fn set_pixel(&mut self, x: f32, y: f32, color: Color) {
         unsafe { ffi::set_pixel(x, y, color.0 as i32) }
@@ -445,11 +485,83 @@ impl Graphics {
         self.circle_fill(x, y, r, color)
     }
 
+    /// Ellipse outline inside the `(x, y, w, h)` box.
+    pub fn ellipse(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        if w > 0.0 && h > 0.0 {
+            unsafe { ffi::ellipse(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
+        }
+    }
+
+    /// Alias for [`Graphics::ellipse`].
+    pub fn oval(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        self.ellipse(x, y, w, h, color)
+    }
+
+    /// Filled ellipse inside the `(x, y, w, h)` box.
+    pub fn ellipse_fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        if w > 0.0 && h > 0.0 {
+            unsafe { ffi::ellipse_fill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
+        }
+    }
+
+    /// Alias for [`Graphics::ellipse_fill`].
+    pub fn ovalfill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+        self.ellipse_fill(x, y, w, h, color)
+    }
+
+    /// Set a two-color fill pattern for the filled shapes. Pattern-1 pixels use
+    /// `secondary`. `pattern` is a 4x4 bitmask (bit 15 = top-left); 0 is solid.
+    pub fn set_fill_pattern(&mut self, pattern: u16, secondary: Color) {
+        unsafe { ffi::set_fill_pattern(pattern as i32, secondary.0 as i32, 0) }
+    }
+
+    /// Alias for [`Graphics::set_fill_pattern`] with a black secondary color.
+    pub fn fillp(&mut self, pattern: u16) {
+        self.set_fill_pattern(pattern, Color::BLACK)
+    }
+
+    /// Set a fill pattern whose pattern-1 pixels are left transparent.
+    pub fn set_fill_pattern_transparent(&mut self, pattern: u16) {
+        unsafe { ffi::set_fill_pattern(pattern as i32, 0, 1) }
+    }
+
+    /// Fill solid again (the default).
+    pub fn clear_fill_pattern(&mut self) {
+        unsafe { ffi::set_fill_pattern(0, 0, 0) }
+    }
+
     /// Print text with the built-in 4x6 font. Returns the x position after
     /// the last glyph. For `format!`-style arguments, see
     /// [`printf!`](crate::printf).
     pub fn print(&mut self, text: &str, x: f32, y: f32, color: Color) -> f32 {
         unsafe { ffi::print(text.as_ptr(), text.len() as u32, x, y, color.0 as i32) }
+    }
+
+    /// Set the persistent pen color used by [`Graphics::print_pen`].
+    pub fn set_pen_color(&mut self, color: Color) {
+        unsafe { ffi::set_pen_color(color.0 as i32) }
+    }
+
+    /// Alias for [`Graphics::set_pen_color`].
+    pub fn color(&mut self, color: Color) {
+        self.set_pen_color(color)
+    }
+
+    /// Set the persistent text cursor used by [`Graphics::print_pen`].
+    pub fn set_cursor(&mut self, x: f32, y: f32) {
+        unsafe { ffi::set_cursor(x, y) }
+    }
+
+    /// Alias for [`Graphics::set_cursor`].
+    pub fn cursor(&mut self, x: f32, y: f32) {
+        self.set_cursor(x, y)
+    }
+
+    /// Print at the cursor in the pen color, advancing the cursor one line.
+    /// Returns the x position after the last glyph. The cursor advances by a
+    /// single line regardless of any newlines embedded in `text`.
+    pub fn print_pen(&mut self, text: &str) -> f32 {
+        unsafe { ffi::print_pen(text.as_ptr(), text.len() as u32) }
     }
 
     /// Draw a sprite at `(x, y)`. Color 0 is transparent.
@@ -476,6 +588,43 @@ impl Graphics {
         flip_y: bool,
     ) {
         unsafe { ffi::sprite(sprite.0 as u32, x, y, w, h, flip_x as i32, flip_y as i32) }
+    }
+
+    /// Draw a sheet rectangle `(sx,sy,sw,sh)` stretched into a screen rectangle
+    /// `(dx,dy,dw,dh)`. Honors transparency and the draw palette.
+    #[allow(clippy::too_many_arguments)]
+    pub fn sprite_stretch(
+        &mut self,
+        sx: i32,
+        sy: i32,
+        sw: i32,
+        sh: i32,
+        dx: f32,
+        dy: f32,
+        dw: f32,
+        dh: f32,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
+        unsafe { ffi::sprite_stretch(sx, sy, sw, sh, dx, dy, dw, dh, flip_x as i32, flip_y as i32) }
+    }
+
+    /// Alias for [`Graphics::sprite_stretch`].
+    #[allow(clippy::too_many_arguments)]
+    pub fn sspr(
+        &mut self,
+        sx: i32,
+        sy: i32,
+        sw: i32,
+        sh: i32,
+        dx: f32,
+        dy: f32,
+        dw: f32,
+        dh: f32,
+        flip_x: bool,
+        flip_y: bool,
+    ) {
+        self.sprite_stretch(sx, sy, sw, sh, dx, dy, dw, dh, flip_x, flip_y)
     }
 
     /// Draw a region of the map: `cel_w x cel_h` tiles starting at tile
@@ -750,5 +899,34 @@ mod tests {
         // Native stubs read 0.
         assert_eq!(ctx.sprite_pixel(0, 0), Color::from_index(0));
         assert_eq!(ctx.sprite_pixel(0, 0), ctx.sget(0, 0));
+    }
+
+    #[test]
+    fn graphics_parity_aliases_compile_and_forward() {
+        let mut gfx = Graphics { _private: () };
+        gfx.set_transparent_color(Color::BLACK, true);
+        gfx.palt(Color::BLACK, true);
+        gfx.reset_transparency();
+        gfx.remap_color(Color::RED, Color::BLUE);
+        gfx.pal(Color::RED, Color::BLUE);
+        gfx.remap_display_color(Color::RED, Color::BLUE);
+        gfx.pal_display(Color::RED, Color::BLUE);
+        gfx.reset_palette();
+        gfx.sprite_stretch(0, 0, 8, 8, 0.0, 0.0, 16.0, 16.0, false, false);
+        gfx.sspr(0, 0, 8, 8, 0.0, 0.0, 16.0, 16.0, true, true);
+        gfx.ellipse(0.0, 0.0, 8.0, 6.0, Color::WHITE);
+        gfx.oval(0.0, 0.0, 8.0, 6.0, Color::WHITE);
+        gfx.ellipse_fill(0.0, 0.0, 8.0, 6.0, Color::WHITE);
+        gfx.ovalfill(0.0, 0.0, 8.0, 6.0, Color::WHITE);
+        gfx.set_fill_pattern(0b1010, Color::RED);
+        gfx.fillp(0b1010);
+        gfx.set_fill_pattern_transparent(0b1010);
+        gfx.clear_fill_pattern();
+        gfx.set_pen_color(Color::YELLOW);
+        gfx.color(Color::YELLOW);
+        gfx.set_cursor(4.0, 4.0);
+        gfx.cursor(4.0, 4.0);
+        let cursor: f32 = gfx.print_pen("hi");
+        assert_eq!(cursor, 0.0, "native print_pen stub returns 0.0");
     }
 }
