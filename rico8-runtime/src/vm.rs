@@ -176,14 +176,14 @@ impl GameVm {
         link!(linker, "camera", |mut c: Caller<'_, HostState>,
                                  x: f32,
                                  y: f32| {
-            c.data_mut().fb.camera(px(x), px(y))
+            c.data_mut().fb.camera(x, y)
         });
         link!(linker, "clip", |mut c: Caller<'_, HostState>,
                                x: f32,
                                y: f32,
                                w: f32,
                                h: f32| {
-            c.data_mut().fb.clip(px(x), px(y), px(w), px(h))
+            c.data_mut().fb.clip(x, y, w, h)
         });
         link!(
             linker,

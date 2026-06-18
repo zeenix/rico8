@@ -20,11 +20,19 @@ const IDENTITY_PALETTE: [u8; 16] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13
 /// Default transparency mask: only color 0 is transparent.
 const DEFAULT_TRANSPARENT: u16 = 0x0001;
 
-/// The virtual screen: one byte per pixel, each a palette index in `0..16`.
+/// The virtual screen: one byte per device pixel, each a palette index in `0..16`.
+///
+/// At `scale = 1` the device buffer is exactly `WIDTH * HEIGHT` bytes (identical to
+/// the historical layout). At `scale = N` each logical pixel is rendered as an
+/// `N×N` block, so the buffer is `(WIDTH·N) * (HEIGHT·N)` bytes.
 pub struct Framebuffer {
     pixels: Vec<u8>,
+    scale: i32,
+    /// Camera offset in **device** pixels.
     camera_x: i32,
+    /// Camera offset in **device** pixels.
     camera_y: i32,
+    /// Clip rectangle in **device** pixels `(x0, y0, x1, y1)`.
     clip: (i32, i32, i32, i32),
     draw_pal: [u8; 16],
     display_pal: [u8; 16],
@@ -45,11 +53,24 @@ impl Default for Framebuffer {
 
 impl Framebuffer {
     pub fn new() -> Self {
+        Self::with_scale(1)
+    }
+
+    /// Create a framebuffer with a device-pixel scale factor.
+    ///
+    /// At `scale = 1` this is identical to `new()`. At `scale = N` each logical
+    /// pixel occupies an `N×N` block in the device buffer, enabling sub-logical-pixel
+    /// positioning via fractional camera offsets.
+    pub fn with_scale(scale: i32) -> Self {
+        let scale = scale.max(1);
+        let dw = WIDTH * scale;
+        let dh = HEIGHT * scale;
         Self {
-            pixels: vec![0; (WIDTH * HEIGHT) as usize],
+            pixels: vec![0; (dw * dh) as usize],
+            scale,
             camera_x: 0,
             camera_y: 0,
-            clip: (0, 0, WIDTH, HEIGHT),
+            clip: (0, 0, dw, dh),
             draw_pal: IDENTITY_PALETTE,
             display_pal: IDENTITY_PALETTE,
             transparent: DEFAULT_TRANSPARENT,
@@ -62,7 +83,35 @@ impl Framebuffer {
         }
     }
 
-    /// Raw palette-index pixels, row-major, `WIDTH * HEIGHT` long.
+    /// The device-pixel scale (1 = logical 128²; N = a `(128·N)²` buffer).
+    pub fn scale(&self) -> i32 {
+        self.scale
+    }
+
+    /// Physical buffer width in device pixels (`WIDTH * scale`).
+    pub fn device_width(&self) -> i32 {
+        WIDTH * self.scale
+    }
+
+    /// Physical buffer height in device pixels (`HEIGHT * scale`).
+    pub fn device_height(&self) -> i32 {
+        HEIGHT * self.scale
+    }
+
+    /// Switch supersample scale, reallocating the device buffer. The caller must
+    /// redraw the frame afterwards (no content is preserved).
+    pub fn set_scale(&mut self, scale: i32) {
+        let scale = scale.max(1);
+        if scale != self.scale {
+            self.scale = scale;
+            self.pixels = vec![0; (self.device_width() * self.device_height()) as usize];
+        }
+        self.camera_x = 0;
+        self.camera_y = 0;
+        self.clip = (0, 0, self.device_width(), self.device_height());
+    }
+
+    /// Raw palette-index pixels, row-major, `device_width * device_height` long.
     pub fn pixels(&self) -> &[u8] {
         &self.pixels
     }
@@ -76,30 +125,37 @@ impl Framebuffer {
     }
 
     /// Set the camera offset applied to all subsequent draw operations.
-    pub fn camera(&mut self, x: i32, y: i32) {
-        self.camera_x = x;
-        self.camera_y = y;
+    ///
+    /// Fractional values move content by sub-logical-pixel (device) amounts when
+    /// `scale > 1`. For example `camera(0.25, 0.0)` at `scale = 4` shifts content
+    /// left by exactly one device pixel.
+    pub fn camera(&mut self, x: f32, y: f32) {
+        self.camera_x = (x * self.scale as f32).floor() as i32;
+        self.camera_y = (y * self.scale as f32).floor() as i32;
     }
 
-    /// Restrict drawing to a screen-space rectangle.
-    pub fn clip(&mut self, x: i32, y: i32, w: i32, h: i32) {
-        let x0 = x.clamp(0, WIDTH);
-        let y0 = y.clamp(0, HEIGHT);
-        let x1 = (x + w).clamp(0, WIDTH);
-        let y1 = (y + h).clamp(0, HEIGHT);
+    /// Restrict drawing to a screen-space rectangle (logical pixel coordinates).
+    pub fn clip(&mut self, x: f32, y: f32, w: f32, h: f32) {
+        let s = self.scale as f32;
+        let dw = self.device_width();
+        let dh = self.device_height();
+        let x0 = ((x * s).floor() as i32).clamp(0, dw);
+        let y0 = ((y * s).floor() as i32).clamp(0, dh);
+        let x1 = (((x + w) * s).floor() as i32).clamp(0, dw);
+        let y1 = (((y + h) * s).floor() as i32).clamp(0, dh);
         self.clip = (x0, y0, x1, y1);
     }
 
     /// Remove the clip rectangle.
     pub fn clip_reset(&mut self) {
-        self.clip = (0, 0, WIDTH, HEIGHT);
+        self.clip = (0, 0, self.device_width(), self.device_height());
     }
 
     /// Reset camera and clip to defaults (used between host UI and cart frames).
     pub fn reset_state(&mut self) {
         self.camera_x = 0;
         self.camera_y = 0;
-        self.clip_reset();
+        self.clip = (0, 0, self.device_width(), self.device_height());
         self.draw_pal = IDENTITY_PALETTE;
         self.display_pal = IDENTITY_PALETTE;
         self.transparent = DEFAULT_TRANSPARENT;
@@ -153,7 +209,7 @@ impl Framebuffer {
     }
 
     /// The color a fill should write at framebuffer pixel `(x, y)`, or `None`
-    /// when the transparent pattern skips it. `x`/`y` are post-camera.
+    /// when the transparent pattern skips it. `x`/`y` are post-camera logical coords.
     fn fill_color_at(&self, x: i32, y: i32, primary: u8) -> Option<u8> {
         if self.fill_pattern == 0 {
             return Some(primary);
@@ -168,36 +224,64 @@ impl Framebuffer {
         }
     }
 
-    /// Like `raw_pset` but honoring the fill pattern. `x`/`y` are post-camera.
-    fn raw_pset_fill(&mut self, x: i32, y: i32, primary: u8) {
-        if let Some(c) = self.fill_color_at(x, y, primary) {
-            self.raw_pset(x, y, c);
-        }
-    }
-
     /// Fill the whole screen with a color. Does not touch camera/clip.
     pub fn cls(&mut self, color: u8) {
         self.pixels.fill(color & 0x0f);
     }
 
+    /// Write one device pixel at `(dx, dy)`, applying the draw palette and clip.
     #[inline]
-    fn raw_pset(&mut self, x: i32, y: i32, color: u8) {
-        let (cx0, cy0, cx1, cy1) = self.clip;
-        if x >= cx0 && x < cx1 && y >= cy0 && y < cy1 {
+    fn put_dev(&mut self, dx: i32, dy: i32, color: u8) {
+        let (cx0, cy0, cx1, cy1) = self.clip; // device units
+        if dx >= cx0 && dx < cx1 && dy >= cy0 && dy < cy1 {
             let c = self.draw_pal[(color & 0x0f) as usize] & 0x0f;
-            self.pixels[(y * WIDTH + x) as usize] = c;
+            let dw = self.device_width();
+            self.pixels[(dy * dw + dx) as usize] = c;
+        }
+    }
+
+    /// Fill the `scale×scale` device block whose top-left is the post-camera device
+    /// coordinate `(dx, dy)`.
+    #[inline]
+    fn fill_block(&mut self, dx: i32, dy: i32, color: u8) {
+        for by in 0..self.scale {
+            for bx in 0..self.scale {
+                self.put_dev(dx + bx, dy + by, color);
+            }
+        }
+    }
+
+    /// One logical pixel `(lx, ly)` (pre-camera) → its device block, applying the
+    /// device-space camera offset.
+    #[inline]
+    fn block_logical(&mut self, lx: i32, ly: i32, color: u8) {
+        let dx = lx * self.scale - self.camera_x;
+        let dy = ly * self.scale - self.camera_y;
+        self.fill_block(dx, dy, color);
+    }
+
+    /// Like `block_logical` but honoring the fill pattern (decided at logical,
+    /// post-camera resolution so a 4×4 pattern stays 4×4 logical pixels).
+    #[inline]
+    fn block_logical_fill(&mut self, lx: i32, ly: i32, primary: u8) {
+        let px = lx - self.camera_x.div_euclid(self.scale);
+        let py = ly - self.camera_y.div_euclid(self.scale);
+        if let Some(c) = self.fill_color_at(px, py, primary) {
+            self.block_logical(lx, ly, c);
         }
     }
 
     /// Set one pixel (camera-relative, like all draw ops).
     pub fn pset(&mut self, x: i32, y: i32, color: u8) {
-        self.raw_pset(x - self.camera_x, y - self.camera_y, color);
+        self.block_logical(x, y, color);
     }
 
     /// Read one pixel in screen space. Out-of-bounds reads return 0.
     pub fn pget(&self, x: i32, y: i32) -> u8 {
         if (0..WIDTH).contains(&x) && (0..HEIGHT).contains(&y) {
-            self.pixels[(y * WIDTH + x) as usize]
+            let dw = self.device_width();
+            // Top-left device pixel of the logical block (camera-independent).
+            self.pixels[((y * self.scale) * dw + x * self.scale) as usize]
         } else {
             0
         }
@@ -205,15 +289,14 @@ impl Framebuffer {
 
     /// Bresenham line between two points, inclusive.
     pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u8) {
-        let (mut x0, mut y0) = (x0 - self.camera_x, y0 - self.camera_y);
-        let (x1, y1) = (x1 - self.camera_x, y1 - self.camera_y);
+        let (mut x0, mut y0) = (x0, y0);
         let dx = (x1 - x0).abs();
         let dy = -(y1 - y0).abs();
         let sx = if x0 < x1 { 1 } else { -1 };
         let sy = if y0 < y1 { 1 } else { -1 };
         let mut err = dx + dy;
         loop {
-            self.raw_pset(x0, y0, color);
+            self.block_logical(x0, y0, color);
             if x0 == x1 && y0 == y1 {
                 break;
             }
@@ -245,7 +328,7 @@ impl Framebuffer {
         let (ya, yb) = (y0.min(y1), y0.max(y1));
         for y in ya..=yb {
             for x in xa..=xb {
-                self.raw_pset_fill(x - self.camera_x, y - self.camera_y, color);
+                self.block_logical_fill(x, y, color);
             }
         }
     }
@@ -261,19 +344,18 @@ impl Framebuffer {
     }
 
     fn circle_impl(&mut self, cx: i32, cy: i32, r: i32, color: u8, fill: bool) {
-        let (cx, cy) = (cx - self.camera_x, cy - self.camera_y);
         let mut x = r;
         let mut y = 0;
         let mut err = 1 - r;
         while x >= y {
             if fill {
                 for px in (cx - x)..=(cx + x) {
-                    self.raw_pset_fill(px, cy + y, color);
-                    self.raw_pset_fill(px, cy - y, color);
+                    self.block_logical_fill(px, cy + y, color);
+                    self.block_logical_fill(px, cy - y, color);
                 }
                 for px in (cx - y)..=(cx + y) {
-                    self.raw_pset_fill(px, cy + x, color);
-                    self.raw_pset_fill(px, cy - x, color);
+                    self.block_logical_fill(px, cy + x, color);
+                    self.block_logical_fill(px, cy - x, color);
                 }
             } else {
                 for (px, py) in [
@@ -286,7 +368,7 @@ impl Framebuffer {
                     (cx + y, cy - x),
                     (cx - y, cy - x),
                 ] {
-                    self.raw_pset(px, py, color);
+                    self.block_logical(px, py, color);
                 }
             }
             y += 1;
@@ -327,7 +409,7 @@ impl Framebuffer {
                 let left = (cx - dx).round() as i32;
                 let right = (cx + dx).round() as i32;
                 for x in left..=right {
-                    self.raw_pset_fill(x - self.camera_x, y - self.camera_y, color);
+                    self.block_logical_fill(x, y, color);
                 }
             }
         } else {
@@ -534,7 +616,7 @@ mod tests {
     #[test]
     fn camera_offsets_draws() {
         let mut fb = Framebuffer::new();
-        fb.camera(10, 0);
+        fb.camera(10.0, 0.0);
         fb.pset(15, 5, 9);
         assert_eq!(fb.pget(5, 5), 9);
         fb.reset_state();
@@ -545,7 +627,7 @@ mod tests {
     #[test]
     fn clip_constrains_drawing() {
         let mut fb = Framebuffer::new();
-        fb.clip(0, 0, 4, 4);
+        fb.clip(0.0, 0.0, 4.0, 4.0);
         fb.rectfill(0, 0, 127, 127, 7);
         assert_eq!(fb.pget(3, 3), 7);
         assert_eq!(fb.pget(4, 4), 0);
@@ -762,5 +844,52 @@ mod tests {
         expect.print("x", 5, 5, 6); // default pen color is 6
         expect.print("y", 5, 5 + font::GLYPH_H, 6);
         assert_eq!(fb.pixels(), expect.pixels());
+    }
+
+    #[test]
+    fn scale_one_is_default_and_device_sized() {
+        let fb = Framebuffer::new();
+        assert_eq!(fb.scale(), 1);
+        assert_eq!(fb.device_width(), WIDTH);
+        assert_eq!(fb.device_height(), HEIGHT);
+        assert_eq!(fb.pixels().len(), (WIDTH * HEIGHT) as usize);
+    }
+
+    #[test]
+    fn scaled_pset_fills_a_block() {
+        let mut fb = Framebuffer::with_scale(4);
+        assert_eq!(fb.pixels().len(), (WIDTH * 4 * HEIGHT * 4) as usize);
+        fb.pset(10, 20, 8); // logical pixel -> 4x4 device block at (40, 80)
+        let dw = fb.device_width();
+        for by in 0..4 {
+            for bx in 0..4 {
+                assert_eq!(fb.pixels()[((80 + by) * dw + 40 + bx) as usize], 8);
+            }
+        }
+        // Neighbouring logical pixel is untouched.
+        assert_eq!(fb.pixels()[(80 * dw + 44) as usize], 0);
+    }
+
+    #[test]
+    fn scaled_camera_shifts_by_device_pixels() {
+        // A fractional camera moves content by sub-logical-pixel (device) amounts.
+        let mut fb = Framebuffer::with_scale(4);
+        fb.camera(0.25, 0.0); // 0.25 logical px = 1 device px
+        fb.pset(10, 0, 8); // block origin device x = 10*4 - 1 = 39
+        let dw = fb.device_width();
+        assert_eq!(fb.pixels()[39_usize], 8);
+        assert_eq!(fb.pixels()[36_usize], 0);
+        let _ = dw;
+    }
+
+    #[test]
+    fn scaled_rectfill_block_aligned() {
+        let mut fb = Framebuffer::with_scale(2);
+        fb.rectfill(0, 0, 1, 0, 7); // two logical pixels wide -> 4 device px
+        let dw = fb.device_width();
+        for dx in 0..4 {
+            assert_eq!(fb.pixels()[dx as usize], 7, "dx={dx}");
+            assert_eq!(fb.pixels()[(dw + dx) as usize], 7);
+        }
     }
 }
