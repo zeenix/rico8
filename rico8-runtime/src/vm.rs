@@ -852,4 +852,40 @@ mod tests {
         };
         assert!(err.to_string().contains("128K of memory"), "got: {err}");
     }
+
+    /// Characterisation test: a cart drawing sprite 0 at a fractional x=10.5
+    /// must land at device column floor(10.5 * scale) = 42 when scale = 4.
+    ///
+    /// This locks in the cart -> ABI -> framebuffer sub-pixel path so a future
+    /// regression restoring flooring in the ABI layer will be caught here.
+    #[test]
+    fn cart_sprite_draws_at_sub_pixel_column() {
+        // A cart that paints sprite-sheet pixel (0,0) = color 8 and draws
+        // sprite 0 at logical (10.5, 0) with w=1, h=1, no flip.
+        const SPR_SUBPIXEL_CART: &str = r#"
+            (module
+              (import "rico8" "set_sprite_pixel" (func $sset (param i32 i32 i32)))
+              (import "rico8" "sprite"
+                (func $spr (param i32 f32 f32 f32 f32 i32 i32)))
+              (memory (export "memory") 1)
+              (func (export "rico8_init"))
+              (func (export "rico8_update"))
+              (func (export "rico8_draw")
+                (call $sset (i32.const 0) (i32.const 0) (i32.const 8))
+                (call $spr (i32.const 0)
+                           (f32.const 10.5) (f32.const 0)
+                           (f32.const 1) (f32.const 1)
+                           (i32.const 0) (i32.const 0))))
+        "#;
+        let mut vm = load_test_vm(SPR_SUBPIXEL_CART).unwrap();
+        // Override the framebuffer with a scale-4 version so sub-pixel
+        // positioning has enough device columns to observe.
+        vm.state_mut().fb = Framebuffer::with_scale(4);
+        vm.call_draw().unwrap();
+        let dw = vm.state().fb.device_width();
+        let pixels = vm.state().fb.pixels();
+        let first_col = (0..dw as usize).find(|&dx| pixels[dx] == 8);
+        // floor(10.5 * 4) = 42: the sprite must start at device column 42.
+        assert_eq!(first_col, Some(42), "sprite must land at device column 42");
+    }
 }
