@@ -484,13 +484,17 @@ impl Framebuffer {
     /// Draw sprite `n` (and `w x h` neighbors) from a sheet. Color 0 is
     /// transparent, matching the classic default. `w`/`h` are in sprite units
     /// and may be fractional: `w = 0.5` draws a 4-pixel-wide slice.
+    ///
+    /// `x`/`y` are logical coordinates; sub-logical-pixel precision is available
+    /// at `scale > 1` because the origin is converted to device pixels via
+    /// `floor(x * scale)`, so `0.25` at scale 4 lands on device column 1.
     #[allow(clippy::too_many_arguments)]
     pub fn spr(
         &mut self,
         sheet: &SpriteSheet,
         n: u32,
-        x: i32,
-        y: i32,
+        x: f32,
+        y: f32,
         w: f32,
         h: f32,
         flip_x: bool,
@@ -500,13 +504,16 @@ impl Framebuffer {
         // pixels, so the last cell can be clipped mid-sprite.
         let pw = (w.max(0.0) * SPRITE_SIZE as f32) as i32;
         let ph = (h.max(0.0) * SPRITE_SIZE as f32) as i32;
+        let s = self.scale;
+        let ox = (x * s as f32).floor() as i32 - self.camera_x;
+        let oy = (y * s as f32).floor() as i32 - self.camera_y;
         for py in 0..ph {
             for px in 0..pw {
                 let sx = if flip_x { pw - 1 - px } else { px };
                 let sy = if flip_y { ph - 1 - py } else { py };
                 let c = sheet.sprite_pixel(n, sx, sy);
                 if ((self.transparent >> c) & 1) == 0 {
-                    self.pset(x + px, y + py, c);
+                    self.fill_block(ox + px * s, oy + py * s, c);
                 }
             }
         }
@@ -515,6 +522,9 @@ impl Framebuffer {
     /// Draw a sheet rectangle `(sx,sy,sw,sh)` stretched into a screen rectangle
     /// `(dx,dy,dw,dh)` with nearest-neighbor sampling. Honors per-color
     /// transparency and the draw palette.
+    ///
+    /// `dx`/`dy` are logical coordinates with sub-logical-pixel precision at
+    /// `scale > 1`; `dw`/`dh` remain in whole logical pixels.
     #[allow(clippy::too_many_arguments)]
     pub fn sspr(
         &mut self,
@@ -523,8 +533,8 @@ impl Framebuffer {
         sy: i32,
         sw: i32,
         sh: i32,
-        dx: i32,
-        dy: i32,
+        dx: f32,
+        dy: f32,
         dw: i32,
         dh: i32,
         flip_x: bool,
@@ -533,13 +543,16 @@ impl Framebuffer {
         if sw <= 0 || sh <= 0 || dw <= 0 || dh <= 0 {
             return;
         }
+        let s = self.scale;
+        let ox = (dx * s as f32).floor() as i32 - self.camera_x;
+        let oy = (dy * s as f32).floor() as i32 - self.camera_y;
         for py in 0..dh {
             for px in 0..dw {
                 let fx = if flip_x { dw - 1 - px } else { px };
                 let fy = if flip_y { dh - 1 - py } else { py };
                 let c = sheet.get(sx + fx * sw / dw, sy + fy * sh / dh);
                 if ((self.transparent >> c) & 1) == 0 {
-                    self.pset(dx + px, dy + py, c);
+                    self.fill_block(ox + px * s, oy + py * s, c);
                 }
             }
         }
@@ -547,6 +560,9 @@ impl Framebuffer {
 
     /// Draw a region of the tile map. `layers` is a flag mask: when nonzero,
     /// only tiles whose flags intersect the mask are drawn. Tile 0 is empty.
+    ///
+    /// `sx`/`sy` are logical screen-space coordinates with sub-logical-pixel
+    /// precision at `scale > 1`.
     #[allow(clippy::too_many_arguments)]
     pub fn map(
         &mut self,
@@ -554,8 +570,8 @@ impl Framebuffer {
         sheet: &SpriteSheet,
         cel_x: i32,
         cel_y: i32,
-        sx: i32,
-        sy: i32,
+        sx: f32,
+        sy: f32,
         cel_w: i32,
         cel_h: i32,
         layers: u8,
@@ -572,8 +588,8 @@ impl Framebuffer {
                 self.spr(
                     sheet,
                     tile as u32,
-                    sx + tx * SPRITE_SIZE as i32,
-                    sy + ty * SPRITE_SIZE as i32,
+                    sx + (tx * SPRITE_SIZE as i32) as f32,
+                    sy + (ty * SPRITE_SIZE as i32) as f32,
                     1.0,
                     1.0,
                     false,
@@ -660,7 +676,7 @@ mod tests {
             }
         }
         // Half width draws only the left four columns.
-        fb.spr(&sheet, 0, 0, 0, 0.5, 1.0, false, false);
+        fb.spr(&sheet, 0, 0.0, 0.0, 0.5, 1.0, false, false);
         assert_eq!(fb.pget(3, 4), 7, "left half is drawn");
         assert_eq!(fb.pget(4, 4), 0, "right half is untouched");
         assert_eq!(fb.pget(7, 7), 0, "bottom-right corner is untouched");
@@ -676,16 +692,16 @@ mod tests {
             }
         }
         // Default: nonzero colors draw.
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0.0, 0.0, 1.0, 1.0, false, false);
         assert_eq!(fb.pget(1, 1), 8);
         // Make red transparent: redrawing over green leaves green showing.
         fb.cls(3);
         fb.set_transparent_color(8, true);
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0.0, 0.0, 1.0, 1.0, false, false);
         assert_eq!(fb.pget(1, 1), 3, "red made transparent");
         // reset_transparency restores the default; red draws again.
         fb.reset_transparency();
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0.0, 0.0, 1.0, 1.0, false, false);
         assert_eq!(fb.pget(1, 1), 8);
     }
 
@@ -695,7 +711,7 @@ mod tests {
         let sheet = SpriteSheet::default(); // all color 0
         fb.cls(7);
         fb.set_transparent_color(0, false);
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0.0, 0.0, 1.0, 1.0, false, false);
         assert_eq!(fb.pget(3, 3), 0, "color 0 now drawn over white");
     }
 
@@ -785,7 +801,7 @@ mod tests {
         let mut fb = Framebuffer::new();
         let mut sheet = SpriteSheet::default();
         sheet.set(0, 0, 8); // single red source pixel
-        fb.sspr(&sheet, 0, 0, 1, 1, 10, 10, 4, 4, false, false);
+        fb.sspr(&sheet, 0, 0, 1, 1, 10.0, 10.0, 4, 4, false, false);
         assert_eq!(fb.pget(10, 10), 8);
         assert_eq!(
             fb.pget(13, 13),
@@ -799,7 +815,7 @@ mod tests {
         let mut fb = Framebuffer::new();
         let sheet = SpriteSheet::default(); // all color 0
         fb.cls(3);
-        fb.sspr(&sheet, 0, 0, 2, 2, 0, 0, 4, 4, false, false);
+        fb.sspr(&sheet, 0, 0, 2, 2, 0.0, 0.0, 4, 4, false, false);
         assert_eq!(fb.pget(1, 1), 3, "color 0 is transparent by default");
     }
 
@@ -809,7 +825,7 @@ mod tests {
         let mut sheet = SpriteSheet::default();
         sheet.set(0, 0, 8);
         sheet.set(1, 0, 9);
-        fb.sspr(&sheet, 0, 0, 2, 1, 0, 0, 2, 1, true, false);
+        fb.sspr(&sheet, 0, 0, 2, 1, 0.0, 0.0, 2, 1, true, false);
         assert_eq!(
             fb.pget(1, 0),
             8,
@@ -890,6 +906,48 @@ mod tests {
         for dx in 0..4 {
             assert_eq!(fb.pixels()[dx as usize], 7, "dx={dx}");
             assert_eq!(fb.pixels()[(dw + dx) as usize], 7);
+        }
+    }
+
+    #[test]
+    fn sprite_position_resolves_to_device_pixels() {
+        // A 1x1 opaque sprite at sub-logical-pixel x positions lands on
+        // distinct device columns: scale=4 gives quarter-pixel resolution.
+        let mut sheet = SpriteSheet::default();
+        sheet.set(0, 0, 8); // sprite 0, pixel (0,0) = colour 8 (opaque)
+        let dw = WIDTH * 4;
+        let col = |x: f32| -> i32 {
+            let mut fb = Framebuffer::with_scale(4);
+            // Draw a 1-device-pixel-wide slice: w = 1/8 sprite = 1 source pixel.
+            fb.spr(&sheet, 0, x, 0.0, 0.125, 0.125, false, false);
+            (0..dw)
+                .find(|&dx| fb.pixels()[dx as usize] == 8)
+                .unwrap_or(-1)
+        };
+        assert_eq!(col(10.0), 40);
+        assert_eq!(col(10.25), 41);
+        assert_eq!(col(10.5), 42);
+        assert_eq!(col(10.75), 43);
+    }
+
+    #[test]
+    fn sprite_pixels_are_scale_blocks() {
+        // Sprite 0 pixel (1,2) must be drawn as a 3×3 device block at (3,6)..(6,9).
+        let mut sheet = SpriteSheet::default();
+        sheet.set(1, 2, 9); // sheet coordinates (x=1, y=2) → sprite 0 pixel (1,2)
+        let mut fb = Framebuffer::with_scale(3);
+        fb.spr(&sheet, 0, 0.0, 0.0, 1.0, 1.0, false, false);
+        let dw = fb.device_width();
+        for by in 0..3 {
+            for bx in 0..3 {
+                assert_eq!(
+                    fb.pixels()[((6 + by) * dw + 3 + bx) as usize],
+                    9,
+                    "block at ({}, {})",
+                    3 + bx,
+                    6 + by
+                );
+            }
         }
     }
 }

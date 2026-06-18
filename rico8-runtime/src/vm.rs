@@ -281,7 +281,7 @@ impl GameVm {
              flip_x: i32,
              flip_y: i32| {
                 let HostState { fb, sprites, .. } = c.data_mut();
-                fb.spr(sprites, n, px(x), px(y), w, h, flip_x != 0, flip_y != 0);
+                fb.spr(sprites, n, x, y, w, h, flip_x != 0, flip_y != 0);
             }
         );
         link!(linker, "map", |mut c: Caller<'_, HostState>,
@@ -300,8 +300,8 @@ impl GameVm {
                 sprites,
                 cel_x,
                 cel_y,
-                px(sx),
-                px(sy),
+                sx,
+                sy,
                 cel_w,
                 cel_h,
                 layers as u8,
@@ -399,8 +399,8 @@ impl GameVm {
                     sy,
                     sw,
                     sh,
-                    px(dx),
-                    px(dy),
+                    dx,
+                    dy,
                     px(dw),
                     px(dh),
                     flip_x != 0,
