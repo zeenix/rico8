@@ -18,6 +18,19 @@ colors — stay `i32`/`u32`. Colors are palette indices `0..16` (masked with
 `0x0f`).
 Out-of-range coordinates are safe everywhere: draws clip, reads return 0.
 
+A sprite moving diagonally at less than a pixel per frame can shimmer: with
+`x` and `y` floored independently, the two axes' floors tick on different
+frames unless they share a sub-pixel phase, so the steps alternate x-only
+then y-only — a zigzag rather than a clean staircase. Holding two buttons for
+a 45° heading triggers it whenever `x` and `y` start on different fractions.
+This is integer-grid geometry (PICO-8 has it too), and the floor can't smooth
+it: the immediate-mode renderer sees independent floored points with no notion
+of which belong to one mover. Carts that want a clean staircase use the SDK's
+opt-in [`Body`] mover, which owns the trajectory and steps both axes together;
+the exact sub-pixel position stays available for collision.
+
+[`Body`]: ../rico8/src/motion.rs
+
 (Why not narrower integer types for positions? WebAssembly function
 signatures only have `i32`/`i64`/`f32`/`f64` — there is no `i8`/`u8`/`i16`
 at the ABI boundary — and positions are deliberately unbounded, drawn

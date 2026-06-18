@@ -41,10 +41,12 @@ pub mod ffi;
 mod flags;
 mod fmt;
 mod glue;
+mod motion;
 
 use crate::flags::bitflag_enum;
 pub use crate::flags::{BitFlag, BitFlags, UnknownBits};
 pub use glue::__internal;
+pub use motion::Body;
 
 /// The screen is 128x128 pixels.
 pub const SCREEN_W: i32 = 128;
