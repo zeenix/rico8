@@ -1,16 +1,17 @@
 //! A tiny platformer: run, jump, collect coins. Solid tiles carry sprite
 //! flag 0; coins are tile 3 and are collected by rewriting the map.
+//!
+//! The player is a [`Body`], so a running jump (hold Right + jump) — a
+//! sub-pixel diagonal — climbs a clean staircase instead of shimmering. The
+//! body owns the position; the cart just hands it the movement it worked out
+//! for the frame and draws at `draw_x`/`draw_y`.
 
 #![no_std]
 
 use rico8::*;
 
 struct Platformer {
-    // Position and velocity in pixels. Fractional, so movement can be
-    // slower than a pixel per frame and gravity can ramp up smoothly; the
-    // console floors to a pixel when drawing.
-    x: f32,
-    y: f32,
+    body: Body,
     vx: f32,
     vy: f32,
     grounded: bool,
@@ -20,6 +21,9 @@ struct Platformer {
 }
 
 const SOLID: SpriteFlag = SpriteFlag::Flag0;
+// Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
+// Body keeps coherent. At a whole pixel per frame there would be no zigzag.
+const RUN: f32 = 0.7;
 
 impl Platformer {
     fn solid_at(&self, ctx: &Context, px: i32, py: i32) -> bool {
@@ -41,10 +45,10 @@ impl Game for Platformer {
         self.frame += 1;
         // Horizontal movement (pixels per frame).
         if ctx.is_button_down(Button::Left) {
-            self.vx = -1.0;
+            self.vx = -RUN;
             self.flip = true;
         } else if ctx.is_button_down(Button::Right) {
-            self.vx = 1.0;
+            self.vx = RUN;
             self.flip = false;
         } else {
             self.vx = 0.0;
@@ -57,24 +61,28 @@ impl Game for Platformer {
         }
         self.vy = (self.vy + 0.25).min(4.0);
 
-        // Move and collide, axis by axis. Tile lookups want the pixel the
-        // hitbox occupies, so drop the fraction (positions stay >= 0).
-        let nx = (self.x + self.vx) as i32;
-        if !self.collide(ctx, nx, self.y as i32) {
-            self.x += self.vx;
+        // Resolve collision axis by axis against the body's exact position,
+        // then hand the allowed movement over in one call so the diagonal
+        // render stays coherent. Tile lookups want whole pixels; positions
+        // stay >= 0, so the truncating cast floors.
+        let (x, y) = (self.body.x(), self.body.y());
+        let mut dx = self.vx;
+        if self.collide(ctx, (x + dx) as i32, y as i32) {
+            dx = 0.0;
         }
-        let ny = (self.y + self.vy) as i32;
-        if self.collide(ctx, self.x as i32, ny) {
+        let mut dy = self.vy;
+        if self.collide(ctx, (x + dx) as i32, (y + dy) as i32) {
             self.grounded = self.vy > 0.0;
             self.vy = 0.0;
+            dy = 0.0;
         } else {
-            self.y += self.vy;
             self.grounded = false;
         }
+        self.body.move_by(dx, dy);
 
         // Coins (tile 3): sample the hitbox center.
-        let cx = (self.x as i32 + 4) / 8;
-        let cy = (self.y as i32 + 4) / 8;
+        let cx = (self.body.x() as i32 + 4) / 8;
+        let cy = (self.body.y() as i32 + 4) / 8;
         if ctx.map_tile(cx, cy) == SpriteId(3) {
             ctx.set_map_tile(cx, cy, SpriteId(0));
             self.coins += 1;
@@ -85,7 +93,7 @@ impl Game for Platformer {
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::DARK_BLUE);
         // Camera follows the player across the 32-tile-wide level.
-        let cam = (self.x - 60.0).clamp(0.0, (32 * 8 - SCREEN_W) as f32);
+        let cam = (self.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_W) as f32);
         gfx.camera(cam, 0.0);
         gfx.map(0, 0, 0.0, 0.0, 32, 16, BitFlags::empty());
         let frame = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
@@ -93,16 +101,23 @@ impl Game for Platformer {
         } else {
             1
         };
-        // Pass the fractional position straight through; the host floors it.
-        gfx.sprite_ext(SpriteId(frame), self.x, self.y, 1.0, 1.0, self.flip, false);
+        // The body's coherent pixel — a running jump climbs cleanly, no zigzag.
+        gfx.sprite_ext(
+            SpriteId(frame),
+            self.body.draw_x(),
+            self.body.draw_y(),
+            1.0,
+            1.0,
+            self.flip,
+            false,
+        );
         gfx.camera(0.0, 0.0);
         rico8::printf!(gfx, 2.0, 2.0, Color::YELLOW, "Coins {}", self.coins);
     }
 }
 
 rico8::game!(Platformer {
-    x: 16.0,
-    y: 80.0,
+    body: Body::new(16.0, 80.0),
     vx: 0.0,
     vy: 0.0,
     grounded: false,
