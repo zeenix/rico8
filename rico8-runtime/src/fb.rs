@@ -29,6 +29,9 @@ pub struct Framebuffer {
     draw_pal: [u8; 16],
     display_pal: [u8; 16],
     transparent: u16,
+    fill_pattern: u16,
+    fill_secondary: u8,
+    fill_transparent: bool,
 }
 
 impl Default for Framebuffer {
@@ -47,6 +50,9 @@ impl Framebuffer {
             draw_pal: IDENTITY_PALETTE,
             display_pal: IDENTITY_PALETTE,
             transparent: DEFAULT_TRANSPARENT,
+            fill_pattern: 0,
+            fill_secondary: 0,
+            fill_transparent: false,
         }
     }
 
@@ -91,6 +97,9 @@ impl Framebuffer {
         self.draw_pal = IDENTITY_PALETTE;
         self.display_pal = IDENTITY_PALETTE;
         self.transparent = DEFAULT_TRANSPARENT;
+        self.fill_pattern = 0;
+        self.fill_secondary = 0;
+        self.fill_transparent = false;
     }
 
     /// Make a palette color transparent (or opaque) for sprite draws.
@@ -122,6 +131,39 @@ impl Framebuffer {
     pub fn reset_palette(&mut self) {
         self.draw_pal = IDENTITY_PALETTE;
         self.display_pal = IDENTITY_PALETTE;
+    }
+
+    /// Configure the fill pattern for the filled shape primitives. `pattern` is
+    /// a 4x4 bitmask (bit 15 = top-left). Pattern-0 pixels take the shape's
+    /// color; pattern-1 pixels take `secondary`, or are skipped when
+    /// `transparent`. A `pattern` of 0 fills solid.
+    pub fn set_fill_pattern(&mut self, pattern: u16, secondary: u8, transparent: bool) {
+        self.fill_pattern = pattern;
+        self.fill_secondary = secondary & 0x0f;
+        self.fill_transparent = transparent;
+    }
+
+    /// The color a fill should write at framebuffer pixel `(x, y)`, or `None`
+    /// when the transparent pattern skips it. `x`/`y` are post-camera.
+    fn fill_color_at(&self, x: i32, y: i32, primary: u8) -> Option<u8> {
+        if self.fill_pattern == 0 {
+            return Some(primary);
+        }
+        let idx = ((y & 3) * 4 + (x & 3)) as u16;
+        if (self.fill_pattern >> (15 - idx)) & 1 == 0 {
+            Some(primary)
+        } else if self.fill_transparent {
+            None
+        } else {
+            Some(self.fill_secondary)
+        }
+    }
+
+    /// Like `raw_pset` but honoring the fill pattern. `x`/`y` are post-camera.
+    fn raw_pset_fill(&mut self, x: i32, y: i32, primary: u8) {
+        if let Some(c) = self.fill_color_at(x, y, primary) {
+            self.raw_pset(x, y, c);
+        }
     }
 
     /// Fill the whole screen with a color. Does not touch camera/clip.
@@ -194,7 +236,7 @@ impl Framebuffer {
         let (ya, yb) = (y0.min(y1), y0.max(y1));
         for y in ya..=yb {
             for x in xa..=xb {
-                self.raw_pset(x - self.camera_x, y - self.camera_y, color);
+                self.raw_pset_fill(x - self.camera_x, y - self.camera_y, color);
             }
         }
     }
@@ -217,12 +259,12 @@ impl Framebuffer {
         while x >= y {
             if fill {
                 for px in (cx - x)..=(cx + x) {
-                    self.raw_pset(px, cy + y, color);
-                    self.raw_pset(px, cy - y, color);
+                    self.raw_pset_fill(px, cy + y, color);
+                    self.raw_pset_fill(px, cy - y, color);
                 }
                 for px in (cx - y)..=(cx + y) {
-                    self.raw_pset(px, cy + x, color);
-                    self.raw_pset(px, cy - x, color);
+                    self.raw_pset_fill(px, cy + x, color);
+                    self.raw_pset_fill(px, cy - x, color);
                 }
             } else {
                 for (px, py) in [
@@ -276,7 +318,7 @@ impl Framebuffer {
                 let left = (cx - dx).round() as i32;
                 let right = (cx + dx).round() as i32;
                 for x in left..=right {
-                    self.raw_pset(x - self.camera_x, y - self.camera_y, color);
+                    self.raw_pset_fill(x - self.camera_x, y - self.camera_y, color);
                 }
             }
         } else {
@@ -557,5 +599,40 @@ mod tests {
         fb.oval(0, 0, 10, 10, 7);
         assert_eq!(fb.pget(5, 0), 7, "top of the outline is set");
         assert_eq!(fb.pget(5, 5), 0, "center is hollow");
+    }
+
+    #[test]
+    fn two_color_fill_pattern_alternates() {
+        let mut fb = Framebuffer::new();
+        // bit 15 (top-left) = 1, bit 14 = 0, ...
+        fb.set_fill_pattern(0b1010_0101_1010_0101, 12, false);
+        fb.rectfill(0, 0, 3, 3, 7);
+        assert_eq!(
+            fb.pget(0, 0),
+            12,
+            "pattern-1 pixel uses the secondary color"
+        );
+        assert_eq!(fb.pget(1, 0), 7, "pattern-0 pixel uses the primary color");
+    }
+
+    #[test]
+    fn transparent_fill_pattern_skips_pixels() {
+        let mut fb = Framebuffer::new();
+        fb.cls(3);
+        fb.set_fill_pattern(0xffff, 0, true); // every pixel is pattern-1, transparent
+        fb.rectfill(0, 0, 3, 3, 7);
+        assert_eq!(
+            fb.pget(1, 1),
+            3,
+            "all pattern-1 pixels skipped; background shows"
+        );
+    }
+
+    #[test]
+    fn zero_pattern_fills_solid() {
+        let mut fb = Framebuffer::new();
+        fb.set_fill_pattern(0, 0, false);
+        fb.rectfill(0, 0, 3, 3, 7);
+        assert_eq!(fb.pget(2, 2), 7);
     }
 }
