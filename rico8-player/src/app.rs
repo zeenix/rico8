@@ -139,8 +139,14 @@ impl App {
         loop {
             let snap = self.platform.poll();
             match controls.update(&snap, fps) {
-                ControlAction::Quit => return Ok(Flow::Quit),
-                ControlAction::BackToPicker => return Ok(Flow::BackToPicker),
+                ControlAction::Quit => {
+                    self.audio.stop_all();
+                    return Ok(Flow::Quit);
+                }
+                ControlAction::BackToPicker => {
+                    self.audio.stop_all();
+                    return Ok(Flow::BackToPicker);
+                }
                 ControlAction::ToggleFps => show_fps = !show_fps,
                 ControlAction::None => {}
             }
