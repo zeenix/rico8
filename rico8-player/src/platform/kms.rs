@@ -74,10 +74,10 @@ impl KmsPlatform {
         let con_handle = con.handle();
         let rotate = Rotate::from_env_or(detect_rotation(&card, con_handle));
 
-        let vt = set_vt_graphics();
-
-        // Initial modeset: put the front buffer on screen.
+        // Initial modeset: put the front buffer on screen. Switch to VT graphics mode only
+        // after the modeset succeeds so a failed set_crtc does not leave the console blank.
         card.set_crtc(crtc, Some(fb0), (0, 0), &[con_handle], Some(mode))?;
+        let vt = set_vt_graphics();
 
         Ok(KmsPlatform {
             card,

@@ -116,6 +116,8 @@ impl App {
             Ok(c) => c,
             Err(e) => return self.show_error(&format!("load failed\n{e}")),
         };
+        // Stop any audio from a previous cart before loading the new VM.
+        self.audio.stop_all();
         // The VM writes into the same synth the platform's audio thread reads.
         let mut vm = match GameVm::load(&cart.wasm, &cart.assets, self.audio.clone()) {
             Ok(vm) => Some(vm),
@@ -152,6 +154,7 @@ impl App {
             if let Some(v) = vm.as_mut() {
                 if let Err(e) = v.call_update().and_then(|()| v.call_draw()) {
                     eprintln!("rico8-player: runtime error: {e}");
+                    self.audio.stop_all();
                     let mut fb = ui::error_screen(&e.to_string());
                     fb.print("hold o+x to exit", 2, HEIGHT - 7, col::LIGHT_GREY);
                     error_fb = Some(fb);
@@ -180,6 +183,7 @@ impl App {
     /// Show a RICO-8 error screen until the player presses back.
     fn show_error(&mut self, message: &str) -> Result<Flow> {
         eprintln!("rico8-player: {}", message.replace('\n', ": "));
+        self.audio.stop_all();
         let mut fb = ui::error_screen(message);
         fb.print("select/b: back", 2, HEIGHT - 7, col::LIGHT_GREY);
         let mut controls = Controls::default();
