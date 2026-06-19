@@ -363,6 +363,9 @@ impl ApplicationHandler for App {
                 return;
             }
         };
+        // The console draws its own pixel-art cursor into the framebuffer, so
+        // hide the OS cursor to avoid showing two cursors at once.
+        window.set_cursor_visible(false);
         match gpu::Gpu::new(window.clone(), event_loop.owned_display_handle()) {
             Ok(g) => {
                 self.gpu = Some(g);
