@@ -72,8 +72,13 @@ fn main() -> Result<()> {
         ["export-web", input, out] => headless_export_web(Path::new(input), Path::new(out)),
         ["verify", png] => headless_verify(Path::new(png)),
         ["snap", project, outdir] => headless_snap(Path::new(project), Path::new(outdir)),
-        [] => run_windowed(None),
-        [path] => run_windowed(Some(path.to_string())),
+        ["run", path] => run_windowed(Some(path.to_string()), true),
+        ["run"] => {
+            print_help();
+            bail!("Usage: rico8 run <dir|cart.png>");
+        }
+        [] => run_windowed(None, false),
+        [path] => run_windowed(Some(path.to_string()), false),
         _ => {
             print_help();
             bail!("Unrecognized arguments: {args:?}");
@@ -87,6 +92,7 @@ fn print_help() {
          Usage:\n\
          \x20 rico8                      Boot the console\n\
          \x20 rico8 <dir|cart.png>       Boot with a cart loaded\n\
+         \x20 rico8 run <dir|cart.png>   Boot, load, and run immediately\n\
          \x20 rico8 new <dir>            Create a project (headless)\n\
          \x20 rico8 build <dir>          Compile a project to wasm (headless)\n\
          \x20 rico8 export <dir> <out.png> [--no-source]\n\
@@ -266,7 +272,7 @@ fn headless_snap(project: &Path, outdir: &Path) -> Result<()> {
 // Windowed console
 // ---------------------------------------------------------------------------
 
-fn run_windowed(load: Option<String>) -> Result<()> {
+fn run_windowed(load: Option<String>, auto_run: bool) -> Result<()> {
     #[cfg(feature = "audio")]
     let audio_out = rico8_runtime::audio::AudioOutput::start();
     #[cfg(feature = "audio")]
@@ -280,6 +286,9 @@ fn run_windowed(load: Option<String>) -> Result<()> {
     let mut shell = Shell::new(audio, sdk_path());
     if let Some(path) = load {
         shell.startup_load(&path);
+        if auto_run {
+            shell.startup_run();
+        }
     }
 
     let event_loop = EventLoop::new()?;

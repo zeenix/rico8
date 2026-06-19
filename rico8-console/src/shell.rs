@@ -730,6 +730,13 @@ impl Shell {
         }
     }
 
+    /// Run the cart/project loaded at boot, as if the user typed `run`. Used by
+    /// the `rico8 run <path>` launch mode. A cart enters Run mode immediately; a
+    /// project spawns its build and enters Run mode once it succeeds.
+    pub fn startup_run(&mut self) {
+        self.cmd_run();
+    }
+
     fn cmd_load(&mut self, args: &[&str]) -> Result<()> {
         let Some(path) = args.first() else {
             bail!("Usage: load <dir|cart.png>");
@@ -1772,6 +1779,31 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(33));
         }
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// `startup_run` (the `rico8 run <path>` launch mode) loads-then-runs: on a
+    /// project it kicks off the async build and arms the deferred run, exactly
+    /// as the in-console `run` verb does.
+    #[test]
+    fn startup_run_arms_the_deferred_run() {
+        let dir = std::env::temp_dir().join(format!("rico8_startup_run_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+
+        shell.startup_load(project_dir.to_str().unwrap());
+        assert_eq!(shell.mode, Mode::Console, "loaded, still at the console");
+
+        shell.startup_run();
+        assert!(shell.build.is_some(), "startup_run spawns the build");
+        assert!(
+            shell.run_after_build,
+            "and arms the run to start once it is built"
+        );
+
+        // The build runs on a detached thread; don't wait for cargo, just clean up.
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
