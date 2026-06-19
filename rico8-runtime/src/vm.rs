@@ -154,7 +154,7 @@ impl GameVm {
     /// Load a cart module, wire up the ABI, and run `rico8_init`.
     pub fn load(wasm: &[u8], assets: &Assets, audio: AudioHandle) -> Result<Self> {
         // The single chokepoint every frontend runs a cart through: the
-        // desktop console, the SDL player, the web player and headless
+        // desktop console, the standalone player, the web player and headless
         // verify all land here. Reject mis-sized asset bundles before they
         // reach the renderer, regardless of where the cart came from (a PNG
         // cart, an on-disk project, or a hand-built module).

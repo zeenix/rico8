@@ -2,7 +2,12 @@
 [alias]
 console = "run --release -p rico8-console"
 
-# Cross-compiling the handheld player (see docs/HANDHELD.md):
-#   cargo build --release -p rico8-player --target aarch64-unknown-linux-gnu
-[target.aarch64-unknown-linux-gnu]
-linker = "aarch64-linux-gnu-gcc"
+# Handheld player builds as fully-static musl binaries (see docs/HANDHELD.md). rust-lld +
+# self-contained linking needs no cross-gcc, no zig, no Docker.
+[target.aarch64-unknown-linux-musl]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes", "-C", "strip=symbols"]
+
+[target.armv7-unknown-linux-musleabihf]
+linker = "rust-lld"
+rustflags = ["-C", "link-self-contained=yes", "-C", "strip=symbols"]

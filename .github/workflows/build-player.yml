@@ -1,7 +1,7 @@
-# Build the handheld cart player for aarch64 devices (PowKiddy RGB10S,
-# Anbernic RG351/353, ... running ArkOS/ROCKNIX) on every push to main,
-# smoke-test the same code on the host, and upload a ready-to-copy
-# ports bundle as an artifact.
+# Build the handheld cart player as fully-static musl binaries for
+# aarch64/armv7 devices (PowKiddy RGB10S, Anbernic RG351/353, ...) on
+# every push to main, smoke-test the same code on the host, and upload
+# a ready-to-copy ports bundle as an artifact.
 
 name: build handheld player
 
@@ -21,35 +21,19 @@ jobs:
 
       - uses: dtolnay/rust-toolchain@stable
         with:
-          targets: aarch64-unknown-linux-gnu,armv7-unknown-linux-gnueabihf,wasm32-unknown-unknown
+          targets: aarch64-unknown-linux-musl,armv7-unknown-linux-musleabihf,wasm32-unknown-unknown
 
       - uses: Swatinem/rust-cache@v2
 
-      - name: Install host SDL2 and the arm cross toolchains
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libsdl2-dev gcc-aarch64-linux-gnu \
-            gcc-arm-linux-gnueabihf zstd
-
-      # cargo-zigbuild + zig let us cross-link against an old glibc
-      # baseline so the binary runs on the devices' ~2.31 glibc.
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: cargo-zigbuild
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: 0.13.0
-
-      - name: Host smoke test (SDL dummy drivers)
+      - name: Host smoke test
         run: |
           cargo test -p rico8-player
           cargo build --release -p rico8-player
           cargo build --release -p rico8-console --no-default-features
           ./target/release/rico8 export examples/platformer /tmp/platformer.png
-          SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy \
-            ./target/release/rico8-player --smoke 60 /tmp/platformer.png
+          ./target/release/rico8-player --smoke 60 /tmp/platformer.png
 
-      - name: Cross-build the ports bundle
+      - name: Cross-build the static musl ports bundle
         run: ./.github/build-handheld.sh dist/handheld
 
       - name: Add the example carts to the bundle

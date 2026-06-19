@@ -7,9 +7,8 @@
 #   /roms/ports/rico8/carts/     <- put your .png carts here
 #
 # Controls: d-pad moves, the two action buttons = O / X. Select returns
-# to the cart picker and Start+Select quits (on pads SDL recognizes as
-# GameControllers); on any pad, holding both action buttons for ~1s
-# returns to the picker.
+# to the cart picker; Start+Select quits. On any pad, holding both action
+# buttons for ~1s also returns to the picker.
 
 DIR="$(cd "$(dirname "$0")" && pwd)/rico8"
 cd "$DIR" || exit 1
@@ -25,7 +24,8 @@ chmod +x "$DIR/"rico8-player.* 2>/dev/null || true
 # armhf -- in which case an aarch64 binary is routed through
 # qemu-aarch64-static and fails. uname/loader checks report the kernel,
 # not this runtime, so don't guess: probe each binary (a cheap self-test
-# that exits before SDL) and use the first that actually executes here.
+# that exits before opening the display/devices) and use the first that
+# actually executes here.
 # Override with RICO8_ARCH=aarch64|armhf.
 echo "rico8: $(uname -a)" >"$DIR/log.txt"
 PLAYER=""
@@ -44,34 +44,11 @@ if [ -z "$PLAYER" ]; then
 fi
 echo "rico8: using $PLAYER" >>"$DIR/log.txt"
 
-# Help SDL recognize the device's gamepad as a GameController (so named
-# buttons like Select/Start work) by pointing it at a controller
-# database if the firmware ships one. Harmless if none is found -- the
-# raw-joystick fallback (d-pad + face buttons + hold-O+X-to-exit) still
-# works.
-if [ -z "${RICO8_GCDB:-}" ] || [ ! -f "${RICO8_GCDB:-}" ]; then
-  for db in \
-    "$DIR/gamecontrollerdb.txt" \
-    /roms/ports/PortMaster/gamecontrollerdb.txt \
-    /opt/system/gamecontrollerdb.txt \
-    /usr/local/share/gamecontrollerdb.txt \
-    /usr/share/gamecontrollerdb.txt; do
-    if [ -f "$db" ]; then export RICO8_GCDB="$db"; break; fi
-  done
-fi
-echo "rico8: gcdb=${RICO8_GCDB:-none}" >>"$DIR/log.txt"
-
-# These handhelds have no PulseAudio session, so SDL's default pulse
-# probe just spews "failed to create secure directory" before falling
-# back. Go straight to ALSA, and give anything that still wants an
-# XDG runtime dir a writable one.
-export SDL_AUDIODRIVER="${SDL_AUDIODRIVER:-alsa}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/tmp}"
 
-# On pads SDL doesn't recognize as GameControllers, Select/Start have no
-# names, only raw button indices. If you know them, bind them here so
-# Select = back to picker and Start+Select = quit. (Holding both action
-# buttons always returns to the picker, regardless of this.)
+# If you know the raw evdev button indices for Select/Start on your pad,
+# bind them here so Select = back to picker and Start+Select = quit.
+# (Holding both action buttons always returns to the picker, regardless.)
 # export RICO8_SELECT=8
 # export RICO8_START=9
 

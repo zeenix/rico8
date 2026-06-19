@@ -17,20 +17,20 @@ All three limits are built around one number: **128 K**.
 "build" limits are observed where carts are *compiled and packed* — the desktop
 console and the headless CLI (both are the `rico8` binary). "run" limits are
 observed where carts are *played* — the desktop console, the web player, and
-the SDL player.
+the handheld player.
 
 Which UI observes which limit:
 
-| UI              | cart size | RAM | per-frame work |
-| --------------- | --------- | --- | -------------- |
-| desktop console | yes       | yes | yes            |
-| headless CLI    | yes       | no  | no             |
-| web player      | no        | yes | yes            |
-| SDL player      | no        | yes | yes            |
+| UI               | cart size | RAM | per-frame work |
+| ---------------- | --------- | --- | -------------- |
+| desktop console  | yes       | yes | yes            |
+| headless CLI     | yes       | no  | no             |
+| web player       | no        | yes | yes            |
+| handheld player  | no        | yes | yes            |
 
 The headless CLI builds and exports but never runs a cart, so it never shows the
-RAM or per-frame-work error screens. The web and SDL players run a packed cart
-but never build one, so they never show the cart-size warning or rejection.
+RAM or per-frame-work error screens. The web and handheld players run a packed
+cart but never build one, so they never show the cart-size warning or rejection.
 
 ---
 
@@ -105,7 +105,7 @@ update() ran too long
 with a `press f5 to restart` hint at the bottom. Pressing **F5** reloads the
 page and reboots the cart.
 
-**SDL player.** Same shared error screen (red bar, `** runtime error **`, the
+**Handheld player.** Same shared error screen (red bar, `** runtime error **`, the
 `runtime error in update:` text), with a `hold o+x to exit` hint at the bottom;
 hold both action buttons to return to the picker. The same line is also written
 to stderr as `rico8-player: runtime error: …`.
@@ -155,8 +155,8 @@ update() ran out of memory
 
 with the `press f5 to restart` hint.
 
-**SDL player.** The same shared error screen with the `hold o+x to exit` hint,
-and `rico8-player: runtime error: …` on stderr.
+**Handheld player.** The same shared error screen with the `hold o+x to exit`
+hint, and `rico8-player: runtime error: …` on stderr.
 
 ---
 
@@ -275,10 +275,10 @@ Open `stress.html` and click to boot. Keyboard mapping matches the console
 (arrows + `Z`/`X`); on a touch screen the on-page d-pad and O/X buttons work
 too.
 
-### SDL player
+### Handheld player
 
-The SDL player also runs a packed cart. Export `examples/stress` to a PNG cart
-first, then point the player at it:
+The handheld player also runs a packed cart. Export `examples/stress` to a PNG
+cart first, then point the player at it:
 
 ```text
 cargo run --release -p rico8-console -- export examples/stress stress.png
