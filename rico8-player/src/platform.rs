@@ -1,9 +1,13 @@
 //! The platform seam: everything device-specific (display, input) lives behind this trait,
 //! so the picker and game loop are written once and tested headless.
 
+#[cfg(feature = "kms")]
 pub mod alsa;
+#[cfg(feature = "kms")]
 pub mod blit;
+#[cfg(feature = "kms")]
 pub mod evdev;
+#[cfg(feature = "kms")]
 pub mod kms;
 pub mod null;
 
@@ -36,6 +40,7 @@ pub struct InputSnapshot {
 }
 
 /// Screen rotation applied during the blit, for panels mounted rotated.
+#[cfg(feature = "kms")]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Rotate {
     None,
@@ -44,6 +49,7 @@ pub enum Rotate {
     Cw270,
 }
 
+#[cfg(feature = "kms")]
 impl Rotate {
     /// `RICO8_ROTATE=0|90|180|270` overrides `default`; an unset/invalid value keeps `default`.
     pub fn from_env_or(default: Rotate) -> Rotate {

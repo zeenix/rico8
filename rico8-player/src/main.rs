@@ -7,7 +7,8 @@ mod platform;
 
 use anyhow::{anyhow, Result};
 use app::App;
-use platform::{kms::KmsPlatform, null::NullPlatform};
+use platform::null::NullPlatform;
+use rico8_runtime::audio::AudioHandle;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -32,18 +33,8 @@ fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
 
-    let audio = rico8_runtime::audio::AudioHandle::dummy();
-    let platform: Box<dyn platform::Platform> = if smoke.is_some() {
-        Box::new(NullPlatform::new())
-    } else {
-        match KmsPlatform::new(audio.clone()) {
-            Ok(p) => Box::new(p),
-            Err(e) => {
-                eprintln!("rico8-player: KMS init failed: {e:#}");
-                return Err(e);
-            }
-        }
-    };
+    // The audio keepalive must outlive `app` (a later task returns the cpal stream here).
+    let (platform, audio, _audio) = build_backend(smoke)?;
     let mut app = App::new(platform, audio, smoke);
     if target.is_file() {
         app.play(&target)?;
@@ -51,4 +42,25 @@ fn main() -> Result<()> {
         app.picker(&target)?;
     }
     Ok(())
+}
+
+/// Build the display/input backend plus the audio handle the running cart writes to. The third
+/// element is a keepalive whose drop stops audio (used by a later cpal backend; `()` for KMS).
+fn build_backend(smoke: Option<u32>) -> Result<(Box<dyn platform::Platform>, AudioHandle, ())> {
+    if smoke.is_some() {
+        return Ok((Box::new(NullPlatform::new()), AudioHandle::dummy(), ()));
+    }
+    #[cfg(feature = "kms")]
+    {
+        let audio = AudioHandle::dummy();
+        let platform = platform::kms::KmsPlatform::new(audio.clone())?;
+        Ok((Box::new(platform), audio, ()))
+    }
+    #[cfg(not(feature = "kms"))]
+    {
+        let _ = smoke;
+        Err(anyhow!(
+            "rico8-player was built with no display backend; enable the `window` or `kms` feature"
+        ))
+    }
 }
