@@ -1,6 +1,8 @@
 //! The platform seam: everything device-specific (display, input) lives behind this trait,
 //! so the picker and game loop are written once and tested headless.
 
+pub mod null;
+
 use anyhow::Result;
 use rico8_runtime::fb::Framebuffer;
 
