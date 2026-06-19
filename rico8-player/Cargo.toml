@@ -4,12 +4,10 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 repository.workspace = true
-description = "RICO-8 cart player for handhelds and the couch: SDL2 frontend over the console runtime"
+description = "RICO-8 cart player for handhelds and the couch: KMS/evdev/ALSA backend over the console runtime"
 
-# Links against the system SDL2 (present on ArkOS/ROCKNIX/etc. and any
-# desktop with libsdl2), so handheld builds use the device's KMS/DRM
-# video and gamepad drivers.
+# Pure-Rust KMS/evdev/ALSA backend; no SDL required. Targets musl-linked
+# static binaries for handhelds (ArkOS/ROCKNIX) as well as desktop couch play.
 [dependencies]
 rico8-runtime.workspace = true
 anyhow.workspace = true
-sdl2 = "0.38"
