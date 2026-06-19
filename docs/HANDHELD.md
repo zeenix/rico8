@@ -1,10 +1,12 @@
 # RICO-8 on handhelds
 
 `rico8-player` is the third frontend over the console runtime: a pure-Rust
-KMS/evdev/ALSA cart player sized for retro handhelds — PowKiddy RGB10S, the
-Anbernic RG351/353 family, and anything else aarch64 running ArkOS, ROCKNIX or
-a similar ports-friendly firmware. The same binary also runs on a desktop TTY,
-where it opens full-screen via KMS (no window manager required).
+cart player sized for retro handhelds — PowKiddy RGB10S, the Anbernic RG351/353
+family, and anything else aarch64 running ArkOS, ROCKNIX or a similar
+ports-friendly firmware. On the desktop it opens a **window** with keyboard
+input (the default build). The handheld build is a static-musl **KMS/evdev/ALSA**
+binary; that backend can also be run on a desktop bare TTY by building with
+`--no-default-features --features kms`.
 
 ```text
 rico8-player cart.png      play one cart
@@ -12,26 +14,30 @@ rico8-player /path/to/dir  cart picker over a directory
 rico8-player               picker over the current directory
 ```
 
-For windowed cart testing on a desktop, use `cargo console` (its Run mode)
-instead.
+The player itself opens a window on the desktop; `cargo console` is the
+integrated editor and development environment.
 
 ## Controls
 
-| input                     | action                                           |
-| --------------------------| -------------------------------------------------|
-| d-pad                     | directions / move in picker                      |
-| any face button           | O / X in game, launch in picker                  |
-| **hold both O + X (~1s)** | **return to the cart picker** (works on any pad) |
-| Select                    | back to picker (named pads)                      |
-| Start + Select            | quit (named pads)                                |
-| keyboard                  | arrows + Z/X, Esc = back, F1 = fps meter         |
+| input                              | action                                                     |
+| -----------------------------------| -----------------------------------------------------------|
+| d-pad                              | directions / move in picker                                |
+| any face button                    | O / X in game, launch in picker                            |
+| **hold both O + X (~1s)**          | **return to the cart picker** (works on any pad)           |
+| Select                             | back to picker (named pads)                                |
+| Start + Select                     | quit (named pads)                                          |
+| **picker: `-- quit --` row**       | **select it + press O/X to exit the player** (any pad)     |
+| keyboard                           | arrows + Z/X, Esc = back, Enter = start, F1 = fps; close   |
+|                                    | the window to quit                                         |
 
 The picker shows the key controls along its bottom edge. Input is read
 directly from the kernel via evdev; named buttons like Select/Start only work
 when the driver reports them by those names. Because that varies across
 devices, the **hold-O+X** combo is the universal, always-available way back to
-the picker. For unrecognized pads you can bind raw evdev button indices via
-`RICO8_SELECT` / `RICO8_START`.
+the picker. Likewise, the **`-- quit --`** entry at the bottom of the picker is
+the universal way to exit the player — it works on any pad, including handhelds
+whose driver exposes no named Select/Start. For unrecognized pads you can bind
+raw evdev button indices via `RICO8_SELECT` / `RICO8_START`.
 
 ## Installing on the device (ArkOS / ROCKNIX style)
 
@@ -100,7 +106,8 @@ version-mismatch failures at load time cannot occur.
 - Audio is the same 4-channel synth at 44.1 kHz written straight to
   ALSA via raw ioctls (falls back to 48 kHz if the device requires it).
   Set `RICO8_NOAUDIO=1` to disable audio entirely.
-- On a desktop TTY the player renders full-screen via KMS; `/dev/dri`
-  and `/dev/input` access is required (root or appropriate group).
+- When built with `--no-default-features --features kms` (the KMS backend),
+  the player renders full-screen via KMS on a bare TTY; `/dev/dri` and
+  `/dev/input` access is required (root or appropriate group).
 - Tested in CI headless and cross-built automatically; on-device testing
   reports are very welcome.

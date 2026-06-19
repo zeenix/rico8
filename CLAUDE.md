@@ -60,8 +60,10 @@ The workspace excludes `examples/` (those are standalone wasm crates). Five memb
   `music`).
 - **`rico8-web/`** — the browser player: `rico8-runtime` compiled to wasm and wrapped
   in a C-like export surface. `cdylib` + `rlib` (rlib so player logic is host-testable).
-- **`rico8-player/`** — pure-Rust KMS/evdev/ALSA cart player for handhelds and desktop
-  TTYs; builds as a fully static musl binary.
+- **`rico8-player/`** — pure-Rust cart player with two cargo-feature backends:
+  **`window`** (winit + softbuffer, the desktop default — opens a window with keyboard
+  input) and **`kms`** (static-musl KMS/evdev/ALSA, built with
+  `--no-default-features --features kms`, for handhelds and bare TTYs).
 
 ## Architecture essentials
 
