@@ -13,11 +13,11 @@ PNG images with the wasm + assets (and optionally source) embedded.
 ## Build, test, lint
 
 A one-time setup is required because cart-build tests cross-compile to wasm and the
-player/console link SDL2/ALSA:
+console links ALSA:
 
 ```sh
 rustup target add wasm32-unknown-unknown
-sudo apt install libsdl2-dev libasound2-dev   # debian/ubuntu (or SDL2-devel alsa-lib-devel on fedora)
+sudo apt install libasound2-dev   # debian/ubuntu (or alsa-lib-devel on fedora)
 ```
 
 ```sh
@@ -25,9 +25,9 @@ sudo apt install libsdl2-dev libasound2-dev   # debian/ubuntu (or SDL2-devel als
 cargo console
 cargo console -- examples/platformer    # boot with a project loaded, then type `run`
 
-# Tests — SDL opens with dummy drivers since CI/headless has no display or audio device
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy cargo test --workspace
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy cargo test -p rico8-runtime audio::   # single module/test
+# Tests
+cargo test --workspace
+cargo test -p rico8-runtime audio::   # single module/test
 
 # Format — .rustfmt.toml uses nightly-only options, so fmt MUST run on nightly
 cargo +nightly fmt --all
@@ -37,8 +37,7 @@ cargo clippy --workspace --all-targets -- -D warnings
 ```
 
 CI (`.github/workflows/ci.yml`) runs three jobs that must stay green: `fmt` (nightly),
-`clippy` (`-D warnings`), and `test` (workspace, dummy SDL drivers). Match them locally
-before pushing.
+`clippy` (`-D warnings`), and `test` (workspace). Match them locally before pushing.
 
 ## Workspace layout
 
@@ -61,8 +60,8 @@ The workspace excludes `examples/` (those are standalone wasm crates). Five memb
   `music`).
 - **`rico8-web/`** — the browser player: `rico8-runtime` compiled to wasm and wrapped
   in a C-like export surface. `cdylib` + `rlib` (rlib so player logic is host-testable).
-- **`rico8-player/`** — SDL2 cart player for handhelds and desktop couch play; links
-  the system SDL2.
+- **`rico8-player/`** — pure-Rust KMS/evdev/ALSA cart player for handhelds and desktop
+  TTYs; builds as a fully static musl binary.
 
 ## Architecture essentials
 

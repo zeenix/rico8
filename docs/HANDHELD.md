@@ -1,16 +1,19 @@
 # RICO-8 on handhelds
 
-`rico8-player` is the third frontend over the console runtime: an SDL2
-cart player sized for retro handhelds — PowKiddy RGB10S, the Anbernic
-RG351/353 family, and anything else aarch64 running ArkOS, ROCKNIX or
-a similar ports-friendly firmware. The same binary also runs on a
-desktop with SDL2, where it doubles as a minimal cart player.
+`rico8-player` is the third frontend over the console runtime: a pure-Rust
+KMS/evdev/ALSA cart player sized for retro handhelds — PowKiddy RGB10S, the
+Anbernic RG351/353 family, and anything else aarch64 running ArkOS, ROCKNIX or
+a similar ports-friendly firmware. The same binary also runs on a desktop TTY,
+where it opens full-screen via KMS (no window manager required).
 
 ```text
 rico8-player cart.png      play one cart
 rico8-player /path/to/dir  cart picker over a directory
 rico8-player               picker over the current directory
 ```
+
+For windowed cart testing on a desktop, use `cargo console` (its Run mode)
+instead.
 
 ## Controls
 
@@ -19,20 +22,16 @@ rico8-player               picker over the current directory
 | d-pad                     | directions / move in picker                      |
 | any face button           | O / X in game, launch in picker                  |
 | **hold both O + X (~1s)** | **return to the cart picker** (works on any pad) |
-| Select                    | back to picker (recognized pads)                 |
-| Start + Select            | quit (recognized pads)                           |
+| Select                    | back to picker (named pads)                      |
+| Start + Select            | quit (named pads)                                |
 | keyboard                  | arrows + Z/X, Esc = back, F1 = fps meter         |
 
-The picker shows the key controls along its bottom edge. Input prefers
-SDL's GameController API, which most firmwares preconfigure for their
-built-in pads; named buttons like Select/Start only work when the pad
-is recognized that way. Because that varies wildly across devices, the
-**hold-O+X** combo is the universal, always-available way back to the
-picker. For unrecognized pads you can bind raw button indices for
-Select/Start via `RICO8_SELECT` / `RICO8_START`, and dropping a
-[SDL_GameControllerDB](https://github.com/mdqinc/SDL_GameControllerDB)
-`gamecontrollerdb.txt` next to the binary (or `RICO8_GCDB`) can promote
-a pad to a recognized GameController.
+The picker shows the key controls along its bottom edge. Input is read
+directly from the kernel via evdev; named buttons like Select/Start only work
+when the driver reports them by those names. Because that varies across
+devices, the **hold-O+X** combo is the universal, always-available way back to
+the picker. For unrecognized pads you can bind raw evdev button indices via
+`RICO8_SELECT` / `RICO8_START`.
 
 ## Installing on the device (ArkOS / ROCKNIX style)
 
@@ -68,9 +67,7 @@ a pad to a recognized GameController.
 
 The launcher restores the binary's executable bit on each run, since
 FAT/exFAT game partitions don't preserve it. If a launch fails, the
-log at `rico8/log.txt` (next to the binary) says why — a glibc version
-mismatch there means the device's runtime is older than the build
-host's, so rebuild on / against an older system.
+log at `rico8/log.txt` (next to the binary) says why.
 
 You boot into the cart shelf: a console-style list of every cart on
 the card. Pick one with A; Select brings you back; runtime errors show
@@ -81,40 +78,29 @@ the same friendly RICO-8 error screen as everywhere else.
 On any Linux x86_64 machine with Rust:
 
 ```text
-rustup target add aarch64-unknown-linux-gnu armv7-unknown-linux-gnueabihf
-sudo apt install gcc-aarch64-linux-gnu gcc-arm-linux-gnueabihf zstd
-cargo install cargo-zigbuild                  # (script auto-fetches zig)
+rustup target add aarch64-unknown-linux-musl armv7-unknown-linux-musleabihf
 ./.github/build-handheld.sh                   # writes dist/handheld/
 ```
 
-It builds both the armhf and aarch64 binaries.
-
-The script downloads an aarch64 `libSDL2.so` (from Debian) purely to
-link against — at runtime the player uses the SDL2 the firmware ships,
-which is what knows about the device's KMS/DRM display, gamepad and
-audio path. The binary's only dynamic dependencies are `libSDL2-2.0`,
-libc, libm, libpthread and libdl.
-
-It builds with [`cargo-zigbuild`](https://github.com/rust-cross/cargo-zigbuild)
-against an **old glibc baseline** (`RICO8_GLIBC`, default 2.28) because
-these firmwares ship glibc ~2.31, while a stock cross toolchain emits
-`GLIBC_2.34+` references that fail to load with
-`version 'GLIBC_2.34' not found`. musl is not an option here: the
-player dynamically loads the device's glibc-linked `libSDL2.so`, which
-a musl-static process can't host. If a device turns out older still,
-lower the baseline, e.g. `RICO8_GLIBC=2.27 ./.github/build-handheld.sh`.
-
-A desktop build is just `cargo build --release -p rico8-player`
-(needs `libsdl2-dev` / `SDL2-devel`).
+That is all — no cross-compiler, no extra packages. The script produces fully
+static musl binaries for both armhf and aarch64, linked with rust-lld. There
+is no dynamic runtime dependency — the binaries are fully self-contained, so
+version-mismatch failures at load time cannot occur.
 
 ## Notes and limits
 
 - **Play only** — like the web export, this is a player, not the
   console. Make carts on a PC, copy the `.png`s over.
 - The screen is letterboxed to square (640x480 -> 480x480 on the
-  RGB10S) with nearest-neighbor scaling.
+  RGB10S) with nearest-neighbor scaling. Set `RICO8_ROTATE=90`,
+  `180`, or `270` to rotate the output, and `RICO8_DRM_CARD` to
+  override the default `/dev/dri/card0`.
 - Cart-rate logic (30 or 60 fps) with its own timer; vsync is used when
   the device renderer provides it.
-- Audio is the same 4-channel synth at 44.1 kHz through SDL/ALSA.
-- Tested in CI headless (SDL dummy drivers) and cross-built
-  automatically; on-device testing reports are very welcome.
+- Audio is the same 4-channel synth at 44.1 kHz written straight to
+  ALSA via raw ioctls (falls back to 48 kHz if the device requires it).
+  Set `RICO8_NOAUDIO=1` to disable audio entirely.
+- On a desktop TTY the player renders full-screen via KMS; `/dev/dri`
+  and `/dev/input` access is required (root or appropriate group).
+- Tested in CI headless and cross-built automatically; on-device testing
+  reports are very welcome.
