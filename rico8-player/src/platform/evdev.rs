@@ -28,8 +28,10 @@ pub fn map_key(k: KeyCode) -> Option<Mapped> {
         KeyCode::BTN_DPAD_RIGHT => Button(1),
         KeyCode::BTN_DPAD_UP => Button(2),
         KeyCode::BTN_DPAD_DOWN => Button(3),
-        KeyCode::BTN_SOUTH | KeyCode::BTN_NORTH | KeyCode::BTN_0 | KeyCode::BTN_3 => Button(4),
-        KeyCode::BTN_EAST | KeyCode::BTN_WEST | KeyCode::BTN_1 | KeyCode::BTN_2 => Button(5),
+        // Match PICO-8's gamepad layout: O (4) is the east/B button, X (5) is the south/A button.
+        // The keyboard above keeps Z = O / X = X; only the pad's two face buttons swap.
+        KeyCode::BTN_EAST | KeyCode::BTN_WEST | KeyCode::BTN_1 | KeyCode::BTN_2 => Button(4),
+        KeyCode::BTN_SOUTH | KeyCode::BTN_NORTH | KeyCode::BTN_0 | KeyCode::BTN_3 => Button(5),
         KeyCode::BTN_SELECT => Select,
         KeyCode::BTN_START => Start,
         _ => return None,
@@ -144,16 +146,17 @@ mod tests {
     #[test]
     fn gamepad_dpad_and_buttons() {
         assert_eq!(map_key(KeyCode::BTN_DPAD_UP), Some(Mapped::Button(2)));
-        assert_eq!(map_key(KeyCode::BTN_SOUTH), Some(Mapped::Button(4)));
-        assert_eq!(map_key(KeyCode::BTN_EAST), Some(Mapped::Button(5)));
+        // PICO-8 layout: east/B = O (4), south/A = X (5).
+        assert_eq!(map_key(KeyCode::BTN_EAST), Some(Mapped::Button(4)));
+        assert_eq!(map_key(KeyCode::BTN_SOUTH), Some(Mapped::Button(5)));
         assert_eq!(map_key(KeyCode::BTN_SELECT), Some(Mapped::Select));
         assert_eq!(map_key(KeyCode::BTN_START), Some(Mapped::Start));
     }
 
     #[test]
     fn raw_face_fallback_indices() {
-        // Nintendo-style cross fallback for unmapped pads: BTN_0/3 = O, BTN_1/2 = X.
-        assert_eq!(map_key(KeyCode::BTN_0), Some(Mapped::Button(4)));
-        assert_eq!(map_key(KeyCode::BTN_1), Some(Mapped::Button(5)));
+        // Nintendo-style cross fallback for unmapped pads: BTN_1/2 = O, BTN_0/3 = X.
+        assert_eq!(map_key(KeyCode::BTN_1), Some(Mapped::Button(4)));
+        assert_eq!(map_key(KeyCode::BTN_0), Some(Mapped::Button(5)));
     }
 }
