@@ -7,7 +7,7 @@ mod platform;
 
 use anyhow::{anyhow, Result};
 use app::App;
-use platform::null::NullPlatform;
+use platform::{kms::KmsPlatform, null::NullPlatform};
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -32,10 +32,18 @@ fn main() -> Result<()> {
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
 
-    // INTERIM: NullPlatform for every path. Task 9 swaps the non-smoke path to KmsPlatform,
-    // passing `rotate` so the display is oriented correctly for the device's panel.
     let audio = rico8_runtime::audio::AudioHandle::dummy();
-    let platform: Box<dyn platform::Platform> = Box::new(NullPlatform::new());
+    let platform: Box<dyn platform::Platform> = if smoke.is_some() {
+        Box::new(NullPlatform::new())
+    } else {
+        match KmsPlatform::new(audio.clone()) {
+            Ok(p) => Box::new(p),
+            Err(e) => {
+                eprintln!("rico8-player: KMS init failed: {e:#}");
+                return Err(e);
+            }
+        }
+    };
     let mut app = App::new(platform, audio, smoke);
     if target.is_file() {
         app.play(&target)?;

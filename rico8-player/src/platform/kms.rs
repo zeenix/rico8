@@ -44,8 +44,6 @@ impl ControlDevice for Card {}
 pub struct KmsPlatform {
     card: Card,
     crtc: crtc::Handle,
-    connector: connector::Handle,
-    mode: Mode,
     dumb: [DumbBuffer; 2],
     fb: [framebuffer::Handle; 2],
     /// Index of the currently displayed (front) buffer.
@@ -73,18 +71,17 @@ impl KmsPlatform {
         let (db0, fb0) = make_buffer(&card, w, h)?;
         let (db1, fb1) = make_buffer(&card, w, h)?;
 
-        let rotate = Rotate::from_env_or(detect_rotation(&card, con.handle()));
+        let con_handle = con.handle();
+        let rotate = Rotate::from_env_or(detect_rotation(&card, con_handle));
 
         let vt = set_vt_graphics();
 
         // Initial modeset: put the front buffer on screen.
-        card.set_crtc(crtc, Some(fb0), (0, 0), &[con.handle()], Some(mode))?;
+        card.set_crtc(crtc, Some(fb0), (0, 0), &[con_handle], Some(mode))?;
 
         Ok(KmsPlatform {
             card,
             crtc,
-            connector: con.handle(),
-            mode,
             dumb: [db0, db1],
             fb: [fb0, fb1],
             front: 0,
