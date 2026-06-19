@@ -1,13 +1,14 @@
 # Build the handheld cart player as fully-static musl binaries for
 # aarch64/armv7 devices (PowKiddy RGB10S, Anbernic RG351/353, ...) on
-# every push to main, smoke-test the same code on the host, and upload
-# a ready-to-copy ports bundle as an artifact.
+# every push to main and on pull requests, smoke-test the same code on
+# the host, and upload a ready-to-copy ports bundle as an artifact.
 
 name: build handheld player
 
 on:
   push:
     branches: [main]
+  pull_request:
   workflow_dispatch:
 
 permissions:
