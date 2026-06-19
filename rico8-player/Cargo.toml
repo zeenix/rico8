@@ -12,4 +12,6 @@ description = "RICO-8 cart player for handhelds and the couch: KMS/evdev/ALSA ba
 rico8-runtime.workspace = true
 anyhow.workspace = true
 evdev = "0.13.2"
-nix = { version = "0.31.3", features = ["ioctl"] }
+nix = { version = "0.31.3", features = ["ioctl", "poll"] }
+drm = "0.15.0"
+bytemuck = "1.25.0"

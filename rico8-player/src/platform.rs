@@ -4,6 +4,7 @@
 pub mod alsa;
 pub mod blit;
 pub mod evdev;
+pub mod kms;
 pub mod null;
 
 use anyhow::Result;
