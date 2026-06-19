@@ -1189,16 +1189,19 @@ impl Shell {
                     }
                 } else {
                     self.run_after_build = false;
+                    // A failed build must never pass silently: whether it was
+                    // kicked off from an editor or by an external edit while a
+                    // cart is running, drop straight back to the console (and
+                    // stop the now-stale cart) so the whole error list is on
+                    // screen, rather than relying on a toast that the editor
+                    // clips off the right edge of the screen.
+                    self.stop_run("");
                     let n = result
                         .errors
                         .iter()
                         .filter(|l| l.starts_with("error"))
                         .count();
-                    self.toast(
-                        &format!("Build failed ({n} errors) - press esc"),
-                        col::RED,
-                        5.0,
-                    );
+                    self.say(&format!("Build failed ({n} errors)"), col::RED);
                     for line in &result.errors {
                         let color = if line.starts_with("error") {
                             col::RED
@@ -1705,9 +1708,22 @@ mod tests {
             }
             std::thread::sleep(std::time::Duration::from_millis(33));
         }
-        let (text, color, _) = shell.toast.as_ref().unwrap();
+        // The build-failure summary is now printed to the console buffer (not
+        // the toast), and the mode drops back to Console.
+        assert_eq!(
+            shell.mode,
+            Mode::Console,
+            "expected console mode after build failure"
+        );
+        let summary = shell.lines.iter().find_map(|l| match l {
+            ConsoleLine::Text { text, color } if text.starts_with("Build failed") => {
+                Some((text.clone(), *color))
+            }
+            _ => None,
+        });
+        let (text, color) = summary.expect("Build failed summary not found in console lines");
         assert!(text.starts_with("Build failed"), "got: {text}");
-        assert_eq!(*color, col::RED);
+        assert_eq!(color, col::RED);
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
