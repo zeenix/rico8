@@ -1,6 +1,7 @@
 //! The platform seam: everything device-specific (display, input) lives behind this trait,
 //! so the picker and game loop are written once and tested headless.
 
+pub mod blit;
 pub mod null;
 
 use anyhow::Result;
