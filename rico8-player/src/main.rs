@@ -19,6 +19,7 @@
 //! so the same binary doubles as a desktop cart player.
 
 mod picker;
+mod platform;
 
 use anyhow::{anyhow, Result};
 use rico8_runtime::{
