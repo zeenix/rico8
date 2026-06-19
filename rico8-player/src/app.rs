@@ -216,21 +216,25 @@ impl App {
         // `None` until the first frame establishes a baseline, so a button still held from the
         // previous screen (e.g. the in-game hold-O+X exit) is not read as a fresh press here.
         let mut prev: Option<InputSnapshot> = None;
+        let quit_row = carts.len();
         loop {
             let snap = self.platform.poll();
             if snap.quit_requested || snap.select {
                 return Ok(None);
             }
             if let Some(p) = &prev {
-                // Edge-detect d-pad up/down and any face button (launch).
+                // Edge-detect d-pad up/down and any face button (select / launch).
                 let edge = |i: usize| snap.buttons[i] && !p.buttons[i];
                 if edge(2) {
                     sel = sel.saturating_sub(1);
                 }
                 if edge(3) {
-                    sel = (sel + 1).min(carts.len().saturating_sub(1));
+                    sel = (sel + 1).min(quit_row);
                 }
-                if (edge(4) || edge(5)) && !carts.is_empty() {
+                if edge(4) || edge(5) {
+                    if sel == quit_row {
+                        return Ok(None);
+                    }
                     return Ok(Some(carts[sel].clone()));
                 }
             }
@@ -405,6 +409,49 @@ mod app_tests {
             "held button on entry must not launch a cart (got {result:?})"
         );
         std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn empty_dir_quit_row_exits() {
+        // No carts: the only selectable entry is "-- quit --"; a fresh face press exits.
+        let pressed = InputSnapshot {
+            buttons: [false, false, false, false, true, false],
+            ..Default::default()
+        };
+        // Baseline frame, then a fresh press on the quit row.
+        let frames = vec![InputSnapshot::default(), pressed];
+        let platform = Box::new(NullPlatform::scripted(frames));
+        let mut app = App::new(platform, AudioHandle::dummy(), Some(10));
+        let result = app.picker_loop(Path::new("/tmp/rico8-empty"), &[]).unwrap();
+        assert!(
+            result.is_none(),
+            "pressing on the quit row exits the picker"
+        );
+    }
+
+    #[test]
+    fn navigating_to_quit_row_exits() {
+        let carts = vec![PathBuf::from("a.png"), PathBuf::from("b.png")]; // quit_row = 2.
+        let down = InputSnapshot {
+            buttons: [false, false, false, true, false, false],
+            ..Default::default()
+        };
+        let none = InputSnapshot::default();
+        let press = InputSnapshot {
+            buttons: [false, false, false, false, true, false],
+            ..Default::default()
+        };
+        // Baseline, two down-edges to reach the quit row, then a face press.
+        let frames = vec![none, down, none, down, none, press];
+        let platform = Box::new(NullPlatform::scripted(frames));
+        let mut app = App::new(platform, AudioHandle::dummy(), Some(20));
+        let result = app
+            .picker_loop(Path::new("/tmp/rico8-carts"), &carts)
+            .unwrap();
+        assert!(
+            result.is_none(),
+            "navigating to the quit row and pressing exits"
+        );
     }
 
     /// A genuine button press that happens AFTER a full release cycle still launches.

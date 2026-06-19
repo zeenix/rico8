@@ -43,35 +43,43 @@ pub fn draw_picker(dir: &Path, carts: &[PathBuf], sel: usize, frame: u32) -> Fra
             .collect();
         fb.print(&tail, 2, 38, col::LIGHT_GREY);
         fb.print("copy .png carts here!", 2, 54, col::ORANGE);
-        return fb;
     }
 
-    // A window of entries around the selection (leaving room for the
-    // controls footer).
+    // The selectable list is the carts followed by a trailing "-- quit --" entry, so the
+    // window of rows and the selection index both span `carts.len() + 1`.
+    let total = carts.len() + 1;
     let rows = 13usize;
-    let top = sel
-        .saturating_sub(rows / 2)
-        .min(carts.len().saturating_sub(rows));
-    for (row, cart_path) in carts.iter().skip(top).take(rows).enumerate() {
+    let top = sel.saturating_sub(rows / 2).min(total.saturating_sub(rows));
+    for row in 0..rows.min(total.saturating_sub(top)) {
         let i = top + row;
         let y = 22 + row as i32 * 7;
-        let name = cart_path
-            .file_stem()
-            .map(|s| s.to_string_lossy().into_owned())
-            .unwrap_or_default();
+        let is_quit = i == carts.len();
+        let name = if is_quit {
+            "-- quit --".to_string()
+        } else {
+            carts[i]
+                .file_stem()
+                .map(|s| s.to_string_lossy().into_owned())
+                .unwrap_or_default()
+        };
         if i == sel {
             fb.rectfill(0, y - 1, 127, y + 5, col::DARK_BLUE);
             // Blinking chevron, console style.
             if (frame / 8).is_multiple_of(2) {
                 fb.print(">", 2, y, col::RED);
             }
-            fb.print(&name, 8, y, col::WHITE);
+            fb.print(&name, 8, y, if is_quit { col::RED } else { col::WHITE });
         } else {
-            fb.print(&name, 8, y, col::LIGHT_GREY);
+            fb.print(
+                &name,
+                8,
+                y,
+                if is_quit { col::RED } else { col::LIGHT_GREY },
+            );
         }
     }
     // Controls, along the bottom of the shelf.
-    fb.print("up/dn:pick   any btn:play", 2, 114, col::DARK_GREY);
+    fb.print("up/dn:pick   o/x:select", 2, 114, col::DARK_GREY);
     fb.print("in game: hold o+x to exit", 2, 121, col::DARK_GREY);
     fb
 }
