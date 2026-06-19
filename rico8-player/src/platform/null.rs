@@ -1,6 +1,6 @@
 //! A headless backend: presents nowhere, replays scripted input. Used by `--smoke` and tests.
 
-use crate::platform::{InputSnapshot, Platform, Rotate};
+use crate::platform::{InputSnapshot, Platform};
 use anyhow::Result;
 use rico8_runtime::fb::Framebuffer;
 
@@ -15,11 +15,6 @@ impl NullPlatform {
             scripted: Default::default(),
             presented: 0,
         }
-    }
-
-    /// Construct with a display rotation hint (ignored; stored for API parity with `KmsPlatform`).
-    pub fn with_rotate(_rotate: Rotate) -> NullPlatform {
-        NullPlatform::new()
     }
 
     #[cfg(test)]

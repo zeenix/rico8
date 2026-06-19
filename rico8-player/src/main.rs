@@ -7,7 +7,7 @@ mod platform;
 
 use anyhow::{anyhow, Result};
 use app::App;
-use platform::{null::NullPlatform, Rotate};
+use platform::null::NullPlatform;
 use std::path::PathBuf;
 
 fn main() -> Result<()> {
@@ -34,9 +34,8 @@ fn main() -> Result<()> {
 
     // INTERIM: NullPlatform for every path. Task 9 swaps the non-smoke path to KmsPlatform,
     // passing `rotate` so the display is oriented correctly for the device's panel.
-    let rotate = Rotate::from_env_or(Rotate::None);
     let audio = rico8_runtime::audio::AudioHandle::dummy();
-    let platform: Box<dyn platform::Platform> = Box::new(NullPlatform::with_rotate(rotate));
+    let platform: Box<dyn platform::Platform> = Box::new(NullPlatform::new());
     let mut app = App::new(platform, audio, smoke);
     if target.is_file() {
         app.play(&target)?;

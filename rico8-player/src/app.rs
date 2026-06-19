@@ -187,16 +187,13 @@ impl App {
         let mut shown = 0u32;
         loop {
             let snap = self.platform.poll();
-            // Any back/quit signal, or any face button, leaves the error screen.
-            let exit = matches!(
-                controls.update(&snap, UI_FPS),
-                ControlAction::BackToPicker | ControlAction::Quit
-            ) || snap.buttons[4]
-                || snap.buttons[5];
-            if snap.quit_requested {
-                return Ok(Flow::Quit);
+            match controls.update(&snap, UI_FPS) {
+                ControlAction::Quit => return Ok(Flow::Quit),
+                ControlAction::BackToPicker => return Ok(Flow::BackToPicker),
+                _ => {}
             }
-            if exit {
+            // Any face button also leaves the error screen, back to the picker.
+            if snap.buttons[4] || snap.buttons[5] {
                 return Ok(Flow::BackToPicker);
             }
             self.platform.present(&fb)?;
