@@ -213,24 +213,28 @@ impl App {
         let mut sel = 0usize;
         let mut frame = 0u32;
         let mut next = Instant::now();
-        let mut prev = InputSnapshot::default();
+        // `None` until the first frame establishes a baseline, so a button still held from the
+        // previous screen (e.g. the in-game hold-O+X exit) is not read as a fresh press here.
+        let mut prev: Option<InputSnapshot> = None;
         loop {
             let snap = self.platform.poll();
             if snap.quit_requested || snap.select {
                 return Ok(None);
             }
-            // Edge-detect d-pad up/down and any face button (launch).
-            let edge = |i: usize| snap.buttons[i] && !prev.buttons[i];
-            if edge(2) {
-                sel = sel.saturating_sub(1);
+            if let Some(p) = &prev {
+                // Edge-detect d-pad up/down and any face button (launch).
+                let edge = |i: usize| snap.buttons[i] && !p.buttons[i];
+                if edge(2) {
+                    sel = sel.saturating_sub(1);
+                }
+                if edge(3) {
+                    sel = (sel + 1).min(carts.len().saturating_sub(1));
+                }
+                if (edge(4) || edge(5)) && !carts.is_empty() {
+                    return Ok(Some(carts[sel].clone()));
+                }
             }
-            if edge(3) {
-                sel = (sel + 1).min(carts.len().saturating_sub(1));
-            }
-            if (edge(4) || edge(5)) && !carts.is_empty() {
-                return Ok(Some(carts[sel].clone()));
-            }
-            prev = snap;
+            prev = Some(snap);
 
             let fb = picker::draw_picker(dir, carts, sel, frame);
             self.platform.present(&fb)?;
@@ -369,6 +373,64 @@ mod app_tests {
         let platform = Box::new(NullPlatform::scripted(vec![snap]));
         let mut app = App::new(platform, AudioHandle::dummy(), None);
         app.picker(&dir).unwrap(); // returns without hanging
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A button still held when re-entering the picker (e.g. the in-game hold-O+X exit) must
+    /// NOT be treated as a fresh press. The first frame establishes the baseline; held buttons
+    /// only act on a subsequent rising edge.
+    #[test]
+    fn held_face_button_on_entry_does_not_launch() {
+        let dir = std::env::temp_dir().join(format!("rico8_app3_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        // Create a dummy cart so carts list is non-empty.
+        std::fs::write(dir.join("test.png"), b"dummy").unwrap();
+
+        // Button 4 (O) held on every frame — no release, no rising edge.
+        let held = InputSnapshot {
+            buttons: [false, false, false, false, true, false],
+            ..Default::default()
+        };
+        let frames = vec![held, held, held];
+        let platform = Box::new(NullPlatform::scripted(frames));
+        // smoke=3 so the loop exits via the smoke limit, not a launch.
+        let mut app = App::new(platform, AudioHandle::dummy(), Some(3));
+        let carts = vec![dir.join("test.png")];
+        // With the OLD code this returns Ok(Some(..)) on frame 0 (false positive launch).
+        // With the fix it returns Ok(None) (exits via smoke, no cart launched).
+        let result = app.picker_loop(&dir, &carts).unwrap();
+        assert!(
+            result.is_none(),
+            "held button on entry must not launch a cart (got {result:?})"
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A genuine button press that happens AFTER a full release cycle still launches.
+    #[test]
+    fn fresh_press_after_release_launches() {
+        let dir = std::env::temp_dir().join(format!("rico8_app4_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("test.png"), b"dummy").unwrap();
+
+        let held = InputSnapshot {
+            buttons: [false, false, false, false, true, false],
+            ..Default::default()
+        };
+        let released = InputSnapshot::default();
+        // Sequence: held, held, released, held (fresh press).
+        let frames = vec![held, held, released, held];
+        let platform = Box::new(NullPlatform::scripted(frames));
+        let mut app = App::new(platform, AudioHandle::dummy(), Some(10));
+        let carts = vec![dir.join("test.png")];
+        let result = app.picker_loop(&dir, &carts).unwrap();
+        assert_eq!(
+            result,
+            Some(carts[0].clone()),
+            "genuine press after release must launch the selected cart"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

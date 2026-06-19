@@ -76,7 +76,11 @@ impl KmsPlatform {
 
         // Initial modeset: put the front buffer on screen. Switch to VT graphics mode only
         // after the modeset succeeds so a failed set_crtc does not leave the console blank.
-        card.set_crtc(crtc, Some(fb0), (0, 0), &[con_handle], Some(mode))?;
+        card.set_crtc(crtc, Some(fb0), (0, 0), &[con_handle], Some(mode))
+            .context(
+                "setting the display mode (could not become DRM master \
+                — close any running compositor or run from a bare TTY)",
+            )?;
         let vt = set_vt_graphics();
 
         Ok(KmsPlatform {
@@ -129,15 +133,61 @@ impl Drop for KmsPlatform {
 
 // ── helpers ──────────────────────────────────────────────────────────────────
 
-/// Open the DRM device at `RICO8_DRM_CARD` (default `/dev/dri/card0`).
+/// Open the DRM device.
+///
+/// If `RICO8_DRM_CARD` is set, open exactly that path. Otherwise scan `/dev/dri` for `card*`
+/// entries (sorted for determinism) and return the first one that both opens successfully and has
+/// at least one connected connector.
 fn open_card() -> Result<Card> {
-    let path = std::env::var("RICO8_DRM_CARD").unwrap_or_else(|_| "/dev/dri/card0".into());
-    let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
-        .open(&path)
-        .with_context(|| format!("opening {path}"))?;
-    Ok(Card(OwnedFd::from(file)))
+    if let Ok(path) = std::env::var("RICO8_DRM_CARD") {
+        let file = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+            .with_context(|| format!("opening {path}"))?;
+        return Ok(Card(OwnedFd::from(file)));
+    }
+
+    let mut names: Vec<std::ffi::OsString> = std::fs::read_dir("/dev/dri")
+        .context("reading /dev/dri")?
+        .filter_map(|e| e.ok())
+        .map(|e| e.file_name())
+        .filter(|n| n.to_str().is_some_and(|s| s.starts_with("card")))
+        .collect();
+    names.sort();
+
+    for name in &names {
+        let path = std::path::Path::new("/dev/dri").join(name);
+        let Ok(file) = std::fs::OpenOptions::new()
+            .read(true)
+            .write(true)
+            .open(&path)
+        else {
+            continue;
+        };
+        let card = Card(OwnedFd::from(file));
+        if card_has_display(&card) {
+            return Ok(card);
+        }
+    }
+
+    Err(anyhow!(
+        "no DRM device with a connected display found in /dev/dri. \
+        The desktop player must run from a bare virtual terminal \
+        (e.g. Ctrl+Alt+F3), not inside an X11/Wayland session. \
+        Set RICO8_DRM_CARD to override."
+    ))
+}
+
+/// Return `true` when `card` exposes at least one connected connector.
+fn card_has_display(card: &Card) -> bool {
+    let Ok(res) = card.resource_handles() else {
+        return false;
+    };
+    res.connectors().iter().any(|&h| {
+        card.get_connector(h, false)
+            .is_ok_and(|c| c.state() == connector::State::Connected)
+    })
 }
 
 /// Find a connected connector, its preferred (or first) mode, and a compatible CRTC.
