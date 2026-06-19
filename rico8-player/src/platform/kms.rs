@@ -11,7 +11,7 @@ use anyhow::{anyhow, Context, Result};
 use drm::{
     buffer::{Buffer as DrmBuffer, DrmFourcc},
     control::{
-        connector, crtc, dumbbuffer::DumbBuffer, framebuffer, Device as ControlDevice, Event, Mode,
+        connector, crtc, dumbbuffer::DumbBuffer, framebuffer, Device as ControlDevice, Mode,
         ModeTypeFlags, PageFlipFlags,
     },
     Device as DrmDevice,
@@ -220,11 +220,9 @@ fn blit_to_dumb(
 fn wait_for_page_flip(card: &Card) -> Result<()> {
     let mut pfds = [PollFd::new(card.as_fd(), PollFlags::POLLIN)];
     poll(&mut pfds, PollTimeout::NONE)?;
-    for ev in card.receive_events()? {
-        if let Event::PageFlip(_) = ev {
-            break;
-        }
-    }
+    // Drain every event from this read; the page-flip we queued is among them, and
+    // breaking early would discard any events that follow it in the same buffer.
+    for _ev in card.receive_events()? {}
     Ok(())
 }
 
