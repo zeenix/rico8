@@ -25,6 +25,12 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
 
+      # ALSA headers for the cpal audio used by the console and the windowed player.
+      - name: Install ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
       - name: Host smoke test
         run: |
           cargo test -p rico8-player
