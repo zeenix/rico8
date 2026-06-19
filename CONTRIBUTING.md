@@ -70,20 +70,16 @@ your changes. If anything does not pass, typically it will be easier to iterate 
 than waiting for the CI servers to run tests for you.
 
 Building and testing needs the `wasm32-unknown-unknown` target (the cart-build tests compile carts
-for it) and, on Linux, the SDL2 and ALSA headers (for the player and the console's audio):
+for it) and, on Linux, the ALSA headers (for the cpal audio used by the console and the windowed
+player):
 
 ```sh
 rustup target add wasm32-unknown-unknown
-sudo apt install libsdl2-dev libasound2-dev   # debian/ubuntu
-sudo dnf install SDL2-devel alsa-lib-devel    # fedora
+sudo apt install libasound2-dev   # debian/ubuntu
+sudo dnf install alsa-lib-devel   # fedora
 ```
 
-The player's tests open SDL with no display or audio device, so point them at the dummy drivers when
-running headless:
-
-```sh
-SDL_VIDEODRIVER=dummy SDL_AUDIODRIVER=dummy cargo test --workspace
-```
+The tests run headlessly with no display or audio device, so `cargo test --workspace` just works.
 
 Also please ensure that code is formatted correctly. `.rustfmt.toml` uses nightly-only options, so
 formatting runs on nightly:
