@@ -34,13 +34,14 @@ jobs:
           components: clippy
       - uses: Swatinem/rust-cache@v2
 
-      # SDL2 for the player, ALSA for the console's audio feature.
-      - name: Install SDL2 and ALSA headers
+      # ALSA headers for the cpal audio used by the console and the windowed player.
+      - name: Install ALSA headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev libasound2-dev
+          sudo apt-get install -y libasound2-dev
 
       - run: cargo clippy --workspace --all-targets -- -D warnings
+      - run: cargo clippy -p rico8-player --no-default-features --features kms --all-targets -- -D warnings
 
   test:
     runs-on: ubuntu-latest
@@ -53,16 +54,11 @@ jobs:
           targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
 
-      # SDL2 for the player, ALSA for the console's audio feature.
-      - name: Install SDL2 and ALSA headers
+      # ALSA headers for the cpal audio used by the console and the windowed player.
+      - name: Install ALSA headers
         run: |
           sudo apt-get update
-          sudo apt-get install -y libsdl2-dev libasound2-dev
+          sudo apt-get install -y libasound2-dev
 
-      # SDL has no display or audio device on the runner; the dummy
-      # drivers let the player tests initialize headlessly.
-      - name: Run the test suite
-        run: cargo test --workspace
-        env:
-          SDL_VIDEODRIVER: dummy
-          SDL_AUDIODRIVER: dummy
+      - run: cargo test --workspace
+      - run: cargo test -p rico8-player --no-default-features --features kms
