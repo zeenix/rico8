@@ -46,21 +46,34 @@ fn main() -> Result<()> {
 
 /// Build the display/input backend plus the audio handle the running cart writes to. The third
 /// element is a keepalive whose drop stops audio (used by a later cpal backend; `()` for KMS).
+///
+/// `window` is preferred when enabled (the desktop default); `kms` drives the handheld build,
+/// where `window` is off. A build with neither backend errors at runtime.
 fn build_backend(smoke: Option<u32>) -> Result<(Box<dyn platform::Platform>, AudioHandle, ())> {
     if smoke.is_some() {
         return Ok((Box::new(NullPlatform::new()), AudioHandle::dummy(), ()));
     }
-    #[cfg(feature = "kms")]
-    {
-        let audio = AudioHandle::dummy();
-        let platform = platform::kms::KmsPlatform::new(audio.clone())?;
-        Ok((Box::new(platform), audio, ()))
-    }
-    #[cfg(not(feature = "kms"))]
-    {
-        let _ = smoke;
-        Err(anyhow!(
-            "rico8-player was built with no display backend; enable the `window` or `kms` feature"
-        ))
-    }
+    real_backend()
+}
+
+/// The non-smoke backend, selected at compile time by the enabled feature.
+#[cfg(feature = "window")]
+fn real_backend() -> Result<(Box<dyn platform::Platform>, AudioHandle, ())> {
+    let audio = AudioHandle::dummy();
+    let platform = platform::window::WindowPlatform::new()?;
+    Ok((Box::new(platform), audio, ()))
+}
+
+#[cfg(all(feature = "kms", not(feature = "window")))]
+fn real_backend() -> Result<(Box<dyn platform::Platform>, AudioHandle, ())> {
+    let audio = AudioHandle::dummy();
+    let platform = platform::kms::KmsPlatform::new(audio.clone())?;
+    Ok((Box::new(platform), audio, ()))
+}
+
+#[cfg(not(any(feature = "window", feature = "kms")))]
+fn real_backend() -> Result<(Box<dyn platform::Platform>, AudioHandle, ())> {
+    Err(anyhow!(
+        "rico8-player was built with no display backend; enable the `window` or `kms` feature"
+    ))
 }

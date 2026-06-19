@@ -16,7 +16,7 @@ build_arch() {
   local rust_target="$1" suffix="$2"
   rustup target add "$rust_target" >/dev/null 2>&1 || true
   echo "building rico8-player for $rust_target..."
-  cargo build --release -p rico8-player --target "$rust_target"
+  cargo build --release -p rico8-player --no-default-features --features kms --target "$rust_target"
   cp "$root/target/$rust_target/release/rico8-player" "$out/rico8/rico8-player.$suffix"
   echo "  -> rico8-player.$suffix ($(file -b "$out/rico8/rico8-player.$suffix" | cut -d, -f1,2))"
 }

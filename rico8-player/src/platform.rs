@@ -3,13 +3,15 @@
 
 #[cfg(feature = "kms")]
 pub mod alsa;
-#[cfg(feature = "kms")]
+#[cfg(any(feature = "kms", feature = "window"))]
 pub mod blit;
 #[cfg(feature = "kms")]
 pub mod evdev;
 #[cfg(feature = "kms")]
 pub mod kms;
 pub mod null;
+#[cfg(feature = "window")]
+pub mod window;
 
 use anyhow::Result;
 use rico8_runtime::fb::Framebuffer;
@@ -40,7 +42,7 @@ pub struct InputSnapshot {
 }
 
 /// Screen rotation applied during the blit, for panels mounted rotated.
-#[cfg(feature = "kms")]
+#[cfg(any(feature = "kms", feature = "window"))]
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Rotate {
     None,
@@ -49,7 +51,7 @@ pub enum Rotate {
     Cw270,
 }
 
-#[cfg(feature = "kms")]
+#[cfg(any(feature = "kms", feature = "window"))]
 impl Rotate {
     /// `RICO8_ROTATE=0|90|180|270` overrides `default`; an unset/invalid value keeps `default`.
     pub fn from_env_or(default: Rotate) -> Rotate {
