@@ -289,7 +289,8 @@ fn run_windowed(load: Option<String>) -> Result<()> {
         gpu: None,
         shell,
         mods: Mods::default(),
-        next_tick: Instant::now(),
+        last_tick: Instant::now(),
+        vsync_paced: true,
         #[cfg(feature = "audio")]
         _audio_out: audio_out,
     };
@@ -302,7 +303,14 @@ struct App {
     gpu: Option<gpu::Gpu>,
     shell: Shell,
     mods: Mods,
-    next_tick: Instant,
+    /// When the last logical frame was ticked. Updates are phase-locked to the
+    /// vsync'd redraw instead of a free-running wall clock, so a 60 fps cart on
+    /// a ~60 Hz panel advances exactly once per refresh (no beating/judder).
+    last_tick: Instant,
+    /// Whether the last present blocked on vblank. When it did, the panel paces
+    /// the loop; when it didn't (window occluded/minimized), we fall back to a
+    /// wall-clock cap so the loop never busy-spins.
+    vsync_paced: bool,
     #[cfg(feature = "audio")]
     _audio_out: Option<rico8_runtime::audio::AudioOutput>,
 }
@@ -366,6 +374,8 @@ impl ApplicationHandler for App {
         match gpu::Gpu::new(window.clone(), event_loop.owned_display_handle()) {
             Ok(g) => {
                 self.gpu = Some(g);
+                // Kick the vsync-driven render loop; each frame re-arms it.
+                window.request_redraw();
                 self.window = Some(window);
             }
             Err(e) => {
@@ -430,12 +440,30 @@ impl ApplicationHandler for App {
                 }
             }
             WindowEvent::RedrawRequested => {
-                let shell = &mut self.shell;
-                let fb = shell.draw();
+                // One logical tick per vsync'd frame. The 3/4-frame threshold
+                // makes a 60 fps cart on a ~60 Hz panel advance exactly once
+                // per refresh (phase-locked, no 60-vs-59.97 beating) while
+                // capping logical speed on high-refresh panels.
+                let now = Instant::now();
+                let frame = frame_duration(self.shell.tick_fps());
+                if now.duration_since(self.last_tick) >= frame * 3 / 4 {
+                    self.shell.tick();
+                    self.last_tick = now;
+                }
+                if self.shell.want_exit {
+                    event_loop.exit();
+                    return;
+                }
+                let fb = self.shell.draw();
                 if let Some(g) = &mut self.gpu {
+                    let present = Instant::now();
                     if let Err(e) = g.render(fb) {
                         eprintln!("rico8: Render error: {e:#}");
                     }
+                    // A real Fifo present waits for vblank (milliseconds); an
+                    // instant return means the surface isn't presenting (the
+                    // window is occluded), so the loop must self-pace instead.
+                    self.vsync_paced = present.elapsed() >= Duration::from_millis(3);
                 }
             }
             _ => {}
@@ -443,27 +471,23 @@ impl ApplicationHandler for App {
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
-        let now = Instant::now();
-        let mut ticked = false;
-        let frame = frame_duration(self.shell.tick_fps());
-        while Instant::now() >= self.next_tick {
-            self.shell.tick();
-            self.next_tick += frame;
-            ticked = true;
-            // Don't death-spiral after a long stall.
-            if now > self.next_tick + frame * 10 {
-                self.next_tick = now + frame;
-            }
-        }
         if self.shell.want_exit {
             event_loop.exit();
             return;
         }
-        if ticked {
-            if let Some(w) = &self.window {
-                w.request_redraw();
-            }
+        // Re-arm the redraw every iteration; the game advances in the
+        // RedrawRequested handler, one frame per refresh.
+        if let Some(w) = &self.window {
+            w.request_redraw();
         }
-        event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_tick));
+        // When the present blocks on vblank it paces the loop, so just wait for
+        // the re-armed redraw. When it doesn't (occluded window), cap to the
+        // frame interval so the loop never busy-spins.
+        if self.vsync_paced {
+            event_loop.set_control_flow(ControlFlow::Wait);
+        } else {
+            let frame = frame_duration(self.shell.tick_fps());
+            event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + frame));
+        }
     }
 }

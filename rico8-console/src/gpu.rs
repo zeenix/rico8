@@ -100,7 +100,9 @@ impl Gpu {
         let mut config = surface
             .get_default_config(&adapter, size.width.max(1), size.height.max(1))
             .ok_or_else(|| anyhow!("surface is not supported by the adapter"))?;
-        config.present_mode = wgpu::PresentMode::AutoVsync;
+        // Explicit Fifo (hard vsync) rather than AutoVsync: each present blocks
+        // until vblank, so the cart is paced by the panel and never tears.
+        config.present_mode = wgpu::PresentMode::Fifo;
         surface.configure(&device, &config);
 
         let texture = device.create_texture(&wgpu::TextureDescriptor {
