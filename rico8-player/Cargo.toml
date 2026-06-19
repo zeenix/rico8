@@ -13,7 +13,7 @@ default = ["window"]
 # Static-musl handheld backend: DRM/KMS video, evdev input, raw-ioctl ALSA. No GL, no SDL.
 kms = ["dep:drm", "dep:evdev", "dep:nix", "dep:bytemuck"]
 # Windowed desktop backend: winit + softbuffer CPU present, keyboard input.
-window = ["dep:winit", "dep:softbuffer"]
+window = ["dep:winit", "dep:softbuffer", "rico8-runtime/audio"]
 
 [dependencies]
 rico8-runtime.workspace = true
