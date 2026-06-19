@@ -197,6 +197,12 @@ impl ApplicationHandler for WinHandler {
     fn window_event(&mut self, _el: &ActiveEventLoop, _id: WindowId, event: WindowEvent) {
         match event {
             WindowEvent::CloseRequested => self.quit = true,
+            // Focus loss swallows the key-up events, so clear held input to avoid stuck buttons.
+            WindowEvent::Focused(false) => {
+                self.buttons = [false; 6];
+                self.select = false;
+                self.start = false;
+            }
             WindowEvent::KeyboardInput { event, .. } => {
                 let PhysicalKey::Code(code) = event.physical_key else {
                     return;
