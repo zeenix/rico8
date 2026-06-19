@@ -26,7 +26,8 @@ pub fn present_into(fb: &Framebuffer, dst: &mut [u32], dst_w: usize, dst_h: usiz
                 Rotate::Cw180 => (sw - 1 - sx, sh - 1 - sy),
                 Rotate::Cw270 => (sh - 1 - sy, sx),
             };
-            let [r, g, b] = palette::PALETTE[fb.pget(rx as i32, ry as i32) as usize];
+            let idx = (fb.pget(rx as i32, ry as i32) & 0x0f) as usize;
+            let [r, g, b] = palette::PALETTE[idx];
             let px = (r as u32) << 16 | (g as u32) << 8 | b as u32;
             for dy in 0..scale {
                 let row = oy + sy * scale + dy;
@@ -90,5 +91,20 @@ mod tests {
         let mut dst = vec![0u32; 128 * 128];
         present_into(&fb, &mut dst, 128, 128, Rotate::Cw90);
         assert_eq!(dst[127], rgb(col::RED), "(0,0) -> (127,0) under CW90");
+    }
+
+    #[test]
+    fn rotate_180_maps_top_left_to_bottom_right() {
+        // 128x128, single red pixel at (0,0). After CW180 it lands at (127,127).
+        let mut fb = Framebuffer::new();
+        fb.cls(col::BLACK);
+        fb.pset(0, 0, col::RED);
+        let mut dst = vec![0u32; 128 * 128];
+        present_into(&fb, &mut dst, 128, 128, Rotate::Cw180);
+        assert_eq!(
+            dst[127 * 128 + 127],
+            rgb(col::RED),
+            "(0,0) -> (127,127) under CW180"
+        );
     }
 }
