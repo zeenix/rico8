@@ -11,3 +11,4 @@ description = "RICO-8 cart player for handhelds and the couch: KMS/evdev/ALSA ba
 [dependencies]
 rico8-runtime.workspace = true
 anyhow.workspace = true
+evdev = "0.13.2"

@@ -2,6 +2,7 @@
 //! so the picker and game loop are written once and tested headless.
 
 pub mod blit;
+pub mod evdev;
 pub mod null;
 
 use anyhow::Result;
