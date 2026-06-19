@@ -164,13 +164,14 @@ fn writer_loop(
         while off < total {
             // SAFETY: off < total, so off * CHANNELS is in bounds of frames_buf.
             let ptr = unsafe { frames_buf.as_ptr().add(off * CHANNELS) };
-            let x = SndXferi {
+            let mut x = SndXferi {
                 result: 0,
                 buf: ptr as *const _,
                 frames: total - off,
             };
             // SAFETY: `fd` is the open PCM device; `x.buf` points to `x.frames` valid frames.
-            match unsafe { pcm_writei(fd, &x as *const _) } {
+            // The `&mut x` gives the pointer mutable provenance so the kernel can write `result`.
+            match unsafe { pcm_writei(fd, &mut x as *const _) } {
                 Ok(_) => {
                     let w = x.result.max(0) as usize;
                     if w == 0 {
