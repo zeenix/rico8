@@ -31,9 +31,10 @@ const ASSETS_VERSION: u8 = 1;
 
 /// Default game source created by `new`.
 pub const TEMPLATE_CODE: &str = r#"#![no_std]
+
 use rico8::*;
 
-rico8::game!(MyGame { x: 60.0, y: 70.0 });
+game!(MyGame { x: 60.0, y: 70.0 });
 
 struct MyGame {
     x: f32,
