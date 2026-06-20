@@ -22,14 +22,14 @@ to edit.
 
 ## What transfers
 
-| PICO-8 section            | RICO-8 asset            | Notes                                    |
-| ------------------------- | ----------------------- | ---------------------------------------- |
-| `__gfx__` (sprite sheet)  | sprite sheet            | 128x128, one palette index per pixel     |
-| `__gff__` (sprite flags)  | sprite flags            | all 256 sprites, 8 flags each            |
-| `__map__`                 | map (all 64 rows)       | see the map note below                   |
-| `__label__`               | cart label             | the captured screenshot, when present    |
-| `__sfx__`                 | sound effects           | notes, speed, loop points, filters       |
-| `__music__`               | music patterns          | channels and loop/stop flags             |
+| PICO-8 section           | RICO-8 asset      | Notes                                 |
+| ------------------------ | ----------------- | ------------------------------------- |
+| `__gfx__` (sprite sheet) | sprite sheet      | 128x128, one palette index per pixel  |
+| `__gff__` (sprite flags) | sprite flags      | all 256 sprites, 8 flags each         |
+| `__map__`                | map (all 64 rows) | see the map note below                |
+| `__label__`              | cart label        | the captured screenshot, when present |
+| `__sfx__`                | sound effects     | notes, speed, loop points, filters    |
+| `__music__`              | music patterns    | channels and loop/stop flags          |
 
 Because the palette and the audio model line up exactly — waveforms
 (triangle, tilted saw, saw, square, pulse, organ, noise, phaser) and effects
