@@ -1,95 +1,95 @@
-//! Stress cart: probes the three 128 K budgets on real hardware.
+//! Stress cart: probes the three 128 K budgets, each independently.
 //!
-//! A trap ends the cart, so the three probes are independently toggleable —
-//! enable one, then ramp N until that cap trips. Controls:
-//!   - Up/Down : change workload level N
-//!   - O       : toggle the memory probe  (hold a heap Vec of N*4 KiB)
-//!   - X       : toggle the compute probe (run N*2000 arithmetic iterations)
-//!   - drawing N*20 shapes is always on   (the wall-clock baseline)
+//! Toggle the live resource overlay with F1, then ramp one probe until its cap
+//! trips. Controls:
+//!   - Up/Down    : heap +/- one 4 KiB block
+//!   - O/X        : shadow stack +/- one ~1 KiB frame
+//!   - Right/Left : CPU +/- 4000 arithmetic iterations per frame
 //!
 //! What you read off:
-//!   - "ran out of memory" with only MEM on -> N at the 128 K memory budget,
-//!   - "ran too long" with only CPU on      -> N at the 128 K fuel budget,
-//!   - frame drop with both off             -> draw-only wall-clock limit.
+//!   - "ran out of memory" while ramping heap -> the 128 K memory budget,
+//!   - a trap while ramping stack            -> the shadow-stack reserve,
+//!   - "ran too long" while ramping CPU      -> the per-call fuel budget.
+//!
+//! Every step is deterministic: heap blocks are exact 4 KiB boxes (no amortized
+//! over-allocation), each stack frame is a fixed 1 KiB, and CPU work is a fixed
+//! count — so the cap trips at a predictable level.
 use rico8::*;
 
+/// Bytes per heap block.
+const HEAP_BLOCK: usize = 4096;
+/// Bytes of shadow stack burned per recursion level.
+const STACK_FRAME: usize = 1024;
+/// Arithmetic iterations per CPU level, per frame.
+const CPU_ITERS: u32 = 4000;
+
 struct Stress {
-    n: i32,
-    mem_on: bool,
-    cpu_on: bool,
-    blob: Vec<u8>,
+    heap: Vec<Box<[u8; HEAP_BLOCK]>>,
+    stack_n: u32,
+    cpu_n: u32,
     checksum: u32,
 }
 
 impl Game for Stress {
     fn update(&mut self, ctx: &mut Context) {
         if ctx.is_button_pressed(Button::Up) {
-            self.n += 1;
+            self.heap.push(Box::new([0x5a; HEAP_BLOCK]));
         }
-        if ctx.is_button_pressed(Button::Down) && self.n > 0 {
-            self.n -= 1;
+        if ctx.is_button_pressed(Button::Down) {
+            self.heap.pop();
         }
         if ctx.is_button_pressed(Button::O) {
-            self.mem_on = !self.mem_on;
+            self.stack_n += 1;
         }
-        if ctx.is_button_pressed(Button::X) {
-            self.cpu_on = !self.cpu_on;
+        if ctx.is_button_pressed(Button::X) && self.stack_n > 0 {
+            self.stack_n -= 1;
+        }
+        if ctx.is_button_pressed(Button::Right) {
+            self.cpu_n += 1;
+        }
+        if ctx.is_button_pressed(Button::Left) && self.cpu_n > 0 {
+            self.cpu_n -= 1;
         }
 
-        // Memory probe: hold N * 4 KiB on the heap (else release it).
-        let want = if self.mem_on {
-            (self.n as usize) * 4 * 1024
-        } else {
-            0
-        };
-        self.blob.resize(want, 0x5a);
-
-        // Compute probe: N * 2000 arithmetic iterations.
-        let mut acc: u32 = 1;
-        if self.cpu_on {
-            for i in 0..(self.n * 2000) {
-                acc = acc.wrapping_mul(31).wrapping_add(i as u32);
-            }
+        // Burn the configured stack depth and CPU each frame, and touch the
+        // heap in O(1), so nothing is optimized away.
+        let mut acc = burn_stack(self.stack_n);
+        for i in 0..(self.cpu_n * CPU_ITERS) {
+            acc = acc.wrapping_mul(31).wrapping_add(i);
         }
-        // Touch the blob in O(1) so the optimizer cannot drop the allocation,
-        // without the memory probe doing per-frame work proportional to its size.
-        let touch = self.blob.first().copied().unwrap_or(0) as u32 ^ self.blob.len() as u32;
+        let touch = self.heap.first().map_or(0, |b| b[0] as u32) ^ self.heap.len() as u32;
         self.checksum = acc ^ touch;
     }
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::BLACK);
-        // Wall-clock baseline: N * 20 shapes.
-        for i in 0..(self.n * 20) {
-            let x = ((i * 7) % 128) as f32;
-            let y = ((i * 13) % 128) as f32;
-            gfx.rect_fill(x, y, 6.0, 6.0, Color::from_index((i % 15 + 1) as u8));
-        }
-        gfx.print("Stress", 2.0, 2.0, Color::WHITE);
-        let mut label = String::from("N=");
-        push_int(&mut label, self.n);
-        gfx.print(&label, 2.0, 10.0, Color::YELLOW);
-        // Spell on/off out and color it too, so state reads at a glance.
-        gfx.print(
-            if self.mem_on { "Mem on" } else { "Mem off" },
-            2.0,
-            18.0,
-            if self.mem_on {
-                Color::GREEN
-            } else {
-                Color::DARK_GREY
-            },
-        );
-        gfx.print(
-            if self.cpu_on { "CPU on" } else { "CPU off" },
-            2.0,
-            26.0,
-            if self.cpu_on {
-                Color::GREEN
-            } else {
-                Color::DARK_GREY
-            },
-        );
+        // Draw in the vertical middle so the F1 stats overlay (top corners)
+        // never covers the readouts.
+        gfx.print("Stress  F1 = stats", 2.0, 50.0, Color::WHITE);
+        let mut row = |y: f32, label: &str, n: u32, color: Color| {
+            let mut s = String::from(label);
+            push_int(&mut s, n as i32);
+            gfx.print(&s, 2.0, y, color);
+        };
+        row(62.0, "Heap blk  (U/D): ", self.heap.len() as u32, Color::GREEN);
+        row(70.0, "Stack frm (O/X): ", self.stack_n, Color::from_index(12));
+        row(78.0, "CPU lvl   (R/L): ", self.cpu_n, Color::from_index(9));
+    }
+}
+
+/// Recurse `depth` levels, each burning `STACK_FRAME` bytes of shadow stack.
+/// `black_box(&mut frame)` forces the whole array onto the stack (otherwise the
+/// optimizer keeps only the bytes it sees used), so each level costs a real
+/// `STACK_FRAME` bytes.
+#[inline(never)]
+fn burn_stack(depth: u32) -> u32 {
+    let mut frame = [0xa5u8; STACK_FRAME];
+    core::hint::black_box(&mut frame);
+    let here = frame[depth as usize % STACK_FRAME] as u32 ^ depth;
+    if depth == 0 {
+        here
+    } else {
+        here.wrapping_add(burn_stack(depth - 1))
     }
 }
 
@@ -112,9 +112,8 @@ fn push_int(s: &mut String, mut v: i32) {
 }
 
 rico8::game!(Stress {
-    n: 1,
-    mem_on: false,
-    cpu_on: false,
-    blob: Vec::new(),
+    heap: Vec::new(),
+    stack_n: 0,
+    cpu_n: 0,
     checksum: 0
 });
