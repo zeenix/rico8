@@ -41,7 +41,18 @@ pub mod ffi;
 mod flags;
 mod fmt;
 mod glue;
+pub mod memstat;
 mod motion;
+
+// Install the live-tracking allocator for `std` carts. It lives here, not in
+// the `game!` macro, so the `feature = "std"` cfg is evaluated in this crate
+// (where the feature is defined) rather than in the cart crate (which has no
+// such feature). A library-defined global allocator is picked up by the cart
+// cdylib that links it. Wasm-only: on the host it would perturb this crate's
+// own allocation tests.
+#[cfg(all(feature = "std", target_arch = "wasm32"))]
+#[global_allocator]
+static RICO8_ALLOC: memstat::TrackingAlloc = memstat::TrackingAlloc;
 
 use crate::flags::bitflag_enum;
 pub use crate::flags::{BitFlag, BitFlags, UnknownBits};
@@ -347,6 +358,37 @@ impl Context {
     /// `format!`-style arguments, see [`logf!`](crate::logf).
     pub fn log(&mut self, msg: &str) {
         unsafe { ffi::log(msg.as_ptr(), msg.len() as u32) }
+    }
+
+    /// Fraction (`0.0`–`1.0`) of last frame's `update` CPU budget used.
+    ///
+    /// Reports the previous completed frame: mid-`update` the current call's
+    /// cost isn't known yet. A value near `1.0` means the budget was nearly
+    /// exhausted (a call that fully spends it traps before this can report).
+    pub fn cpu_update(&self) -> f32 {
+        unsafe { ffi::cpu_update() }
+    }
+
+    /// Fraction (`0.0`–`1.0`) of last frame's `draw` CPU budget used.
+    pub fn cpu_draw(&self) -> f32 {
+        unsafe { ffi::cpu_draw() }
+    }
+
+    /// The cart's committed-memory high-water — the highest its footprint
+    /// (shadow-stack reserve, statics and heap together) has ever reached — as
+    /// a fraction (`0.0`–`1.0`) of the 128 K cap. It never decreases (wasm never
+    /// returns pages) and counts freed-but-stranded memory, so it tracks real
+    /// pressure closely. It is still not an exact OOM line: the allocator keeps
+    /// a small reserve above the last allocation, so the cap can be reached
+    /// while this reads a little under 100%.
+    pub fn mem(&self) -> f32 {
+        crate::memstat::used_fraction()
+    }
+
+    /// Actual measured frames per second. Equals the target rate (see
+    /// [`Game::FRAME_RATE`]) until the host has measured a real one.
+    pub fn fps(&self) -> f32 {
+        unsafe { ffi::fps() }
     }
 }
 
@@ -690,6 +732,11 @@ macro_rules! game {
         }
 
         #[no_mangle]
+        pub extern "C" fn rico8_mem_used() -> u32 {
+            $crate::memstat::used_bytes() as u32
+        }
+
+        #[no_mangle]
         pub extern "C" fn rico8_update() {
             GAME.update();
         }
@@ -899,6 +946,17 @@ mod tests {
         // Native stubs read 0.
         assert_eq!(ctx.sprite_pixel(0, 0), Color::from_index(0));
         assert_eq!(ctx.sprite_pixel(0, 0), ctx.sget(0, 0));
+    }
+
+    #[test]
+    fn context_exposes_resource_stats() {
+        // On native targets the ffi stubs return 0.0; this asserts the safe
+        // wrappers compile and forward to them.
+        let ctx = Context { _private: () };
+        assert_eq!(ctx.cpu_update(), 0.0);
+        assert_eq!(ctx.cpu_draw(), 0.0);
+        assert_eq!(ctx.mem(), 0.0);
+        assert_eq!(ctx.fps(), 0.0);
     }
 
     #[test]
