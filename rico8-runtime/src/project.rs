@@ -31,7 +31,10 @@ const ASSETS_VERSION: u8 = 1;
 
 /// Default game source created by `new`.
 pub const TEMPLATE_CODE: &str = r#"#![no_std]
+
 use rico8::*;
+
+game!(MyGame { x: 60.0, y: 70.0 });
 
 struct MyGame {
     x: f32,
@@ -52,8 +55,6 @@ impl Game for MyGame {
         gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::PINK);
     }
 }
-
-rico8::game!(MyGame { x: 60.0, y: 70.0 });
 "#;
 
 /// A loaded project: code + assets + where they live.
@@ -67,7 +68,7 @@ pub struct Project {
 
 impl Project {
     /// Create a fresh project directory with template code and empty assets.
-    pub fn create(dir: &Path, name: &str, sdk_path: &Path) -> Result<Self> {
+    pub fn create(dir: &Path, name: &str) -> Result<Self> {
         let name = sanitize_name(name)?;
         if dir.exists()
             && dir
@@ -81,7 +82,6 @@ impl Project {
             );
         }
         fs::create_dir_all(dir.join("src"))?;
-        let sdk = sdk_path.to_string_lossy().replace('\\', "/");
         fs::write(
             dir.join("Cargo.toml"),
             format!(
@@ -94,10 +94,10 @@ edition = "2021"
 crate-type = ["cdylib"]
 
 [dependencies]
-rico8 = {{ path = "{sdk}", default-features = false }}
+rico8 = {{ git = "https://github.com/zeenix/rico8", default-features = false }}
 
-# Standalone workspace so the project builds the same inside and outside
-# the RICO-8 source tree.
+# Standalone workspace so the project builds anywhere, independent of the
+# RICO-8 source tree.
 [workspace]
 
 [profile.release]
@@ -249,7 +249,7 @@ mod tests {
     fn create_load_roundtrip() {
         let dir = std::env::temp_dir().join(format!("rico8_test_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        let mut p = Project::create(&dir.join("mygame"), "MyGame", Path::new("/tmp/sdk")).unwrap();
+        let mut p = Project::create(&dir.join("mygame"), "MyGame").unwrap();
         p.assets.sprites.set(0, 0, 8);
         p.code = "// changed".into();
         p.save().unwrap();
@@ -307,10 +307,14 @@ mod tests {
     fn create_scaffolds_a_no_std_project() {
         let dir = std::env::temp_dir().join(format!("rico8_nostd_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        Project::create(&dir.join("g"), "g", Path::new("/tmp/sdk")).unwrap();
+        Project::create(&dir.join("g"), "g").unwrap();
         let lib = fs::read_to_string(dir.join("g/src/lib.rs")).unwrap();
         let manifest = fs::read_to_string(dir.join("g/Cargo.toml")).unwrap();
         assert!(lib.contains("#![no_std]"), "lib.rs:\n{lib}");
+        assert!(
+            manifest.contains("git = \"https://github.com/zeenix/rico8\""),
+            "Cargo.toml:\n{manifest}"
+        );
         assert!(
             manifest.contains("default-features = false"),
             "Cargo.toml:\n{manifest}"
@@ -322,7 +326,7 @@ mod tests {
     fn create_writes_cargo_config_with_stack_size() {
         let dir = std::env::temp_dir().join(format!("rico8_cfg_{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
-        Project::create(&dir.join("g"), "g", Path::new("/tmp/sdk")).unwrap();
+        Project::create(&dir.join("g"), "g").unwrap();
         let cfg = fs::read_to_string(dir.join("g/.cargo/config.toml")).unwrap();
         assert!(cfg.contains("wasm32-unknown-unknown"), "config: {cfg}");
         assert!(cfg.contains("stack-size=49152"), "config: {cfg}");

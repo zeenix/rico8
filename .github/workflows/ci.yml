@@ -24,6 +24,16 @@ jobs:
           toolchain: nightly
           components: rustfmt
       - run: cargo fmt --all -- --check
+      - name: Check formatting of the example carts
+        run: |
+          fail=0
+          for d in examples/*/; do
+            [ -f "$d/Cargo.toml" ] || continue
+            echo "::group::fmt $d"
+            (cd "$d" && cargo fmt --all -- --check) || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
 
   clippy:
     runs-on: ubuntu-latest
@@ -32,6 +42,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: clippy
+          targets: wasm32-unknown-unknown
       - uses: Swatinem/rust-cache@v2
 
       # ALSA headers for the cpal audio used by the console and the windowed player.
@@ -42,6 +53,16 @@ jobs:
 
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo clippy -p rico8-player --no-default-features --features kms --all-targets -- -D warnings
+      - name: Clippy the example carts
+        run: |
+          fail=0
+          for d in examples/*/; do
+            [ -f "$d/Cargo.toml" ] || continue
+            echo "::group::clippy $d"
+            (cd "$d" && cargo clippy -- -D warnings) || fail=1
+            echo "::endgroup::"
+          done
+          exit $fail
 
   test:
     runs-on: ubuntu-latest

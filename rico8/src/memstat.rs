@@ -22,9 +22,11 @@ pub const CAP: usize = 131_072;
 static HEAP_LIVE: AtomicUsize = AtomicUsize::new(0);
 /// Highest `ptr + size` the allocator has ever returned — the high-water of
 /// committed linear memory. Monotonic: frees never lower it.
+#[cfg(any(feature = "std", target_arch = "wasm32"))]
 static PEAK_END: AtomicUsize = AtomicUsize::new(0);
 
 /// Record an allocation's extent against both counters.
+#[cfg(feature = "std")]
 fn note_alloc(ptr: *mut u8, size: usize) {
     HEAP_LIVE.fetch_add(size, Relaxed);
     PEAK_END.fetch_max(ptr as usize + size, Relaxed);

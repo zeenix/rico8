@@ -66,14 +66,30 @@ impl Game for Stress {
         // Draw in the vertical middle so the F1 stats overlay (top corners)
         // never covers the readouts.
         gfx.print("Stress  F1 = stats", 2.0, 50.0, Color::WHITE);
-        let mut row = |y: f32, label: &str, n: u32, color: Color| {
-            let mut s = String::from(label);
-            push_int(&mut s, n as i32);
-            gfx.print(&s, 2.0, y, color);
-        };
-        row(62.0, "Heap blk  (U/D): ", self.heap.len() as u32, Color::GREEN);
-        row(70.0, "Stack frm (O/X): ", self.stack_n, Color::from_index(12));
-        row(78.0, "CPU lvl   (R/L): ", self.cpu_n, Color::from_index(9));
+        rico8::printf!(
+            gfx,
+            2.0,
+            62.0,
+            Color::GREEN,
+            "Heap blk  (U/D): {}",
+            self.heap.len()
+        );
+        rico8::printf!(
+            gfx,
+            2.0,
+            70.0,
+            Color::from_index(12),
+            "Stack frm (O/X): {}",
+            self.stack_n
+        );
+        rico8::printf!(
+            gfx,
+            2.0,
+            78.0,
+            Color::from_index(9),
+            "CPU lvl   (R/L): {}",
+            self.cpu_n
+        );
     }
 }
 
@@ -90,24 +106,6 @@ fn burn_stack(depth: u32) -> u32 {
         here
     } else {
         here.wrapping_add(burn_stack(depth - 1))
-    }
-}
-
-fn push_int(s: &mut String, mut v: i32) {
-    if v == 0 {
-        s.push('0');
-        return;
-    }
-    let mut digits = [0u8; 12];
-    let mut i = 0;
-    while v > 0 {
-        digits[i] = b'0' + (v % 10) as u8;
-        v /= 10;
-        i += 1;
-    }
-    while i > 0 {
-        i -= 1;
-        s.push(digits[i] as char);
     }
 }
 

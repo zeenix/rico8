@@ -101,7 +101,7 @@ pub fn parse_bytes(bytes: &[u8]) -> Result<Assets> {
 /// The project's crate name comes from the target directory (like `new`);
 /// the cart title comes from the source file. Imported assets are written to
 /// `assets.rico8` and a stub `src/lib.rs` is scaffolded.
-pub fn import_project(src: &Path, dir: &Path, sdk: &Path) -> Result<Project> {
+pub fn import_project(src: &Path, dir: &Path) -> Result<Project> {
     let assets = parse_file(src)?;
 
     let crate_name = dir
@@ -111,7 +111,7 @@ pub fn import_project(src: &Path, dir: &Path, sdk: &Path) -> Result<Project> {
         .unwrap_or_else(|| "imported".into());
     let title = cart_title(src).unwrap_or_else(|| crate_name.clone());
 
-    let mut project = Project::create(dir, &crate_name, sdk)?;
+    let mut project = Project::create(dir, &crate_name)?;
     project.assets = assets;
     project.assets.meta.name = title;
     project.code = IMPORT_TEMPLATE.to_string();
@@ -719,7 +719,7 @@ mod tests {
         std::fs::write(&src, sample_p8()).unwrap();
 
         let dir = base.join("ported");
-        let project = import_project(&src, &dir, Path::new("/tmp/sdk")).unwrap();
+        let project = import_project(&src, &dir).unwrap();
 
         assert_eq!(project.name, "ported");
         assert_eq!(project.assets.meta.name, "celeste");

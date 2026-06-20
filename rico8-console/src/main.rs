@@ -119,7 +119,7 @@ fn headless_new(dir: &Path) -> Result<()> {
         .ok_or_else(|| anyhow!("Bad directory name"))?
         .to_string_lossy()
         .into_owned();
-    Project::create(dir, &name, &sdk_path())?;
+    Project::create(dir, &name)?;
     println!("Created {}", dir.display());
     Ok(())
 }
@@ -169,7 +169,7 @@ fn headless_extract(png: &Path, dir: &Path) -> Result<()> {
     let source = cart
         .source
         .ok_or_else(|| anyhow!("Cart has no embedded source (playable-only cart)"))?;
-    let mut project = Project::create(dir, &cart.assets.meta.name, &sdk_path())?;
+    let mut project = Project::create(dir, &cart.assets.meta.name)?;
     project.code = source;
     project.assets = cart.assets;
     project.save()?;
@@ -181,7 +181,7 @@ fn headless_extract(png: &Path, dir: &Path) -> Result<()> {
 /// the assets — graphics, map, sound and music — transfer; the cart's Lua
 /// code is ignored.
 fn headless_import_pico8(src: &Path, dir: &Path) -> Result<()> {
-    rico8_runtime::pico8::import_project(src, dir, &sdk_path())?;
+    rico8_runtime::pico8::import_project(src, dir)?;
     println!("Imported {} into {}", src.display(), dir.display());
     Ok(())
 }

@@ -42,7 +42,7 @@ impl Game for SpriteMove {
         gfx.clear(Color::DARK_BLUE);
         gfx.print("Arrows to walk", 36.0, 4.0, Color::LIGHT_GREY);
         // Sprites 1 and 2 are the two walk frames.
-        let frame = if self.walking && (self.frame / 4) % 2 == 0 {
+        let frame = if self.walking && (self.frame / 4).is_multiple_of(2) {
             2
         } else {
             1

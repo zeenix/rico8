@@ -19,16 +19,16 @@ integrated editor and development environment.
 
 ## Controls
 
-| input                              | action                                                     |
-| -----------------------------------| -----------------------------------------------------------|
-| d-pad                              | directions / move in picker                                |
-| any face button                    | O / X in game, launch in picker                            |
-| **hold both O + X (~1s)**          | **return to the cart picker** (works on any pad)           |
-| Select                             | back to picker (named pads)                                |
-| Start + Select                     | quit (named pads)                                          |
-| **picker: `-- quit --` row**       | **select it + press O/X to exit the player** (any pad)     |
-| keyboard                           | arrows + Z/X, Esc = back, Enter = start, F1 = fps; close   |
-|                                    | the window to quit                                         |
+| input                        | action                                                   |
+| ---------------------------- | -------------------------------------------------------- |
+| d-pad                        | directions / move in picker                              |
+| any face button              | O / X in game, launch in picker                          |
+| **hold both O + X (~1s)**    | **return to the cart picker** (works on any pad)         |
+| Select                       | back to picker (named pads)                              |
+| Start + Select               | quit (named pads)                                        |
+| **picker: `-- quit --` row** | **select it + press O/X to exit the player** (any pad)   |
+| keyboard                     | arrows + Z/X, Esc = back, Enter = start, F1 = fps; close |
+|                              | the window to quit                                       |
 
 The picker shows the key controls along its bottom edge. Input is read
 directly from the kernel via evdev; named buttons like Select/Start only work
