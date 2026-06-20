@@ -33,6 +33,8 @@ const ASSETS_VERSION: u8 = 1;
 pub const TEMPLATE_CODE: &str = r#"#![no_std]
 use rico8::*;
 
+rico8::game!(MyGame { x: 60.0, y: 70.0 });
+
 struct MyGame {
     x: f32,
     y: f32,
@@ -52,8 +54,6 @@ impl Game for MyGame {
         gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::PINK);
     }
 }
-
-rico8::game!(MyGame { x: 60.0, y: 70.0 });
 "#;
 
 /// A loaded project: code + assets + where they live.
