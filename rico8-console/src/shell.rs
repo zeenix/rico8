@@ -768,7 +768,7 @@ impl Shell {
             bail!("Usage: new <name>");
         };
         let dir = self.cwd.join(name);
-        let project = Project::create(&dir, name, &self.sdk_path)?;
+        let project = Project::create(&dir, name)?;
         self.say(&format!("Created ./{name}"), col::GREEN);
         self.code_ed.set_text(&project.code);
         self.project_watch = Some(ProjectWatch::new(&project));
@@ -1075,7 +1075,7 @@ impl Shell {
             bail!("Cart has no source (playable-only)");
         };
         let dir = self.cwd.join(dir);
-        let mut project = Project::create(&dir, &cart.assets.meta.name, &self.sdk_path)?;
+        let mut project = Project::create(&dir, &cart.assets.meta.name)?;
         project.code = source.clone();
         project.assets = cart.assets.clone();
         project.save()?;
@@ -1101,7 +1101,7 @@ impl Shell {
             Some(d) => self.cwd.join(d),
             None => self.cwd.join(rico8_runtime::pico8::default_dir_name(&src)),
         };
-        let project = rico8_runtime::pico8::import_project(&src, &dir, &self.sdk_path)?;
+        let project = rico8_runtime::pico8::import_project(&src, &dir)?;
         self.say(
             &format!("Imported assets into {}", dir.display()),
             col::GREEN,
@@ -1725,7 +1725,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut shell = test_shell();
         let project_dir = dir.join("game");
-        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        Project::create(&project_dir, "game").unwrap();
 
         shell
             .cmd_load(&[project_dir.to_str().unwrap()])
@@ -1781,7 +1781,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut shell = test_shell();
         let project_dir = dir.join("game");
-        let mut project = Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        let mut project = Project::create(&project_dir, "game").unwrap();
         project.code = "fn broken( {".into();
         project.save().unwrap();
 
@@ -1831,7 +1831,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut shell = test_shell();
         let project_dir = dir.join("game");
-        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        Project::create(&project_dir, "game").unwrap();
         shell
             .cmd_load(&[project_dir.to_str().unwrap()])
             .expect("load");
@@ -1880,7 +1880,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut shell = test_shell();
         let project_dir = dir.join("game");
-        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        Project::create(&project_dir, "game").unwrap();
 
         shell.startup_load(project_dir.to_str().unwrap());
         assert_eq!(shell.mode, Mode::Console, "loaded, still at the console");
@@ -1917,7 +1917,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut shell = test_shell();
         let project_dir = dir.join("game");
-        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        Project::create(&project_dir, "game").unwrap();
         shell
             .cmd_load(&[project_dir.to_str().unwrap()])
             .expect("load");
@@ -1960,7 +1960,7 @@ mod tests {
         let mut shell = test_shell();
 
         let project_dir = dir.join("game");
-        let project = Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        let project = Project::create(&project_dir, "game").unwrap();
         let png = dir.join("game.png");
 
         // A valid cart needs the 4-byte wasm magic (plus version); the codec
@@ -2008,7 +2008,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();
         let mut shell = test_shell();
-        let project = Project::create(&dir.join("game"), "game", &shell.sdk_path).unwrap();
+        let project = Project::create(&dir.join("game"), "game").unwrap();
         let png = dir.join("game.png");
         let cart = Cart {
             wasm: b"\0asm\x01\0\0\0".to_vec(),
@@ -2048,7 +2048,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut shell = test_shell();
         let project_dir = dir.join("game");
-        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        Project::create(&project_dir, "game").unwrap();
         shell
             .cmd_load(&[project_dir.to_str().unwrap()])
             .expect("load");
@@ -2075,7 +2075,7 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
         let mut shell = test_shell();
         let project_dir = dir.join("game");
-        Project::create(&project_dir, "game", &shell.sdk_path).unwrap();
+        Project::create(&project_dir, "game").unwrap();
         shell
             .cmd_load(&[project_dir.to_str().unwrap()])
             .expect("load");
