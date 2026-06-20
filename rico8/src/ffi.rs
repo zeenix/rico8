@@ -68,6 +68,9 @@ extern "C" {
     pub fn set_pen_color(color: i32);
     pub fn set_cursor(x: f32, y: f32);
     pub fn print_pen(ptr: *const u8, len: u32) -> f32;
+    pub fn cpu_update() -> f32;
+    pub fn cpu_draw() -> f32;
+    pub fn fps() -> f32;
 }
 
 // Host-target stubs so the SDK (and carts) also type-check, document and
@@ -161,6 +164,15 @@ mod stubs {
     pub unsafe fn set_pen_color(_color: i32) {}
     pub unsafe fn set_cursor(_x: f32, _y: f32) {}
     pub unsafe fn print_pen(_ptr: *const u8, _len: u32) -> f32 {
+        0.0
+    }
+    pub unsafe fn cpu_update() -> f32 {
+        0.0
+    }
+    pub unsafe fn cpu_draw() -> f32 {
+        0.0
+    }
+    pub unsafe fn fps() -> f32 {
         0.0
     }
 }

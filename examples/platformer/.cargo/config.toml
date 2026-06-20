@@ -4,7 +4,7 @@
 [build]
 target = "wasm32-unknown-unknown"
 
-# Shrink LLVM's 1 MiB shadow-stack reserve to 32 KiB so the cart's initial
+# Shrink LLVM's 1 MiB shadow-stack reserve to 48 KiB so the cart's initial
 # linear memory fits the 128 K runtime cap (the console injects the same flag).
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "link-arg=-z", "-C", "link-arg=stack-size=32768"]
+rustflags = ["-C", "link-arg=-z", "-C", "link-arg=stack-size=49152"]

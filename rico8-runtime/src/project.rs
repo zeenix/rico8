@@ -118,7 +118,7 @@ panic = "abort"
             // is what carts compile to anyway. The console still passes
             // `--target wasm32-unknown-unknown` explicitly, which matches.
             //
-            // The rustflags shrink LLVM's 1 MiB shadow-stack reserve to 32 KiB
+            // The rustflags shrink LLVM's 1 MiB shadow-stack reserve to 48 KiB
             // so the cart's initial linear memory fits the 128 K runtime cap.
             // Target-scoped so host tooling is unaffected. The console injects
             // the same flag via RUSTFLAGS when it builds; this keeps plain
@@ -127,7 +127,7 @@ panic = "abort"
              target = \"wasm32-unknown-unknown\"\n\
              \n\
              [target.wasm32-unknown-unknown]\n\
-             rustflags = [\"-C\", \"link-arg=-z\", \"-C\", \"link-arg=stack-size=32768\"]\n",
+             rustflags = [\"-C\", \"link-arg=-z\", \"-C\", \"link-arg=stack-size=49152\"]\n",
         )?;
         let mut assets = Assets::default();
         assets.meta.name = name.clone();
@@ -325,7 +325,7 @@ mod tests {
         Project::create(&dir.join("g"), "g", Path::new("/tmp/sdk")).unwrap();
         let cfg = fs::read_to_string(dir.join("g/.cargo/config.toml")).unwrap();
         assert!(cfg.contains("wasm32-unknown-unknown"), "config: {cfg}");
-        assert!(cfg.contains("stack-size=32768"), "config: {cfg}");
+        assert!(cfg.contains("stack-size=49152"), "config: {cfg}");
         // Default build target so plain `cargo build`/`check` target wasm and a
         // no_std cart doesn't fail with "unwinding panics are not supported".
         assert!(

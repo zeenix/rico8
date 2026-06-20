@@ -53,6 +53,12 @@ pub struct HostState {
     /// The cart's logical frames per second (30 or 60), from its `rico8_fps`
     /// export. Drives `time()` and the host's update/draw cadence.
     pub fps: u32,
+    /// Fraction (0.0..1.0) of `update`'s fuel budget used last completed frame.
+    last_update_cpu: f32,
+    /// Fraction (0.0..1.0) of `draw`'s fuel budget used last completed frame.
+    last_draw_cpu: f32,
+    /// Real frames per second measured by the host frontend; `0.0` until fed.
+    measured_fps: f32,
     rng: u64,
     /// Enforces `MAX_MEMORY` on linear-memory growth, including the initial
     /// allocation at instantiation.
@@ -71,6 +77,9 @@ impl HostState {
             panic_message: None,
             frame: 0,
             fps: DEFAULT_FPS,
+            last_update_cpu: 0.0,
+            last_draw_cpu: 0.0,
+            measured_fps: 0.0,
             rng: 0x2545_f491_4f6c_dd1d,
             limits: StoreLimitsBuilder::new()
                 .memory_size(MAX_MEMORY)
@@ -88,6 +97,21 @@ impl HostState {
         self.rng = x;
         let bits = (x.wrapping_mul(0x2545_f491_4f6c_dd1d) >> 40) as u32;
         bits as f32 / (1u32 << 24) as f32
+    }
+
+    /// Feed the host frontend's measured frame rate, surfaced to carts via `fps`.
+    pub fn set_measured_fps(&mut self, fps: f32) {
+        self.measured_fps = fps;
+    }
+
+    /// The measured frame rate, or the cart's target rate until a frontend
+    /// measures one. Keeps `fps()` sane on frontends that never measure.
+    pub fn measured_fps_or_target(&self) -> f32 {
+        if self.measured_fps > 0.0 {
+            self.measured_fps
+        } else {
+            self.fps as f32
+        }
     }
 
     fn seed_rand(&mut self, seed: u32) {
@@ -341,6 +365,15 @@ impl GameVm {
         link!(linker, "music", |c: Caller<'_, HostState>, n: i32| {
             c.data().audio.play_music(n)
         });
+        link!(linker, "cpu_update", |c: Caller<'_, HostState>| -> f32 {
+            c.data().last_update_cpu
+        });
+        link!(linker, "cpu_draw", |c: Caller<'_, HostState>| -> f32 {
+            c.data().last_draw_cpu
+        });
+        link!(linker, "fps", |c: Caller<'_, HostState>| -> f32 {
+            c.data().measured_fps_or_target()
+        });
         link!(linker, "time", |c: Caller<'_, HostState>| -> f32 {
             let st = c.data();
             st.frame as f32 / st.fps as f32
@@ -542,7 +575,7 @@ impl GameVm {
         func: TypedFunc<(), ()>,
     ) -> std::result::Result<(), RuntimeError> {
         self.store.set_fuel(FUEL_PER_CALL).ok();
-        func.call(&mut self.store, ()).map_err(|err| {
+        let result = func.call(&mut self.store, ()).map_err(|err| {
             let message = match self.store.data_mut().panic_message.take() {
                 Some(panic) => panic,
                 None => {
@@ -557,7 +590,17 @@ impl GameVm {
                 }
             };
             RuntimeError { phase, message }
-        })
+        });
+        if result.is_ok() {
+            let remaining = self.store.get_fuel().unwrap_or(0);
+            let frac = FUEL_PER_CALL.saturating_sub(remaining) as f32 / FUEL_PER_CALL as f32;
+            match phase {
+                "update" => self.store.data_mut().last_update_cpu = frac,
+                "draw" => self.store.data_mut().last_draw_cpu = frac,
+                _ => {}
+            }
+        }
+        result
     }
 
     /// Run one logical frame: tick input, call `rico8_update`.
@@ -576,6 +619,40 @@ impl GameVm {
     /// The cart's logical frame rate: 30, or 60 if it opted in.
     pub fn fps(&self) -> u32 {
         self.store.data().fps
+    }
+
+    /// Fraction (0.0..1.0) of `update`'s fuel budget used last completed frame.
+    pub fn cpu_update(&self) -> f32 {
+        self.store.data().last_update_cpu
+    }
+
+    /// Fraction (0.0..1.0) of `draw`'s fuel budget used last completed frame.
+    pub fn cpu_draw(&self) -> f32 {
+        self.store.data().last_draw_cpu
+    }
+
+    /// Fraction (0.0..1.0) of the 128K memory cap currently in use.
+    pub fn memory_used_fraction(&self) -> f32 {
+        let Some(mem) = self._instance.get_memory(&self.store, "memory") else {
+            return 0.0;
+        };
+        mem.data_size(&self.store) as f32 / MAX_MEMORY as f32
+    }
+
+    /// The cart's committed-memory high-water in bytes (shadow-stack reserve +
+    /// statics + the highest the heap has reached), via its `rico8_mem_used`
+    /// export, or 0 for carts without it (hand-written or allocation-free).
+    /// Tracks real pressure closely but is not an exact OOM line — the
+    /// allocator keeps a small reserve above the last allocation.
+    pub fn mem_used_bytes(&mut self) -> u32 {
+        let Ok(func) = self
+            ._instance
+            .get_typed_func::<(), u32>(&self.store, "rico8_mem_used")
+        else {
+            return 0;
+        };
+        self.store.set_fuel(FUEL_PER_CALL).ok();
+        func.call(&mut self.store, ()).unwrap_or(0)
     }
 
     pub fn state(&self) -> &HostState {
@@ -629,6 +706,14 @@ mod tests {
           (func (export "rico8_fps") (result i32) (i32.const 30))
           (func (export "rico8_update"))
           (func (export "rico8_draw")))
+    "#;
+
+    const MEM_EXPORT_CART: &str = r#"
+        (module
+          (func (export "rico8_init"))
+          (func (export "rico8_update"))
+          (func (export "rico8_draw"))
+          (func (export "rico8_mem_used") (result i32) (i32.const 32768)))
     "#;
 
     /// Update loops ~10k times — well under the 131,072-fuel budget.
@@ -702,6 +787,9 @@ mod tests {
           (import "rico8" "set_pen_color" (func $color (param i32)))
           (import "rico8" "set_cursor" (func $cursor (param f32 f32)))
           (import "rico8" "print_pen" (func $printp (param i32 i32) (result f32)))
+          (import "rico8" "cpu_update" (func $cpuu (result f32)))
+          (import "rico8" "cpu_draw" (func $cpud (result f32)))
+          (import "rico8" "fps" (func $fps (result f32)))
           (memory (export "memory") 1)
           (data (i32.const 0) "hi")
           (func (export "rico8_init"))
@@ -723,7 +811,10 @@ mod tests {
             (call $ovalo (f32.const 20) (f32.const 20) (f32.const 28) (f32.const 28)
                          (i32.const 7))
             (call $palr)
-            (call $oval (f32.const 0) (f32.const 0) (f32.const 8) (f32.const 8) (i32.const 8))))
+            (call $oval (f32.const 0) (f32.const 0) (f32.const 8) (f32.const 8) (i32.const 8))
+            (drop (call $cpuu))
+            (drop (call $cpud))
+            (drop (call $fps))))
     "#;
 
     fn load_test_vm(wat_src: &str) -> Result<GameVm> {
@@ -775,6 +866,16 @@ mod tests {
     fn cart_can_select_30fps() {
         let vm = load_test_vm(FPS30_CART).unwrap();
         assert_eq!(vm.fps(), 30);
+    }
+
+    #[test]
+    fn mem_used_reads_export_else_zero() {
+        // A cart exporting rico8_mem_used reports that many bytes used.
+        let mut vm = load_test_vm(MEM_EXPORT_CART).unwrap();
+        assert_eq!(vm.mem_used_bytes(), 32768);
+        // A cart without the export reports 0 (hand-written / allocation-free).
+        let mut vm2 = load_test_vm(TEST_CART).unwrap();
+        assert_eq!(vm2.mem_used_bytes(), 0);
     }
 
     #[test]
@@ -851,5 +952,39 @@ mod tests {
             Ok(_) => panic!("oversized cart should not load"),
         };
         assert!(err.to_string().contains("128K of memory"), "got: {err}");
+    }
+
+    #[test]
+    fn reports_cpu_usage_per_phase() {
+        // BUDGET_OK_CART loops ~10k times in update and has an empty draw, so
+        // the update phase must report a higher CPU fraction than draw.
+        let mut vm = load_test_vm(BUDGET_OK_CART).unwrap();
+        vm.call_update().unwrap();
+        vm.call_draw().unwrap();
+        let u = vm.cpu_update();
+        let d = vm.cpu_draw();
+        assert!(u > 0.0 && u < 1.0, "update cpu fraction in range: {u}");
+        assert!(u > d, "heavy update beats empty draw: {u} vs {d}");
+    }
+
+    #[test]
+    fn reports_memory_usage() {
+        // TEST_CART declares one 64 KiB page of the 128 KiB cap.
+        let vm = load_test_vm(TEST_CART).unwrap();
+        let frac = vm.memory_used_fraction();
+        assert!(
+            (frac - 0.5).abs() < 0.01,
+            "one page is half the cap: {frac}"
+        );
+    }
+
+    #[test]
+    fn fps_falls_back_to_target_until_measured() {
+        // No frontend measurement yet: report the cart's target rate (30).
+        let mut vm = load_test_vm(FPS30_CART).unwrap();
+        assert_eq!(vm.state().measured_fps_or_target(), 30.0);
+        // Once a frontend feeds a real rate, report that.
+        vm.state_mut().set_measured_fps(58.0);
+        assert_eq!(vm.state().measured_fps_or_target(), 58.0);
     }
 }

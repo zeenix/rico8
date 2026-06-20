@@ -52,9 +52,9 @@ pub fn run_build(dir: &Path, started: Instant) -> BuildResult {
     // the 128 K memory cap. Appended after any inherited RUSTFLAGS so ours win.
     let rustflags = match std::env::var("RUSTFLAGS") {
         Ok(existing) if !existing.is_empty() => {
-            format!("{existing} -C link-arg=-z -C link-arg=stack-size=32768")
+            format!("{existing} -C link-arg=-z -C link-arg=stack-size=49152")
         }
-        _ => "-C link-arg=-z -C link-arg=stack-size=32768".to_string(),
+        _ => "-C link-arg=-z -C link-arg=stack-size=49152".to_string(),
     };
     let output = Command::new("cargo")
         .args(["build", "--release", "--target", "wasm32-unknown-unknown"])

@@ -48,8 +48,8 @@ pub enum Key {
     PageDown,
     /// F6: capture the screen as the cart label while running.
     CaptureLabel,
-    /// F1: toggle the wall-clock fps meter.
-    ToggleFps,
+    /// F1: toggle the resource-usage overlay (CPU, memory, fps).
+    ToggleStats,
 }
 
 #[derive(Debug, Clone, Copy, Default)]
@@ -175,13 +175,66 @@ impl CartWatch {
     }
 }
 
-/// Draw the fps meter in the top-left: measured frames per second over the
-/// cart's target rate, e.g. `60/60`.
-fn fps_overlay(fb: &mut Framebuffer, measured: f32, target: u32) {
-    let text = format!("{}/{}", measured.round() as u32, target);
-    let w = text.len() as i32 * 4 + 1;
-    fb.rectfill(0, 0, w, 6, col::BLACK);
-    fb.print(&text, 1, 1, col::YELLOW);
+/// Color a budget fraction: green with headroom, yellow from 70%, red above
+/// 90%.
+fn stat_color(frac: f32) -> u8 {
+    if frac < 0.7 {
+        col::GREEN
+    } else if frac <= 0.9 {
+        col::YELLOW
+    } else {
+        col::RED
+    }
+}
+
+/// Color the fps reading by how close it is to the cart's target rate.
+fn fps_color(measured: f32, target: u32) -> u8 {
+    let ratio = if target > 0 {
+        measured / target as f32
+    } else {
+        1.0
+    };
+    if ratio >= 0.95 {
+        col::GREEN
+    } else if ratio >= 0.8 {
+        col::YELLOW
+    } else {
+        col::RED
+    }
+}
+
+/// Draw the resource-usage overlay in the top-right: CPU (update and draw),
+/// memory and measured fps, color-coded by how close each is to its budget.
+/// `used` is the cart's committed-memory high-water in bytes; it shows as KB
+/// and as a fraction of the 128 K cap (see `GameVm::mem_used_bytes`). Columns
+/// are aligned: the memory KB sits under the per-call CPU labels and every
+/// percentage lines up. A solid black panel keeps it legible over any cart
+/// output; it draws in screen space and accepts whatever camera the cart left
+/// active (carts reset it each draw).
+fn stats_overlay(fb: &mut Framebuffer, cpu_u: f32, cpu_d: f32, used: u32, fps: f32, target: u32) {
+    let used_frac = used as f32 / 131_072.0;
+    let lines = [
+        format!("CPU U   {:>5.1}%", cpu_u * 100.0),
+        format!("CPU D   {:>5.1}%", cpu_d * 100.0),
+        format!(
+            "MEM {:<4}{:>5.1}%",
+            format!("{}K", used / 1024),
+            used_frac * 100.0
+        ),
+        format!("FPS    {:>6.1}", fps),
+    ];
+    let colors = [
+        stat_color(cpu_u),
+        stat_color(cpu_d),
+        stat_color(used_frac),
+        fps_color(fps, target),
+    ];
+    let w = lines.iter().map(|l| l.len()).max().unwrap_or(0) as i32 * 4 + 1;
+    let x0 = 127 - w;
+    fb.rectfill(x0, 0, 127, 4 * 7, col::BLACK);
+    for (i, (line, &color)) in lines.iter().zip(colors.iter()).enumerate() {
+        fb.print(line, x0 + 1, 1 + i as i32 * 7, color);
+    }
 }
 
 /// How long the F6 camera-flash overlay lasts, in frames (~0.1s at 60fps).
@@ -250,8 +303,9 @@ pub struct Shell {
     cwd: PathBuf,
     sdk_path: PathBuf,
 
-    // Wall-clock fps meter (F1 toggles it), measured over a moving window.
-    show_fps: bool,
+    /// F1 toggles the CPU/memory/fps resource overlay.
+    show_stats: bool,
+    // Wall-clock fps, measured over a moving window, shown in the overlay.
     fps_frames: u32,
     fps_t0: Instant,
     fps_val: f32,
@@ -294,7 +348,7 @@ impl Shell {
             want_exit: false,
             cwd: std::env::current_dir().unwrap_or_else(|_| PathBuf::from(".")),
             sdk_path,
-            show_fps: false,
+            show_stats: false,
             fps_frames: 0,
             fps_t0: Instant::now(),
             fps_val: 0.0,
@@ -404,8 +458,8 @@ impl Shell {
 
     pub fn key(&mut self, key: Key, mods: Mods) {
         // Global shortcuts.
-        if key == Key::ToggleFps {
-            self.show_fps = !self.show_fps;
+        if key == Key::ToggleStats {
+            self.show_stats = !self.show_stats;
             return;
         }
         if mods.ctrl {
@@ -579,7 +633,7 @@ impl Shell {
                     self.switch_editor(self.last_editor);
                 }
             }
-            Key::Tab | Key::CaptureLabel | Key::ToggleFps => {}
+            Key::Tab | Key::CaptureLabel | Key::ToggleStats => {}
         }
     }
 
@@ -702,7 +756,7 @@ impl Shell {
             ("ctrl+s", "Save + build check"),
             ("alt+left/right", "Switch editor"),
             ("arrows + z/x", "Game buttons"),
-            ("f1", "Toggle FPS meter"),
+            ("f1", "Toggle resource stats"),
             ("f6", "Capture label (running)"),
         ] {
             self.say(&format!("{k:14} {d}"), col::LIGHT_GREY);
@@ -1228,8 +1282,10 @@ impl Shell {
         match self.mode {
             Mode::Run => {
                 if self.vm.is_some() {
+                    let fps_val = self.fps_val;
                     let (logs, result) = {
                         let vm = self.vm.as_mut().unwrap();
+                        vm.state_mut().set_measured_fps(fps_val);
                         let logs = std::mem::take(&mut vm.state_mut().logs);
                         let r = vm.call_update().and_then(|()| vm.call_draw());
                         (logs, r)
@@ -1484,10 +1540,14 @@ impl Shell {
         self.meter_fps();
         match self.mode {
             Mode::Run => {
-                if self.show_fps {
+                if self.show_stats {
+                    let fps = self.fps_val;
                     if let Some(vm) = self.vm.as_mut() {
                         let target = vm.fps();
-                        fps_overlay(&mut vm.state_mut().fb, self.fps_val, target);
+                        let cpu_u = vm.cpu_update();
+                        let cpu_d = vm.cpu_draw();
+                        let used = vm.mem_used_bytes();
+                        stats_overlay(&mut vm.state_mut().fb, cpu_u, cpu_d, used, fps, target);
                     }
                 }
                 if self.capture_flash > 0 {
@@ -1622,6 +1682,35 @@ impl Shell {
 mod tests {
     use super::*;
     use std::path::Path;
+
+    #[test]
+    fn stats_overlay_draws_top_right_panel() {
+        let text_pixels = |fb: &Framebuffer, xr: std::ops::Range<i32>| {
+            let mut n = 0;
+            for y in 0..28 {
+                for x in xr.clone() {
+                    if fb.pget(x, y) != col::BLACK {
+                        n += 1;
+                    }
+                }
+            }
+            n
+        };
+        let mut fb = Framebuffer::new();
+        stats_overlay(&mut fb, 0.342, 0.51, 32768, 30.0, 30);
+        // With one-decimal CPU the panel widens (12-char rows -> x0=78), so the
+        // decimal digit shows colored text in 78..86 — blank with the old
+        // integer panel (x0=86). This is what makes the test red-before-green.
+        assert!(
+            text_pixels(&fb, 78..86) > 0,
+            "decimal CPU widened the panel left"
+        );
+        assert_eq!(
+            text_pixels(&fb, 0..60),
+            0,
+            "overlay leaves the top-left untouched"
+        );
+    }
 
     fn test_shell() -> Shell {
         let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rico8");

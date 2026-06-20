@@ -1,4 +1,4 @@
-# Cart examples build under the same 32 KiB shadow-stack reserve as real
+# Cart examples build under the same 48 KiB shadow-stack reserve as real
 # projects, so they load within the 128 K linear-memory cap. Target-scoped.
 [target.wasm32-unknown-unknown]
-rustflags = ["-C", "link-arg=-z", "-C", "link-arg=stack-size=32768"]
+rustflags = ["-C", "link-arg=-z", "-C", "link-arg=stack-size=49152"]

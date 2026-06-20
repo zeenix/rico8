@@ -31,8 +31,10 @@ A running cart may use at most 128 KiB of total RAM. Overrunning that budget
 stops the cart immediately and shows a "ran out of memory" error screen. The
 player can then return to the console and you can inspect the output.
 
-Simple games, especially those without a heap, use a small fraction of this.
-Even a game that uses the default allocator freely will typically stay well
+Of those 128 KiB, 48 KiB is reserved for LLVM's shadow stack (set via
+`-z stack-size=49152` in the build flags). That leaves roughly 79 KiB of heap
+headroom for carts that opt into `std` and a heap allocator. Simple `no_std`
+carts use a small fraction of this; even a heap-using cart typically stays well
 inside the budget.
 
 ## Per-frame work — 128 K
