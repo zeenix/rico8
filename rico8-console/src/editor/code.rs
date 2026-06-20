@@ -313,7 +313,7 @@ impl CodeEditor {
                     }
                 }
             }
-            Key::Escape | Key::CaptureLabel | Key::ToggleFps => {}
+            Key::Escape | Key::CaptureLabel | Key::ToggleStats => {}
         }
         self.scroll_to_cursor();
         *code = self.text();

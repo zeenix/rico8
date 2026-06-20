@@ -347,7 +347,7 @@ impl App {
             WKey::Named(NamedKey::PageUp) => Key::PageUp,
             WKey::Named(NamedKey::PageDown) => Key::PageDown,
             WKey::Named(NamedKey::Space) => Key::Char(' '),
-            WKey::Named(NamedKey::F1) => Key::ToggleFps,
+            WKey::Named(NamedKey::F1) => Key::ToggleStats,
             WKey::Named(NamedKey::F6) => Key::CaptureLabel,
             WKey::Character(s) => Key::Char(s.chars().next()?),
             _ => return None,

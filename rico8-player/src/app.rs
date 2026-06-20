@@ -158,6 +158,9 @@ impl App {
             }
 
             if let Some(v) = vm.as_mut() {
+                v.state_mut().set_measured_fps(fps_val);
+            }
+            if let Some(v) = vm.as_mut() {
                 if let Err(e) = v.call_update().and_then(|()| v.call_draw()) {
                     eprintln!("rico8-player: runtime error: {e}");
                     self.audio.stop_all();
