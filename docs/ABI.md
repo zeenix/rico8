@@ -46,20 +46,29 @@ wire and buys sub-pixel precision for free.)
 | `rico8_draw`   | `() -> ()`| after each update                       |
 | `memory`       | memory    | read by `print`/`log`/`panic`           |
 
-Each call runs under a fuel budget (~100M instructions). Exhausting it
-traps with a "ran too long" error screen — infinite loops cannot hang
-the console.
+Each call runs under a fuel budget (~128K instructions; see LIMITS.md).
+Exhausting it traps with a "ran too long" error screen — infinite loops
+cannot hang the console.
 
 ## Guest exports (optional)
 
-| export      | signature   | called                                |
-| ----------- | ----------- | ------------------------------------- |
-| `rico8_fps` | `() -> u32` | once, after `rico8_init`              |
+| export             | signature   | called                                       |
+| ------------------ | ----------- | -------------------------------------------- |
+| `rico8_fps`        | `() -> u32` | once, after `rico8_init`                     |
+| `rico8_mem_used`   | `() -> u32` | each frame, for the stats overlay            |
 
 `rico8_fps` reports the cart's logical frame rate. The SDK emits it from
 every cart; `30` and `60` are honored, and `60` is the default. A missing
 export, or any other value, also means 60, so a hand-written cart that
 omits it still runs.
+
+`rico8_mem_used` reports the cart's committed-memory high-water in bytes — the
+highest its footprint (shadow-stack reserve + statics + heap) has ever reached.
+The host reads it for the F2 stats overlay. It never decreases (wasm never
+returns pages) and counts freed-but-stranded memory, so it tracks real pressure
+closely; it is still not an exact OOM line, since the allocator keeps a small
+reserve above the last allocation. Carts without the export (hand-written WAT
+or allocation-free) report 0.
 
 ## Host imports
 
@@ -139,6 +148,19 @@ camera), so set them in `rico8_init` or each frame as needed.
 | `seed_rng` | `(seed: u32)` | reseed the `rnd` sequence for deterministic runs |
 | `log` | `(ptr: u32, len: u32)` | line to the RICO-8 console |
 | `panic` | `(ptr: u32, len: u32)` | record a panic message; the SDK's panic hook calls this right before the trap so the error screen shows the real message |
+
+### Resources
+
+Read-only meters a cart can watch. CPU is reported for the *last completed frame* (the
+current call isn't finished yet); fps is live. The CPU budget is 128K instructions per
+call (see LIMITS.md). Memory usage is cart-reported via the `rico8_mem_used` guest
+export rather than a host import; see the Guest exports (optional) section above.
+
+| function | signature | notes |
+| --- | --- | --- |
+| `cpu_update` | `() -> f32` | fraction `0..1` of `update`'s fuel budget used last frame |
+| `cpu_draw` | `() -> f32` | fraction `0..1` of `draw`'s fuel budget used last frame |
+| `fps` | `() -> f32` | measured frames per second (target rate until a frontend measures) |
 
 ## Versioning
 
