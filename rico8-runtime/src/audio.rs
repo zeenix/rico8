@@ -303,6 +303,14 @@ pub struct Synth {
     token_counter: i32,
     /// The current song's play-token (`0` when nothing is playing).
     current_token: i32,
+    /// Gain applied to music voices (`0.0`..=`1.0`), for fades.
+    music_gain: f32,
+    /// Where `music_gain` is heading.
+    music_gain_target: f32,
+    /// Per-sample step toward the target (`0.0` once settled).
+    music_gain_step: f32,
+    /// True while fading out: stop the music when the gain reaches zero.
+    stop_when_silent: bool,
 }
 
 impl Synth {
@@ -316,6 +324,10 @@ impl Synth {
             music_state: None,
             token_counter: 0,
             current_token: 0,
+            music_gain: 1.0,
+            music_gain_target: 1.0,
+            music_gain_step: 0.0,
+            stop_when_silent: false,
         }
     }
 
@@ -330,6 +342,10 @@ impl Synth {
         self.voices = [None, None, None, None];
         self.music_state = None;
         self.current_token = 0;
+        self.music_gain = 1.0;
+        self.music_gain_target = 1.0;
+        self.music_gain_step = 0.0;
+        self.stop_when_silent = false;
     }
 
     /// Play SFX `n`. `channel < 0` picks a free channel (preferring ones not
@@ -362,32 +378,86 @@ impl Synth {
 
     /// Start music at pattern `n` (mints and returns a nonzero play-token) or,
     /// when `n < 0`, stop. A start is refused — returns `0` — while a song is
-    /// already playing. A stop acts only when `token <= 0` (unconditional) or
-    /// `token` equals the current song's play-token. `fade_duration` and
-    /// `channel_mask` are honored by later changes.
+    /// already playing and not fading out. A stop acts only when `token <= 0`
+    /// (unconditional) or `token` equals the current song's play-token.
+    /// `_channel_mask` is reserved for Task 3.
     pub fn play_music(
         &mut self,
         n: i32,
-        _fade_duration: i32,
+        fade_duration: i32,
         _channel_mask: i32,
         token: i32,
     ) -> i32 {
         if n < 0 {
-            if token <= 0 || (self.current_token != 0 && token == self.current_token) {
-                self.stop_music();
+            let matches = token <= 0 || (self.current_token != 0 && token == self.current_token);
+            if matches {
+                self.begin_stop(fade_duration);
             }
             return 0;
         }
-        if self.music_state.is_some() {
-            return 0; // a song is already playing
+        // Refuse a second start only while a song is live (not already fading out).
+        if self.music_state.is_some() && !self.stop_when_silent {
+            return 0;
         }
         self.start_pattern(n as usize);
+        self.setup_fade_in(fade_duration);
         self.token_counter = self.token_counter.wrapping_add(1);
         if self.token_counter == 0 {
             self.token_counter = 1;
         }
         self.current_token = self.token_counter;
         self.current_token
+    }
+
+    /// Arm the fade-in (or instant full volume) for a freshly started song.
+    fn setup_fade_in(&mut self, fade_duration: i32) {
+        self.stop_when_silent = false;
+        if fade_duration <= 0 {
+            self.music_gain = 1.0;
+            self.music_gain_target = 1.0;
+            self.music_gain_step = 0.0;
+        } else {
+            let fade_seconds = fade_duration as f32 / 1000.0;
+            self.music_gain = 0.0;
+            self.music_gain_target = 1.0;
+            self.music_gain_step = 1.0 / (fade_seconds * self.sample_rate);
+        }
+    }
+
+    /// Stop now, or ramp to silence over `fade_duration` ms then stop.
+    fn begin_stop(&mut self, fade_duration: i32) {
+        if self.music_state.is_none() {
+            return;
+        }
+        if fade_duration <= 0 {
+            self.stop_music();
+            return;
+        }
+        let fade_seconds = fade_duration as f32 / 1000.0;
+        self.music_gain_target = 0.0;
+        self.music_gain_step = -1.0 / (fade_seconds * self.sample_rate);
+        self.stop_when_silent = true;
+    }
+
+    /// Advance the music-gain envelope one sample; stop the song if a fade-out
+    /// has reached silence.
+    fn advance_music_gain(&mut self) {
+        if self.music_gain_step == 0.0 {
+            return;
+        }
+        self.music_gain += self.music_gain_step;
+        let reached = if self.music_gain_step > 0.0 {
+            self.music_gain >= self.music_gain_target
+        } else {
+            self.music_gain <= self.music_gain_target
+        };
+        if reached {
+            self.music_gain = self.music_gain_target;
+            self.music_gain_step = 0.0;
+            if self.stop_when_silent {
+                self.stop_music();
+            }
+        }
     }
 
     pub fn stop_music(&mut self) {
@@ -398,6 +468,10 @@ impl Synth {
         }
         self.music_state = None;
         self.current_token = 0;
+        self.music_gain = 1.0;
+        self.music_gain_target = 1.0;
+        self.music_gain_step = 0.0;
+        self.stop_when_silent = false;
     }
 
     /// Index of the playing music pattern, if any.
@@ -492,16 +566,25 @@ impl Synth {
             }
         }
 
-        let mut mix = 0.0;
+        let mut music_mix = 0.0;
+        let mut sfx_mix = 0.0;
         for v in &mut self.voices {
             if let Some(voice) = v {
+                let from_music = voice.from_music;
                 match voice.sample(dt, self.t, &inst_waves, &inst_drawn) {
-                    Some(s) => mix += s,
+                    Some(s) => {
+                        if from_music {
+                            music_mix += s;
+                        } else {
+                            sfx_mix += s;
+                        }
+                    }
                     None => *v = None,
                 }
             }
         }
-        mix.clamp(-1.0, 1.0)
+        self.advance_music_gain();
+        (sfx_mix + music_mix * self.music_gain).clamp(-1.0, 1.0)
     }
 
     /// Which SFX index is playing on each channel (for editor UI).
@@ -891,5 +974,85 @@ mod tests {
         // The fresh token stops it.
         synth.play_music(-1, 0, 0, fresh);
         assert_eq!(synth.playing_pattern(), None);
+    }
+
+    #[test]
+    fn music_fades_in_from_silence() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        // Loop the song so it never ends on its own during the measurement window.
+        music[0].channels[0] = Some(0);
+        music[0].loop_start = true;
+        music[1].channels[0] = Some(0);
+        music[1].loop_back = true;
+        synth.load(test_sfx(), music);
+        synth.play_music(0, 1000, 0, 0); // 1s fade-in
+        assert!(
+            synth.music_gain < 0.05,
+            "starts near silent: {}",
+            synth.music_gain
+        );
+        for _ in 0..(44100 / 2) {
+            synth.next_sample();
+        }
+        assert!(
+            synth.music_gain > 0.4 && synth.music_gain < 0.6,
+            "~half after 0.5s: {}",
+            synth.music_gain
+        );
+        for _ in 0..44100 {
+            synth.next_sample();
+        }
+        assert!(
+            (synth.music_gain - 1.0).abs() < 1e-3,
+            "reaches full: {}",
+            synth.music_gain
+        );
+    }
+
+    #[test]
+    fn music_fades_out_then_stops() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[0].loop_start = true; // loops, so it never ends on its own
+        music[1].channels[0] = Some(0);
+        music[1].loop_back = true;
+        synth.load(test_sfx(), music);
+        let token = synth.play_music(0, 0, 0, 0);
+        synth.play_music(-1, 1000, 0, token); // 1s fade-out
+        assert!(synth.stop_when_silent, "fading out");
+        assert_eq!(
+            synth.playing_pattern(),
+            Some(0),
+            "still playing while fading"
+        );
+        for _ in 0..(44100 / 2) {
+            synth.next_sample();
+        }
+        assert!(synth.playing_pattern().is_some(), "still fading at 0.5s");
+        for _ in 0..(44100 / 2 + 200) {
+            synth.next_sample();
+        }
+        assert_eq!(synth.playing_pattern(), None, "stops once silent");
+    }
+
+    #[test]
+    fn start_is_allowed_while_fading_out() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[0].loop_start = true;
+        music[1].channels[0] = Some(0);
+        music[1].loop_back = true;
+        synth.load(test_sfx(), music);
+        let a = synth.play_music(0, 0, 0, 0);
+        synth.play_music(-1, 1000, 0, a); // fade A out
+        let b = synth.play_music(0, 0, 0, 0); // start during the fade
+        assert!(b != 0 && b != a, "took over during fade-out");
+        assert!(
+            !synth.stop_when_silent,
+            "the new song plays at full, not fading"
+        );
     }
 }
