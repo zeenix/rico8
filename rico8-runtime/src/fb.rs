@@ -6,7 +6,7 @@
 //! nearest-neighbor filtering.
 
 use crate::{
-    assets::{MapData, SpriteSheet, SPRITE_SIZE},
+    assets::{MapData, SpriteSheet, SPRITES_PER_ROW, SPRITE_COUNT, SPRITE_SIZE},
     font, palette,
 };
 
@@ -69,9 +69,16 @@ impl Framebuffer {
 
     /// Expand the indexed framebuffer into an RGBA8 buffer for GPU upload.
     pub fn write_rgba(&self, out: &mut [u8]) {
-        for (i, &c) in self.pixels.iter().enumerate() {
-            let c = self.display_pal[(c & 0x0f) as usize];
-            out[i * 4..i * 4 + 4].copy_from_slice(&palette::rgba(c));
+        // Fold the display palette into a 16-entry RGBA lookup table once, so
+        // the per-pixel loop is a plain table read plus a fixed-size copy. This
+        // drops the per-pixel `display_pal` + `rgba` work and the range-index
+        // bounds check, and autovectorizes cleanly.
+        let mut lut = [[0u8; 4]; 16];
+        for (i, entry) in lut.iter_mut().enumerate() {
+            *entry = palette::rgba(self.display_pal[i]);
+        }
+        for (chunk, &c) in out.chunks_exact_mut(4).zip(self.pixels.iter()) {
+            chunk.copy_from_slice(&lut[(c & 0x0f) as usize]);
         }
     }
 
@@ -175,6 +182,26 @@ impl Framebuffer {
         }
     }
 
+    /// Fill a solid horizontal run on row `y` from `x0..=x1` (inclusive,
+    /// POST-camera), clipped to the clip rect. Applies the draw palette. Used by
+    /// the solid (non-patterned) fill path: clipping the span once and writing
+    /// it as one memset is far cheaper than clipping every pixel.
+    fn fill_span(&mut self, x0: i32, x1: i32, y: i32, color: u8) {
+        let (cx0, cy0, cx1, cy1) = self.clip;
+        if y < cy0 || y >= cy1 {
+            return;
+        }
+        let xa = x0.max(cx0);
+        let xb = x1.min(cx1 - 1);
+        if xa > xb {
+            return;
+        }
+        let c = self.draw_pal[(color & 0x0f) as usize] & 0x0f;
+        let start = (y * WIDTH + xa) as usize;
+        let end = (y * WIDTH + xb + 1) as usize;
+        self.pixels[start..end].fill(c);
+    }
+
     /// Fill the whole screen with a color. Does not touch camera/clip.
     pub fn cls(&mut self, color: u8) {
         self.pixels.fill(color & 0x0f);
@@ -243,9 +270,21 @@ impl Framebuffer {
     pub fn rectfill(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: u8) {
         let (xa, xb) = (x0.min(x1), x0.max(x1));
         let (ya, yb) = (y0.min(y1), y0.max(y1));
-        for y in ya..=yb {
-            for x in xa..=xb {
-                self.raw_pset_fill(x - self.camera_x, y - self.camera_y, color);
+        if self.fill_pattern == 0 {
+            // Solid fill: each row is one clipped memset (xa/xb are pre-camera).
+            for y in ya..=yb {
+                self.fill_span(
+                    xa - self.camera_x,
+                    xb - self.camera_x,
+                    y - self.camera_y,
+                    color,
+                );
+            }
+        } else {
+            for y in ya..=yb {
+                for x in xa..=xb {
+                    self.raw_pset_fill(x - self.camera_x, y - self.camera_y, color);
+                }
             }
         }
     }
@@ -266,7 +305,14 @@ impl Framebuffer {
         let mut y = 0;
         let mut err = 1 - r;
         while x >= y {
-            if fill {
+            if fill && self.fill_pattern == 0 {
+                // Solid fill: each scanline of the disc is one clipped memset
+                // (cx/cy are already post-camera here).
+                self.fill_span(cx - x, cx + x, cy + y, color);
+                self.fill_span(cx - x, cx + x, cy - y, color);
+                self.fill_span(cx - y, cx + y, cy + x, color);
+                self.fill_span(cx - y, cx + y, cy - x, color);
+            } else if fill {
                 for px in (cx - x)..=(cx + x) {
                     self.raw_pset_fill(px, cy + y, color);
                     self.raw_pset_fill(px, cy - y, color);
@@ -326,8 +372,18 @@ impl Framebuffer {
                 let dx = a * s.sqrt();
                 let left = (cx - dx).round() as i32;
                 let right = (cx + dx).round() as i32;
-                for x in left..=right {
-                    self.raw_pset_fill(x - self.camera_x, y - self.camera_y, color);
+                if self.fill_pattern == 0 {
+                    // Solid fill: one clipped memset per scanline of the oval.
+                    self.fill_span(
+                        left - self.camera_x,
+                        right - self.camera_x,
+                        y - self.camera_y,
+                        color,
+                    );
+                } else {
+                    for x in left..=right {
+                        self.raw_pset_fill(x - self.camera_x, y - self.camera_y, color);
+                    }
                 }
             }
         } else {
@@ -418,13 +474,41 @@ impl Framebuffer {
         // pixels, so the last cell can be clipped mid-sprite.
         let pw = (w.max(0.0) * SPRITE_SIZE as f32) as i32;
         let ph = (h.max(0.0) * SPRITE_SIZE as f32) as i32;
-        for py in 0..ph {
-            for px in 0..pw {
+
+        // Clip the destination rectangle to the clip rect once, up front, then
+        // walk only the visible sub-rectangle. This skips the per-pixel clip
+        // test entirely and fast-rejects fully off-screen sprites (a big win
+        // for `map`, which calls `spr` once per tile). The destination spans
+        // `[dx0, dx0 + pw)` x `[dy0, dy0 + ph)` in post-camera space; the `px`
+        // range is where that lands inside `[cx0, cx1)`.
+        let (dx0, dy0) = (x - self.camera_x, y - self.camera_y);
+        let (cx0, cy0, cx1, cy1) = self.clip;
+        let px_lo = (cx0 - dx0).max(0);
+        let px_hi = (cx1 - dx0).min(pw);
+        let py_lo = (cy0 - dy0).max(0);
+        let py_hi = (cy1 - dy0).min(ph);
+        if px_lo >= px_hi || py_lo >= py_hi {
+            return;
+        }
+
+        // Decode the sprite's sheet origin once instead of per pixel. The flip
+        // still mirrors about the FULL sprite extent (`pw`/`ph`), and source
+        // reads may run past 8 into neighboring sprites for multi-sprite draws,
+        // exactly as `sprite_pixel` does.
+        let n = (n as usize) % SPRITE_COUNT;
+        let base_sx = (n % SPRITES_PER_ROW * SPRITE_SIZE) as i32;
+        let base_sy = (n / SPRITES_PER_ROW * SPRITE_SIZE) as i32;
+        for py in py_lo..py_hi {
+            let sy = if flip_y { ph - 1 - py } else { py };
+            for px in px_lo..px_hi {
                 let sx = if flip_x { pw - 1 - px } else { px };
-                let sy = if flip_y { ph - 1 - py } else { py };
-                let c = sheet.sprite_pixel(n, sx, sy);
+                let c = sheet.get(base_sx + sx, base_sy + sy);
                 if ((self.transparent >> c) & 1) == 0 {
-                    self.pset(x + px, y + py, c);
+                    // In bounds by construction: `px`/`py` lie within the clip.
+                    let px_dst = dx0 + px;
+                    let py_dst = dy0 + py;
+                    self.pixels[(py_dst * WIDTH + px_dst) as usize] =
+                        self.draw_pal[(c & 0x0f) as usize] & 0x0f;
                 }
             }
         }
@@ -582,6 +666,74 @@ mod tests {
         assert_eq!(fb.pget(3, 4), 7, "left half is drawn");
         assert_eq!(fb.pget(4, 4), 0, "right half is untouched");
         assert_eq!(fb.pget(7, 7), 0, "bottom-right corner is untouched");
+    }
+
+    #[test]
+    fn spr_clipped_flip_mirrors_about_full_sprite() {
+        // Flip must mirror about the FULL 8x8 sprite, then the clip rect cuts
+        // the result — not the other way round. Mark the four source corners
+        // with distinct colors; double-flip swaps each corner to the opposite
+        // one, and a 4x4 top-left clip should keep exactly one of them.
+        let mut fb = Framebuffer::new();
+        let mut sheet = SpriteSheet::default();
+        sheet.set(0, 0, 8); // top-left  -> dest (7,7)
+        sheet.set(7, 0, 9); // top-right -> dest (0,7)
+        sheet.set(0, 7, 11); // bottom-left  -> dest (7,0)
+        sheet.set(7, 7, 12); // bottom-right -> dest (0,0)
+        fb.clip(0, 0, 4, 4);
+        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, true, true);
+        assert_eq!(
+            fb.pget(0, 0),
+            12,
+            "source bottom-right mirrors to dest (0,0) and survives the clip"
+        );
+        assert_eq!(fb.pget(7, 7), 0, "dest (7,7) is outside the 4x4 clip");
+        assert_eq!(fb.pget(0, 7), 0, "dest (0,7) is outside the 4x4 clip");
+        assert_eq!(fb.pget(7, 0), 0, "dest (7,0) is outside the 4x4 clip");
+    }
+
+    #[test]
+    fn spr_partly_offscreen_under_camera_aligns_source() {
+        // With the camera pushing the sprite up-and-left, only its bottom-right
+        // part is on screen; the visible pixels must come from the matching
+        // source columns/rows (no wrap), starting at dest (0,0).
+        let mut fb = Framebuffer::new();
+        let mut sheet = SpriteSheet::default();
+        for y in 0..8 {
+            for x in 0..8 {
+                sheet.set(x, y, 7);
+            }
+        }
+        sheet.set(2, 3, 9); // the source pixel that lands on dest (0,0)
+        fb.camera(2, 3);
+        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        assert_eq!(
+            fb.pget(0, 0),
+            9,
+            "source (2,3) lands at the top-left corner"
+        );
+        assert_eq!(fb.pget(1, 0), 7, "source (3,3) is the next column");
+        assert_eq!(fb.pget(5, 4), 7, "the rest of the on-screen part is drawn");
+        // Nothing wrapped to the far edges of the screen.
+        assert_eq!(fb.pget(127, 127), 0, "no wrap to the opposite corner");
+    }
+
+    #[test]
+    fn spr_fractional_width_meets_clip_edge() {
+        // A half-width sprite (4px) further trimmed by a 2px-wide clip: only the
+        // first two destination columns survive.
+        let mut fb = Framebuffer::new();
+        let mut sheet = SpriteSheet::default();
+        for y in 0..8 {
+            for x in 0..8 {
+                sheet.set(x, y, 7);
+            }
+        }
+        fb.clip(0, 0, 2, 128);
+        fb.spr(&sheet, 0, 0, 0, 0.5, 1.0, false, false);
+        assert_eq!(fb.pget(1, 3), 7, "inside the clip and the fractional width");
+        assert_eq!(fb.pget(2, 3), 0, "clipped away at x=2");
+        assert_eq!(fb.pget(4, 3), 0, "beyond the 4px fractional width anyway");
     }
 
     #[test]
