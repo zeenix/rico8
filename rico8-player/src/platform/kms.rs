@@ -52,6 +52,9 @@ pub struct KmsPlatform {
     height: usize,
     rotate: Rotate,
     input: Input,
+    /// Reusable full-screen scratch buffer for the padded-pitch blit path, so the per-frame
+    /// hot path never allocates. Sized `width * height` and fully overwritten each frame.
+    scratch: Vec<u32>,
     /// Held open so `Drop` can restore KD_TEXT.
     vt: Option<std::fs::File>,
     _audio: Option<AudioThread>,
@@ -93,6 +96,7 @@ impl KmsPlatform {
             height,
             rotate,
             input: Input::new(),
+            scratch: vec![0u32; width * height],
             vt,
             _audio: alsa::spawn(audio),
         })
@@ -113,6 +117,7 @@ impl Platform for KmsPlatform {
             self.height,
             fb,
             self.rotate,
+            &mut self.scratch,
         )?;
         self.card
             .page_flip(self.crtc, self.fb[back], PageFlipFlags::EVENT, None)?;
@@ -232,6 +237,10 @@ fn make_buffer(card: &Card, w: u16, h: u16) -> Result<(DumbBuffer, framebuffer::
 /// `bytemuck::cast_slice_mut` over the entire mapping. When the driver pads
 /// rows (`pitch > width * 4`), each source row is written at the correct
 /// byte offset so no pixels land in the padding area.
+///
+/// `scratch` is a caller-owned `width * height` buffer reused for the padded path so the per-frame
+/// hot path never allocates; `present_into` overwrites every entry (content square plus border), so
+/// it needs no pre-zeroing.
 fn blit_to_dumb(
     card: &Card,
     dumb: &mut DumbBuffer,
@@ -239,6 +248,7 @@ fn blit_to_dumb(
     height: usize,
     fb: &Framebuffer,
     rotate: Rotate,
+    scratch: &mut [u32],
 ) -> Result<()> {
     let pitch = dumb.pitch() as usize; // bytes per row, may be padded.
     let expected_pitch = width * 4; // bytes per row without padding.
@@ -248,10 +258,9 @@ fn blit_to_dumb(
         let dst: &mut [u32] = bytemuck::cast_slice_mut(map.as_mut());
         blit::present_into(fb, dst, width, height, rotate);
     } else {
-        // Padded pitch: blit into a contiguous scratch buffer, then copy each
+        // Padded pitch: blit into the reusable contiguous scratch buffer, then copy each
         // row at the correct byte offset into the mapping.
-        let mut scratch = vec![0u32; width * height];
-        blit::present_into(fb, &mut scratch, width, height, rotate);
+        blit::present_into(fb, scratch, width, height, rotate);
         let raw: &mut [u8] = map.as_mut();
         for y in 0..height {
             let src_start = y * width;
