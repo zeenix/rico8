@@ -38,7 +38,7 @@ extern "C" {
     pub fn sprite_flags(n: u32) -> i32;
     pub fn set_sprite_flags(n: u32, flags: u32);
     pub fn sfx(n: i32, channel: i32);
-    pub fn music(n: i32);
+    pub fn music(n: i32, fade_duration: i32, channel_mask: i32, token: i32) -> i32;
     pub fn time() -> f32;
     pub fn rnd() -> f32;
     pub fn seed_rng(seed: u32);
@@ -126,7 +126,11 @@ mod stubs {
     }
     pub unsafe fn set_sprite_flags(_n: u32, _flags: u32) {}
     pub unsafe fn sfx(_n: i32, _channel: i32) {}
-    pub unsafe fn music(_n: i32) {}
+    // Pretend a start always succeeds (nonzero token) so cart logic type-checks
+    // and unit-tests on native targets, with no real audio.
+    pub unsafe fn music(_n: i32, _fade_duration: i32, _channel_mask: i32, _token: i32) -> i32 {
+        1
+    }
     pub unsafe fn time() -> f32 {
         0.0
     }
