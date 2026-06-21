@@ -362,8 +362,13 @@ impl GameVm {
                               channel: i32| {
             c.data().audio.play_sfx(n, channel)
         });
-        link!(linker, "music", |c: Caller<'_, HostState>, n: i32| {
-            c.data().audio.play_music(n)
+        link!(linker, "music", |c: Caller<'_, HostState>,
+                                n: i32,
+                                fade: i32,
+                                mask: i32,
+                                token: i32|
+         -> i32 {
+            c.data().audio.play_music(n, fade, mask, token)
         });
         link!(linker, "cpu_update", |c: Caller<'_, HostState>| -> f32 {
             c.data().last_update_cpu

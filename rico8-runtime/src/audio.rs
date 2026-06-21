@@ -299,6 +299,10 @@ pub struct Synth {
     music: Vec<MusicPattern>,
     voices: [Option<Voice>; CHANNELS],
     music_state: Option<MusicState>,
+    /// Monotonic counter; each start mints the next play-token.
+    token_counter: i32,
+    /// The current song's play-token (`0` when nothing is playing).
+    current_token: i32,
 }
 
 impl Synth {
@@ -310,6 +314,8 @@ impl Synth {
             music: Vec::new(),
             voices: [None, None, None, None],
             music_state: None,
+            token_counter: 0,
+            current_token: 0,
         }
     }
 
@@ -323,6 +329,7 @@ impl Synth {
     pub fn stop_all(&mut self) {
         self.voices = [None, None, None, None];
         self.music_state = None;
+        self.current_token = 0;
     }
 
     /// Play SFX `n`. `channel < 0` picks a free channel (preferring ones not
@@ -353,13 +360,34 @@ impl Synth {
         self.voices[ch] = Some(Voice::new(n as usize, sfx, false, self.sample_rate));
     }
 
-    /// Start music at pattern `n`, or stop when `n < 0`.
-    pub fn play_music(&mut self, n: i32) {
+    /// Start music at pattern `n` (mints and returns a nonzero play-token) or,
+    /// when `n < 0`, stop. A start is refused — returns `0` — while a song is
+    /// already playing. A stop acts only when `token <= 0` (unconditional) or
+    /// `token` equals the current song's play-token. `fade_duration` and
+    /// `channel_mask` are honored by later changes.
+    pub fn play_music(
+        &mut self,
+        n: i32,
+        _fade_duration: i32,
+        _channel_mask: i32,
+        token: i32,
+    ) -> i32 {
         if n < 0 {
-            self.stop_music();
-            return;
+            if token <= 0 || (self.current_token != 0 && token == self.current_token) {
+                self.stop_music();
+            }
+            return 0;
+        }
+        if self.music_state.is_some() {
+            return 0; // a song is already playing
         }
         self.start_pattern(n as usize);
+        self.token_counter = self.token_counter.wrapping_add(1);
+        if self.token_counter == 0 {
+            self.token_counter = 1;
+        }
+        self.current_token = self.token_counter;
+        self.current_token
     }
 
     pub fn stop_music(&mut self) {
@@ -369,6 +397,7 @@ impl Synth {
             }
         }
         self.music_state = None;
+        self.current_token = 0;
     }
 
     /// Index of the playing music pattern, if any.
@@ -530,8 +559,8 @@ impl AudioHandle {
         self.with_synth(|s| s.channel_step())
     }
 
-    pub fn play_music(&self, n: i32) {
-        self.with_synth(|s| s.play_music(n));
+    pub fn play_music(&self, n: i32, fade_duration: i32, channel_mask: i32, token: i32) -> i32 {
+        self.with_synth(|s| s.play_music(n, fade_duration, channel_mask, token))
     }
 
     pub fn stop_all(&self) {
@@ -703,7 +732,7 @@ mod tests {
         music[0].channels[0] = Some(0);
         music[0].stop_at_end = true;
         synth.load(test_sfx(), music);
-        synth.play_music(0);
+        synth.play_music(0, 0, 0, 0);
         assert_eq!(synth.playing_pattern(), Some(0));
         for _ in 0..(44100 * 5) {
             synth.next_sample();
@@ -720,7 +749,7 @@ mod tests {
         music[1].channels[0] = Some(0);
         music[1].loop_back = true;
         synth.load(test_sfx(), music);
-        synth.play_music(1);
+        synth.play_music(1, 0, 0, 0);
         for _ in 0..(44100 * 5) {
             synth.next_sample();
         }
@@ -748,7 +777,7 @@ mod tests {
         music[0].stop_at_end = true;
         let mut synth = Synth::new(44100.0);
         synth.load(sfx, music);
-        synth.play_music(0);
+        synth.play_music(0, 0, 0, 0);
         let mut n = 0;
         while synth.playing_pattern().is_some() && n < 44100 * 5 {
             synth.next_sample();
@@ -769,7 +798,7 @@ mod tests {
         let mut music = vec![MusicPattern::default(); 64];
         music[0].channels[0] = Some(0);
         synth.load(sfx, music);
-        synth.play_music(0);
+        synth.play_music(0, 0, 0, 0);
         synth.play_sfx(1, -1);
         let chans = synth.channel_sfx();
         assert_eq!(chans[0], Some(0), "music keeps channel 0");
@@ -825,5 +854,42 @@ mod tests {
             synth.next_sample();
         }
         assert_eq!(synth.channel_step()[0], Some(1));
+    }
+
+    #[test]
+    fn second_start_is_refused_while_playing() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[1].channels[0] = Some(0);
+        synth.load(test_sfx(), music);
+        let token = synth.play_music(0, 0, 0, 0);
+        assert!(token != 0, "first start mints a nonzero token");
+        // A second start while a song plays is refused.
+        assert_eq!(synth.play_music(1, 0, 0, 0), 0);
+        assert_eq!(synth.playing_pattern(), Some(0), "first song keeps playing");
+    }
+
+    #[test]
+    fn stale_token_does_not_stop_a_later_song() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[0].stop_at_end = true; // one-shot: ends on its own
+        music[1].channels[0] = Some(0);
+        synth.load(test_sfx(), music);
+        let stale = synth.play_music(0, 0, 0, 0);
+        for _ in 0..(44100 * 5) {
+            synth.next_sample(); // let song 0 finish
+        }
+        assert_eq!(synth.playing_pattern(), None, "one-shot ended on its own");
+        let fresh = synth.play_music(1, 0, 0, 0);
+        assert!(fresh != 0 && fresh != stale, "new song gets a fresh token");
+        // A stop carrying the stale token must NOT stop the new song.
+        synth.play_music(-1, 0, 0, stale);
+        assert_eq!(synth.playing_pattern(), Some(1), "stale token is a no-op");
+        // The fresh token stops it.
+        synth.play_music(-1, 0, 0, fresh);
+        assert_eq!(synth.playing_pattern(), None);
     }
 }

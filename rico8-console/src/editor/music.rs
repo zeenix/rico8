@@ -53,9 +53,9 @@ impl MusicEditor {
     fn toggle_play(&self, assets: &Assets, audio: &AudioHandle) {
         audio.load(assets.sfx.clone(), assets.music.clone());
         if audio.with_synth(|s| s.playing_pattern()).is_some() {
-            audio.play_music(-1);
+            audio.play_music(-1, 0, 0, 0);
         } else {
-            audio.play_music(self.pattern as i32);
+            audio.play_music(self.pattern as i32, 0, 0, 0);
         }
     }
 
