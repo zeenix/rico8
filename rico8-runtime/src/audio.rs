@@ -311,6 +311,8 @@ pub struct Synth {
     music_gain_step: f32,
     /// True while fading out: stop the music when the gain reaches zero.
     stop_when_silent: bool,
+    /// Channels reserved for music (bit i = channel i); auto-routed sfx skip them.
+    reserved_channels: u8,
 }
 
 impl Synth {
@@ -328,6 +330,7 @@ impl Synth {
             music_gain_target: 1.0,
             music_gain_step: 0.0,
             stop_when_silent: false,
+            reserved_channels: 0,
         }
     }
 
@@ -346,6 +349,7 @@ impl Synth {
         self.music_gain_target = 1.0;
         self.music_gain_step = 0.0;
         self.stop_when_silent = false;
+        self.reserved_channels = 0;
     }
 
     /// Play SFX `n`. `channel < 0` picks a free channel (preferring ones not
@@ -363,15 +367,16 @@ impl Synth {
         let ch = if (0..CHANNELS as i32).contains(&channel) {
             channel as usize
         } else {
-            // Prefer an idle channel, then one playing a one-shot SFX;
-            // steal a music channel only as a last resort.
-            let idle = (0..CHANNELS).find(|&i| self.voices[i].is_none());
-            let non_music =
-                (0..CHANNELS).find(|&i| self.voices[i].as_ref().is_some_and(|v| !v.from_music));
-            match idle.or(non_music) {
-                Some(i) => i,
-                None => CHANNELS - 1,
-            }
+            // Prefer an idle non-reserved channel, then one playing a one-shot
+            // SFX, then any non-reserved channel; steal a reserved one only when
+            // every channel is reserved.
+            let reserved = self.reserved_channels;
+            let free = |i: usize| reserved & (1 << i) == 0;
+            let idle = (0..CHANNELS).find(|&i| self.voices[i].is_none() && free(i));
+            let non_music = (0..CHANNELS)
+                .find(|&i| free(i) && self.voices[i].as_ref().is_some_and(|v| !v.from_music));
+            let any_free = (0..CHANNELS).rev().find(|&i| free(i));
+            idle.or(non_music).or(any_free).unwrap_or(CHANNELS - 1)
         };
         self.voices[ch] = Some(Voice::new(n as usize, sfx, false, self.sample_rate));
     }
@@ -380,14 +385,9 @@ impl Synth {
     /// when `n < 0`, stop. A start is refused — returns `0` — while a song is
     /// already playing and not fading out. A stop acts only when `token <= 0`
     /// (unconditional) or `token` equals the current song's play-token.
-    /// `_channel_mask` is reserved for Task 3.
-    pub fn play_music(
-        &mut self,
-        n: i32,
-        fade_duration: i32,
-        _channel_mask: i32,
-        token: i32,
-    ) -> i32 {
+    /// `channel_mask` bits 0-3 mark which channels are reserved for music;
+    /// auto-routed sfx will skip those channels while music is playing.
+    pub fn play_music(&mut self, n: i32, fade_duration: i32, channel_mask: i32, token: i32) -> i32 {
         if n < 0 {
             let matches = token <= 0 || (self.current_token != 0 && token == self.current_token);
             if matches {
@@ -399,6 +399,7 @@ impl Synth {
         if self.music_state.is_some() && !self.stop_when_silent {
             return 0;
         }
+        self.reserved_channels = (channel_mask & 0x0F) as u8;
         self.start_pattern(n as usize);
         self.setup_fade_in(fade_duration);
         self.token_counter = self.token_counter.wrapping_add(1);
@@ -472,6 +473,7 @@ impl Synth {
         self.music_gain_target = 1.0;
         self.music_gain_step = 0.0;
         self.stop_when_silent = false;
+        self.reserved_channels = 0;
     }
 
     /// Index of the playing music pattern, if any.
@@ -1035,6 +1037,40 @@ mod tests {
             synth.next_sample();
         }
         assert_eq!(synth.playing_pattern(), None, "stops once silent");
+    }
+
+    #[test]
+    fn reserved_channel_is_not_auto_selected_for_sfx() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0); // music plays on channel 0
+        synth.load(test_sfx(), music);
+        // Reserve channel 1, which is IDLE — so only the reservation (not mere
+        // occupancy) can keep an auto-routed sfx off it. Without reservation the
+        // router would pick idle channel 1 first.
+        synth.play_music(0, 0, 0b0010, 0);
+        synth.play_sfx(1, -1); // auto-routed
+        let chans = synth.channel_sfx();
+        assert_ne!(
+            chans[1],
+            Some(1),
+            "sfx must avoid the reserved idle channel 1"
+        );
+        assert!(
+            chans[2..].contains(&Some(1)),
+            "sfx landed on a free channel"
+        );
+    }
+
+    #[test]
+    fn explicit_channel_overrides_reservation() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        synth.load(test_sfx(), music);
+        synth.play_music(0, 0, 0b0001, 0); // reserve channel 0
+        synth.play_sfx(1, 0); // explicit channel 0
+        assert_eq!(synth.channel_sfx()[0], Some(1), "explicit request wins");
     }
 
     #[test]
