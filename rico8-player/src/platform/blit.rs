@@ -13,10 +13,10 @@ use rico8_runtime::{
 /// The source is square (128x128), so the largest aspect-preserving fit is a square whose side
 /// equals the smaller of `dst_w`/`dst_h`; the longer axis is letterboxed/pillarboxed.
 pub fn present_into(fb: &Framebuffer, dst: &mut [u32], dst_w: usize, dst_h: usize, rot: Rotate) {
-    for p in dst.iter_mut() {
-        *p = 0;
-    }
     if dst_w == 0 || dst_h == 0 {
+        for p in dst.iter_mut() {
+            *p = 0;
+        }
         return;
     }
     let (sw, sh) = (WIDTH as usize, HEIGHT as usize); // 128 x 128, square.
@@ -24,22 +24,97 @@ pub fn present_into(fb: &Framebuffer, dst: &mut [u32], dst_w: usize, dst_h: usiz
     let ox = (dst_w - out) / 2;
     let oy = (dst_h - out) / 2;
 
+    // Identity palette LUT: pack each color into native-endian XRGB8888 once, then index it per
+    // pixel instead of rebuilding the pack. XRGB native-endian assumes little-endian, which both
+    // the KMS and window backends target. This is the raw stored index (no `display_pal`), matching
+    // the pre-existing player behavior, so the LUT is the identity mapping `lut[i] =
+    // pack(PALETTE[i])`.
+    let mut lut = [0u32; 16];
+    for (i, slot) in lut.iter_mut().enumerate() {
+        let [r, g, b] = palette::PALETTE[i];
+        *slot = (r as u32) << 16 | (g as u32) << 8 | b as u32;
+    }
+
+    // Precompute the nearest-neighbour source index for every output coordinate `k in 0..out`.
+    // The source is square (sw == sh == 128), so the same map serves both axes:
+    // `src_map[k] = k * 128 / out`, matching the original per-pixel `dx*sw/out` divide exactly,
+    // including at fractional scales (e.g. out=480, where rows are not uniformly duplicated).
+    let src_map: Vec<usize> = (0..out).map(|k| k * sw / out).collect();
+
+    // The raw palette-index buffer, row-major 128-wide. Indexing it directly for in-range coords
+    // (all `rx`/`ry` here are 0..128, always in range) is equivalent to `pget`'s non-OOB path.
+    let pixels = fb.pixels();
+
+    // Row-replication insight: for a fixed output row `dy` the source row `sy = src_map[dy]` is
+    // fixed, and for EVERY rotation exactly one source coordinate stays constant across the row
+    // while the other varies with `dx`. Hence two output rows with the same `sy` produce identical
+    // content, so we only build a row when `sy` changes and otherwise memcpy the previous row. At
+    // typical 2x-4x upscales most rows are duplicates, turning per-pixel work into a
+    // `copy_from_slice`.
+    let mut prev_sy = usize::MAX;
+    let mut prev_base = 0usize;
     for dy in 0..out {
-        let sy = dy * sh / out; // Nearest-neighbour source row, in 0..sh.
+        let sy = src_map[dy]; // Nearest-neighbour source row, in 0..sh.
         let base = (oy + dy) * dst_w + ox;
-        for dx in 0..out {
-            let sx = dx * sw / out; // Nearest-neighbour source column, in 0..sw.
-                                    // Map the screen-space source pixel through the panel rotation to read `fb`.
-            let (rx, ry) = match rot {
-                Rotate::None => (sx, sy),
-                Rotate::Cw90 => (sy, sw - 1 - sx),
-                Rotate::Cw180 => (sw - 1 - sx, sh - 1 - sy),
-                Rotate::Cw270 => (sh - 1 - sy, sx),
-            };
-            let idx = (fb.pget(rx as i32, ry as i32) & 0x0f) as usize;
-            let [r, g, b] = palette::PALETTE[idx];
-            dst[base + dx] = (r as u32) << 16 | (g as u32) << 8 | b as u32;
+        if sy == prev_sy {
+            // Same source row as the previous output row: copy its already-built content span.
+            let (head, tail) = dst.split_at_mut(base);
+            tail[..out].copy_from_slice(&head[prev_base..prev_base + out]);
+            continue;
         }
+        let row = &mut dst[base..base + out];
+        // Build one output row, holding the constant source coordinate (derived from `sy`) and
+        // varying the other with `dx` through `src_map`. The rotation mapping mirrors the original:
+        //   None:  (rx,ry) = (src_map[dx], sy)
+        //   Cw90:  (rx,ry) = (sy, 127 - src_map[dx])
+        //   Cw180: (rx,ry) = (127 - src_map[dx], 127 - sy)
+        //   Cw270: (rx,ry) = (127 - sy, src_map[dx])
+        match rot {
+            Rotate::None => {
+                let row_off = sy * sw;
+                for (dx, out_px) in row.iter_mut().enumerate() {
+                    let idx = (pixels[row_off + src_map[dx]] & 0x0f) as usize;
+                    *out_px = lut[idx];
+                }
+            }
+            Rotate::Cw90 => {
+                for (dx, out_px) in row.iter_mut().enumerate() {
+                    let ry = sh - 1 - src_map[dx];
+                    let idx = (pixels[ry * sw + sy] & 0x0f) as usize;
+                    *out_px = lut[idx];
+                }
+            }
+            Rotate::Cw180 => {
+                let row_off = (sh - 1 - sy) * sw;
+                for (dx, out_px) in row.iter_mut().enumerate() {
+                    let rx = sw - 1 - src_map[dx];
+                    let idx = (pixels[row_off + rx] & 0x0f) as usize;
+                    *out_px = lut[idx];
+                }
+            }
+            Rotate::Cw270 => {
+                let rx = sw - 1 - sy;
+                for (dx, out_px) in row.iter_mut().enumerate() {
+                    let ry = src_map[dx];
+                    let idx = (pixels[ry * sw + rx] & 0x0f) as usize;
+                    *out_px = lut[idx];
+                }
+            }
+        }
+        prev_sy = sy;
+        prev_base = base;
+    }
+
+    // Border-only clear: the content square `[ox, ox+out) x [oy, oy+out)` is fully written above,
+    // so only the letterbox/pillarbox border needs zeroing. Its complement is exactly: the top band
+    // (rows `0..oy`), the bottom band (rows `oy+out..dst_h`), and within each content row the left
+    // pillar (`0..ox`) and right pillar (`ox+out..dst_w`).
+    dst[..oy * dst_w].fill(0);
+    dst[(oy + out) * dst_w..].fill(0);
+    for dy in 0..out {
+        let row_start = (oy + dy) * dst_w;
+        dst[row_start..row_start + ox].fill(0);
+        dst[row_start + ox + out..row_start + dst_w].fill(0);
     }
 }
 
@@ -157,5 +232,45 @@ mod tests {
             rgb(col::RED),
             "(0,0) -> (127,127) under CW180"
         );
+    }
+
+    #[test]
+    fn rotate_270_maps_top_left_to_bottom_left() {
+        // 128x128, single red pixel at (0,0). Under CW270 the mapping is (rx,ry) = (127-dy, dx),
+        // so fb (0,0) is read at screen (dx=0, dy=127), i.e. the bottom-left corner.
+        let mut fb = Framebuffer::new();
+        fb.cls(col::BLACK);
+        fb.pset(0, 0, col::RED);
+        let mut dst = vec![0u32; 128 * 128];
+        present_into(&fb, &mut dst, 128, 128, Rotate::Cw270);
+        assert_eq!(
+            dst[127 * 128],
+            rgb(col::RED),
+            "(0,0) -> (0,127) under CW270"
+        );
+    }
+
+    #[test]
+    fn rotate_90_doubles_each_pixel_at_2x() {
+        // 256x256 (out=256, scale 2) under CW90: src_map[k] = k/2. fb (0,0) maps to (rx,ry)=(0,0)
+        // when sy=0 (dy in 0..2) and 127 - dx/2 == 0 (dx in 254..256), i.e. the 2x2 block at the
+        // top-right corner. This locks the rotated row-build at a non-1x scale.
+        let mut fb = Framebuffer::new();
+        fb.cls(col::BLACK);
+        fb.pset(0, 0, col::RED);
+        let mut dst = vec![0u32; 256 * 256];
+        present_into(&fb, &mut dst, 256, 256, Rotate::Cw90);
+        for dy in 0..2 {
+            for dx in 254..256 {
+                assert_eq!(
+                    dst[dy * 256 + dx],
+                    rgb(col::RED),
+                    "doubled rotated pixel at ({dx},{dy})"
+                );
+            }
+        }
+        // A pixel just outside that block reads fb's background.
+        assert_eq!(dst[2 * 256 + 255], rgb(col::BLACK), "row below the block");
+        assert_eq!(dst[253], rgb(col::BLACK), "column left of the block");
     }
 }
