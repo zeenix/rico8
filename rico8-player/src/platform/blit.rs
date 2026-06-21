@@ -24,14 +24,16 @@ pub fn present_into(fb: &Framebuffer, dst: &mut [u32], dst_w: usize, dst_h: usiz
     let ox = (dst_w - out) / 2;
     let oy = (dst_h - out) / 2;
 
-    // Identity palette LUT: pack each color into native-endian XRGB8888 once, then index it per
-    // pixel instead of rebuilding the pack. XRGB native-endian assumes little-endian, which both
-    // the KMS and window backends target. This is the raw stored index (no `display_pal`), matching
-    // the pre-existing player behavior, so the LUT is the identity mapping `lut[i] =
-    // pack(PALETTE[i])`.
+    // Display-palette LUT: fold the screen-time color remap (`display_pal`, PICO-8's
+    // `pal(c0,c1,1)`) into a 16-entry table once, then index it per pixel instead of rebuilding the
+    // pack. Stored index `i` is shown as color `dpal[i]`, exactly as `write_rgba` does for GPU
+    // upload, so display-palette fades/flashes/swaps now render identically on the console, web and
+    // player. Each color is packed into native-endian XRGB8888; XRGB native-endian assumes
+    // little-endian, which both the KMS and window backends target.
+    let dpal = fb.display_palette();
     let mut lut = [0u32; 16];
     for (i, slot) in lut.iter_mut().enumerate() {
-        let [r, g, b] = palette::PALETTE[i];
+        let [r, g, b] = palette::PALETTE[dpal[i] as usize];
         *slot = (r as u32) << 16 | (g as u32) << 8 | b as u32;
     }
 
@@ -126,6 +128,23 @@ mod tests {
     fn rgb(idx: u8) -> u32 {
         let [r, g, b] = palette::PALETTE[idx as usize];
         (r as u32) << 16 | (g as u32) << 8 | b as u32
+    }
+
+    #[test]
+    fn present_applies_display_palette() {
+        let mut fb = Framebuffer::new();
+        fb.cls(col::BLACK);
+        fb.pset(0, 0, col::RED);
+        // Display-time remap RED -> GREEN; the stored index must stay RED.
+        fb.remap_display_color(col::RED, col::GREEN);
+        let mut dst = vec![0u32; 128 * 128];
+        present_into(&fb, &mut dst, 128, 128, Rotate::None);
+        assert_eq!(
+            dst[0],
+            rgb(col::GREEN),
+            "display remap RED->GREEN is honored"
+        );
+        assert_eq!(fb.pget(0, 0), col::RED, "the stored index is unchanged");
     }
 
     #[test]

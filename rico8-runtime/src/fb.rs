@@ -67,6 +67,13 @@ impl Framebuffer {
         &self.pixels
     }
 
+    /// The display palette: at present time, stored index `i` is shown as color
+    /// `display_palette()[i]`. Presenters apply this when expanding the indexed
+    /// framebuffer to RGB, exactly as `write_rgba` does for GPU upload.
+    pub fn display_palette(&self) -> &[u8; 16] {
+        &self.display_pal
+    }
+
     /// Expand the indexed framebuffer into an RGBA8 buffer for GPU upload.
     pub fn write_rgba(&self, out: &mut [u8]) {
         // Fold the display palette into a 16-entry RGBA lookup table once, so
