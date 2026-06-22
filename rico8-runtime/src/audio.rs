@@ -15,6 +15,11 @@ const INTERNAL_RATE: f32 = 22050.0;
 /// PICO-8: one speed-unit tick is 183 samples at the internal rate.
 const SAMPLES_PER_TICK: f32 = 183.0;
 
+/// Anti-click: a voice's amplitude ramps toward its target volume at a
+/// fixed rate (full 0..1 scale in this many seconds), and starts from zero
+/// on onset, matching PICO-8's smooth note-change/onset transitions.
+const ANTICLICK_RAMP_SECONDS: f32 = 0.0025;
+
 fn pitch_to_freq(pitch: f32) -> f32 {
     // Pitch 33 = A-4 = 440 Hz, 12 steps per octave.
     440.0 * ((pitch - 33.0) / 12.0).exp2()
@@ -108,6 +113,9 @@ struct Voice {
     step: usize,
     /// Seconds elapsed within the current step.
     t_in_step: f32,
+    /// Current, slewed output amplitude; ramps toward the note's target
+    /// volume to avoid clicks at onsets and note changes (anti-click).
+    amp: f32,
     /// Oscillator phase in `[0, 1)`.
     phase: f32,
     /// Phase of the detuned second oscillator (`detune` filter).
@@ -143,6 +151,8 @@ impl Voice {
             sfx,
             step: 0,
             t_in_step: 0.0,
+            // Start silent so the first note ramps up from zero (anti-click).
+            amp: 0.0,
             phase: 0.0,
             phase2: 0.0,
             prev_pitch: first_pitch,
@@ -246,7 +256,12 @@ impl Voice {
             raw = (raw * DRIVE).tanh() / DRIVE.tanh();
         }
 
-        let mut out = raw * vol * 0.25;
+        // Anti-click: ramp the amplitude toward the target instead of jumping,
+        // so note onsets and volume changes between steps don't click.
+        let max_step = dt / ANTICLICK_RAMP_SECONDS;
+        self.amp += (vol - self.amp).clamp(-max_step, max_step);
+
+        let mut out = raw * self.amp * 0.25;
 
         // `dampen` is a one-pole low-pass at one of two cutoffs.
         if self.sfx.dampen > 0 {
@@ -845,6 +860,55 @@ mod tests {
             peak = peak.max(s.abs());
         }
         assert!(peak > 0.01, "filtered voice should still be audible");
+    }
+
+    #[test]
+    fn note_transitions_do_not_click() {
+        // A hard amplitude transition (volume 7 -> 0 between steps) on a
+        // click-free triangle wave: the triangle has no in-waveform
+        // discontinuity, so any large sample-to-sample jump can only come
+        // from an un-ramped amplitude boundary (onset or note change).
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        sfx[0].speed = 16;
+        sfx[0].notes[0] = Note {
+            pitch: 33,
+            wave: 0,
+            volume: 7,
+            effect: 0,
+        };
+        sfx[0].notes[1] = Note {
+            pitch: 33,
+            wave: 0,
+            volume: 0,
+            effect: 0,
+        };
+        let mut synth = Synth::new(48000.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+
+        // Step length = 16 * 183 / 22050 ~= 0.133 s; render ~0.3 s so we
+        // cross both the onset and the note0 -> note1 boundary.
+        let mut buf = Vec::with_capacity(14400);
+        for _ in 0..14400 {
+            buf.push(synth.next_sample());
+        }
+        let mut max_jump = 0.0f32;
+        for i in 1..buf.len() {
+            max_jump = max_jump.max((buf[i] - buf[i - 1]).abs());
+        }
+        let peak = buf.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+
+        // Measured at this device rate and at the current gain (waveforms still
+        // +-1.0, master still `* 0.25`): an un-ramped amplitude jump (onset and
+        // the note0 -> note1 boundary, smeared by the 22050 -> 48000 resampler)
+        // is ~0.067, while the 2.5 ms ramp leaves max_jump ~= 0.010, dominated
+        // by the ramp's own per-sample step near peak rather than a
+        // discontinuity. The 0.02 threshold sits cleanly between.
+        assert!(
+            max_jump < 0.02,
+            "amplitude jump should be smooth: {max_jump}"
+        );
+        assert!(peak > 0.01, "the note should still be audible: {peak}");
     }
 
     #[test]
