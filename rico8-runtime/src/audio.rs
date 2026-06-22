@@ -8,6 +8,10 @@
 use crate::assets::{MusicPattern, Sfx, SfxEffect, Waveform, CHANNELS, SFX_LEN};
 use std::sync::{Arc, Mutex};
 
+/// PICO-8 synthesizes at this fixed internal rate; the synth core runs here
+/// and `next_sample` resamples up to the device rate.
+const INTERNAL_RATE: f32 = 22050.0;
+
 /// Steps are timed in 1/128ths of a second, like the SFX `speed` field.
 const TICKS_PER_SECOND: f32 = 128.0;
 
@@ -124,7 +128,7 @@ struct Voice {
 }
 
 impl Voice {
-    fn new(sfx_index: usize, sfx: Sfx, from_music: bool, sample_rate: f32) -> Self {
+    fn new(sfx_index: usize, sfx: Sfx, from_music: bool) -> Self {
         let first_pitch = sfx.notes[0].pitch as f32;
         // Reverb delays by 2 or 4 ticks; size the ring buffer to suit.
         let echo_ticks = match sfx.reverb {
@@ -132,7 +136,7 @@ impl Voice {
             2 => 4.0,
             _ => 0.0,
         };
-        let echo_len = (echo_ticks / TICKS_PER_SECOND * sample_rate).round() as usize;
+        let echo_len = (echo_ticks / TICKS_PER_SECOND * INTERNAL_RATE).round() as usize;
         Self {
             sfx_index,
             sfx,
@@ -313,6 +317,14 @@ pub struct Synth {
     stop_when_silent: bool,
     /// Channels reserved for music (bit i = channel i); auto-routed sfx skip them.
     reserved_channels: u8,
+    /// Resampler position between `prev_internal` and `cur_internal`.
+    resample_frac: f32,
+    /// Previous and current internal-rate samples bracketing the output.
+    prev_internal: f32,
+    cur_internal: f32,
+    /// Two cascaded one-pole low-pass states for reconstruction filtering.
+    lp1: f32,
+    lp2: f32,
 }
 
 impl Synth {
@@ -331,6 +343,12 @@ impl Synth {
             music_gain_step: 0.0,
             stop_when_silent: false,
             reserved_channels: 0,
+            // Start at 1.0 so the first call renders an internal sample.
+            resample_frac: 1.0,
+            prev_internal: 0.0,
+            cur_internal: 0.0,
+            lp1: 0.0,
+            lp2: 0.0,
         }
     }
 
@@ -378,7 +396,7 @@ impl Synth {
             let any_free = (0..CHANNELS).rev().find(|&i| free(i));
             idle.or(non_music).or(any_free).unwrap_or(CHANNELS - 1)
         };
-        self.voices[ch] = Some(Voice::new(n as usize, sfx, false, self.sample_rate));
+        self.voices[ch] = Some(Voice::new(n as usize, sfx, false));
     }
 
     /// Start music at pattern `n` (mints and returns a nonzero play-token) or,
@@ -421,7 +439,7 @@ impl Synth {
             let fade_seconds = fade_duration as f32 / 1000.0;
             self.music_gain = 0.0;
             self.music_gain_target = 1.0;
-            self.music_gain_step = 1.0 / (fade_seconds * self.sample_rate);
+            self.music_gain_step = 1.0 / (fade_seconds * INTERNAL_RATE);
         }
     }
 
@@ -436,7 +454,7 @@ impl Synth {
         }
         let fade_seconds = fade_duration as f32 / 1000.0;
         self.music_gain_target = 0.0;
-        self.music_gain_step = -1.0 / (fade_seconds * self.sample_rate);
+        self.music_gain_step = -1.0 / (fade_seconds * INTERNAL_RATE);
         self.stop_when_silent = true;
     }
 
@@ -500,8 +518,7 @@ impl Synth {
                     if timekeeper.is_none() && !sfx_loops(&sfx) {
                         timekeeper = Some(dur);
                     }
-                    self.voices[ch] =
-                        Some(Voice::new(*sfx_idx as usize, sfx, true, self.sample_rate));
+                    self.voices[ch] = Some(Voice::new(*sfx_idx as usize, sfx, true));
                 }
             } else if self.voices[ch].as_ref().is_some_and(|v| v.from_music) {
                 self.voices[ch] = None;
@@ -545,9 +562,38 @@ impl Synth {
         }
     }
 
-    /// Render one mono sample.
+    /// Render one mono sample at the device rate.
+    ///
+    /// The synth core runs at `INTERNAL_RATE`; this resamples up to the
+    /// device rate with linear interpolation, then applies a two-pole
+    /// reconstruction low-pass to suppress interpolation imaging and match
+    /// PICO-8's clean top end. Calling it N times advances device time by
+    /// `N / sample_rate` seconds.
     pub fn next_sample(&mut self) -> f32 {
-        let dt = 1.0 / self.sample_rate;
+        // Internal samples consumed per output sample (< 1 when upsampling).
+        let ratio = INTERNAL_RATE / self.sample_rate;
+        self.resample_frac += ratio;
+        while self.resample_frac >= 1.0 {
+            self.prev_internal = self.cur_internal;
+            self.cur_internal = self.render_internal();
+            self.resample_frac -= 1.0;
+        }
+        let mut out =
+            self.prev_internal + (self.cur_internal - self.prev_internal) * self.resample_frac;
+        // Two-pole reconstruction low-pass at ~11 kHz on the device-rate
+        // stream: lp1 filters `out`, then lp2 filters lp1.
+        let fc = 11_000.0;
+        let dt_dev = 1.0 / self.sample_rate;
+        let alpha = dt_dev / (1.0 / (2.0 * std::f32::consts::PI * fc) + dt_dev);
+        self.lp1 += alpha * (out - self.lp1);
+        self.lp2 += alpha * (self.lp1 - self.lp2);
+        out = self.lp2;
+        out
+    }
+
+    /// Render one mono sample at the internal rate.
+    fn render_internal(&mut self) -> f32 {
+        let dt = 1.0 / INTERNAL_RATE;
         self.t += dt;
 
         if let Some(state) = &mut self.music_state {
@@ -1071,6 +1117,75 @@ mod tests {
         synth.play_music(0, 0, 0b0001, 0); // reserve channel 0
         synth.play_sfx(1, 0); // explicit channel 0
         assert_eq!(synth.channel_sfx()[0], Some(1), "explicit request wins");
+    }
+
+    /// Goertzel single-bin DFT magnitude of `freq` (Hz) in `samples` at rate
+    /// `fs`. Used to measure spectral content without a full FFT.
+    fn goertzel(samples: &[f32], freq: f32, fs: f32) -> f32 {
+        let omega = 2.0 * std::f32::consts::PI * freq / fs;
+        let coeff = 2.0 * omega.cos();
+        let mut s_prev = 0.0f32;
+        let mut s_prev2 = 0.0f32;
+        for &x in samples {
+            let s = x + coeff * s_prev - s_prev2;
+            s_prev2 = s_prev;
+            s_prev = s;
+        }
+        let real = s_prev - s_prev2 * omega.cos();
+        let imag = s_prev2 * omega.sin();
+        (real * real + imag * imag).sqrt()
+    }
+
+    #[test]
+    fn no_aliasing_above_internal_nyquist() {
+        // A sustained max-pitch (pitch 63) saw has its fundamental near
+        // 2490 Hz; its harmonics 5-8 sit at ~12.4/14.9/17.4/19.9 kHz, well
+        // above the 11025 Hz internal Nyquist. Rendered pointwise at 48 kHz
+        // those harmonics ring loudly; synthesizing at 22050 Hz and
+        // reconstruction-filtering on the way up must crush them.
+        //
+        // The high band probes those four harmonics. Threshold:
+        // high-band/fundamental ratio < 0.30. Measured with this fixture:
+        // the naive 48 kHz code gives ~0.70 (high=580, fund=835); after the
+        // fix it drops to ~0.034 (high=25, fund=747). 0.30 sits cleanly
+        // between the two — FAILS before / PASSES after (verified both ways).
+        let mut sfx = Sfx {
+            speed: 1,
+            ..Default::default()
+        };
+        for n in sfx.notes.iter_mut() {
+            *n = Note {
+                pitch: 63,
+                wave: 2,
+                volume: 7,
+                effect: 0,
+            };
+        }
+        let mut all = vec![Sfx::default(); SFX_COUNT];
+        all[0] = sfx;
+        let fs = 48000.0;
+        let mut synth = Synth::new(fs);
+        synth.load(all, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+        let mut buf = Vec::with_capacity(24000);
+        for i in 0..24000 {
+            let s = synth.next_sample();
+            if i >= 512 {
+                buf.push(s);
+            }
+        }
+        // Pitch-63 saw fundamental, and its harmonics 5-8 (above the internal
+        // Nyquist) as the high-band probes.
+        let fund = goertzel(&buf, 2490.0, fs);
+        let high: f32 = [12445.0, 14934.0, 17423.0, 19912.0]
+            .iter()
+            .map(|&f| goertzel(&buf, f, fs))
+            .sum();
+        let ratio = high / fund;
+        assert!(
+            ratio < 0.30,
+            "high-band/fundamental ratio {ratio} should be small (fund={fund}, high={high})"
+        );
     }
 
     #[test]
