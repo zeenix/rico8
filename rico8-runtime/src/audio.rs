@@ -20,6 +20,10 @@ const SAMPLES_PER_TICK: f32 = 183.0;
 /// on onset, matching PICO-8's smooth note-change/onset transitions.
 const ANTICLICK_RAMP_SECONDS: f32 = 0.0025;
 
+/// PICO-8's noise low-pass scale (= internal rate / frequency of key 63);
+/// the noise cutoff tracks the note frequency through this. (zepto8.)
+const NOISE_CUTOFF_SCALE: f32 = 8.858923;
+
 fn pitch_to_freq(pitch: f32) -> f32 {
     // Pitch 33 = A-4 = 440 Hz, 12 steps per octave.
     440.0 * ((pitch - 33.0) / 12.0).exp2()
@@ -226,18 +230,26 @@ impl Voice {
         let mut raw = if let Some(w) = &drawn {
             drawn_wave(w, self.phase)
         } else if wave == Waveform::Noise {
+            // PICO-8's noise is a one-pole low-pass of white noise whose cutoff
+            // tracks the note frequency (a leaky integrator), so it stays smooth
+            // instead of the hard sample-and-hold steps that crackle. (zepto8.)
+            self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
+            let white = (self.noise >> 16) as f32 / 32768.0 - 1.0;
+            let scale = freq * dt * NOISE_CUTOFF_SCALE;
+            self.noise_level = (self.noise_level + scale * white) / (1.0 + scale);
+            let factor = 1.0 - pitch / 63.0;
+            let mut n = self.noise_level * 1.5 * (1.0 + factor * factor);
             if self.sfx.noiz {
-                // `noiz` swaps the pitched noise for pure white noise.
-                self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
-                (self.noise >> 16) as f32 / 32768.0 - 1.0
-            } else {
-                // Resample an LFSR at the note frequency for pitched noise.
-                if self.phase < freq * dt {
-                    self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
-                    self.noise_level = (self.noise >> 16) as f32 / 32768.0 - 1.0;
-                }
-                self.noise_level
+                // `noiz` brightens the noise: amplitude-modulate by a triangle of
+                // the phase.
+                n *= 2.0
+                    * if self.phase < 0.5 {
+                        self.phase
+                    } else {
+                        self.phase - 1.0
+                    };
             }
+            n
         } else {
             let mut s = tonal_wave(wave, self.phase);
             // `detune` mixes in a second oscillator a little (or an octave)
@@ -251,7 +263,7 @@ impl Voice {
         };
 
         // `buzz` adds harmonics with a soft overdrive (normalized to unity).
-        if self.sfx.buzz {
+        if self.sfx.buzz && wave != Waveform::Noise {
             const DRIVE: f32 = 2.5;
             raw = (raw * DRIVE).tanh() / DRIVE.tanh();
         }
@@ -860,6 +872,51 @@ mod tests {
             peak = peak.max(s.abs());
         }
         assert!(peak > 0.01, "filtered voice should still be audible");
+    }
+
+    #[test]
+    fn noise_is_smooth_not_crackly() {
+        // Mirror airwolf's percussion: every step a wave-6 (noise) note at a
+        // fixed pitch, full speed, with buzz on. The old hard sample-and-hold
+        // noise (resampled LFSR + tanh overdrive) slams steps into the rails,
+        // crackling; PICO-8's leaky-integrator noise stays smooth.
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        for note in sfx[0].notes.iter_mut() {
+            *note = Note {
+                pitch: 17,
+                wave: 6,
+                volume: 7,
+                effect: 0,
+            };
+        }
+        sfx[0].speed = 16;
+        sfx[0].buzz = true;
+        sfx[0].noiz = false;
+
+        let mut synth = Synth::new(48000.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+
+        // Render ~0.5 s; skip the first 256 samples (anti-click onset ramp).
+        let mut buf = Vec::with_capacity(24000);
+        for _ in 0..24000 {
+            buf.push(synth.next_sample());
+        }
+        let mut max_jump = 0.0f32;
+        for i in 257..buf.len() {
+            max_jump = max_jump.max((buf[i] - buf[i - 1]).abs());
+        }
+        let peak = buf[256..].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+
+        // Measured max sample-to-sample jump at the current gain (still the
+        // `* 0.25` master): the leaky integrator is smooth at ~0.018, while the
+        // old hard sample-and-hold would be ~0.146 here. 0.03 sits cleanly
+        // between, so this distinguishes crackle from smooth.
+        assert!(peak > 0.01, "noise should be audible: peak {peak}");
+        assert!(
+            max_jump < 0.03,
+            "noise should be smooth, not crackly: max jump {max_jump}"
+        );
     }
 
     #[test]
