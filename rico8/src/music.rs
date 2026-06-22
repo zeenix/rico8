@@ -81,6 +81,16 @@ impl Music {
 #[derive(Debug, Clone, Copy)]
 pub struct MusicBusy(pub Music);
 
+impl core::fmt::Display for MusicBusy {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        f.write_str("a song is already playing")
+    }
+}
+
+// `core::error::Error` (stable since Rust 1.81) keeps the impl `no_std`-clean; with
+// the `std` feature on, `std::error::Error` is the same trait, so it holds there too.
+impl core::error::Error for MusicBusy {}
+
 /// A handle to the currently-playing song.
 ///
 /// Dropping it stops that song (fading out first if [`fade_out`](Self::fade_out)
@@ -141,5 +151,23 @@ mod tests {
         assert!(handle.is_some(), "stub start succeeds");
         // The handle can be armed for a fade-out and stopped.
         handle.unwrap().fade_out(500).stop();
+    }
+
+    #[test]
+    fn music_busy_is_an_error() {
+        // It satisfies the standard `Error` bound (`core::error::Error`, so this
+        // holds with or without the `std` feature).
+        fn assert_error<E>()
+        where
+            E: core::error::Error,
+        {
+        }
+        assert_error::<MusicBusy>();
+
+        // Its `Display` explains the refusal.
+        use core::fmt::Write as _;
+        let mut buf = crate::fmt::FmtBuf::<64>::new();
+        write!(buf, "{}", MusicBusy(Music::new(MusicId(0)))).unwrap();
+        assert_eq!(buf.as_str(), "a song is already playing");
     }
 }
