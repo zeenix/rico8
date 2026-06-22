@@ -98,6 +98,16 @@ pub struct UnknownBits {
     pub bits: u8,
 }
 
+impl core::fmt::Display for UnknownBits {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        write!(f, "unknown flag bits {:#010b}", self.bits)
+    }
+}
+
+// `core::error::Error` (stable since Rust 1.81) keeps the impl `no_std`-clean; with
+// the `std` feature on, `std::error::Error` is the same trait, so it holds there too.
+impl core::error::Error for UnknownBits {}
+
 impl<T> From<T> for BitFlags<T>
 where
     T: BitFlag,
@@ -270,5 +280,23 @@ mod tests {
         let set = Test::A | Test::B;
         assert!(set.contains(Test::A | Test::B));
         assert!(!set.contains(Test::A | Test::C));
+    }
+
+    #[test]
+    fn unknown_bits_is_an_error() {
+        // It satisfies the standard `Error` bound (`core::error::Error`, so this
+        // holds with or without the `std` feature).
+        fn assert_error<E>()
+        where
+            E: core::error::Error,
+        {
+        }
+        assert_error::<UnknownBits>();
+
+        // Its `Display` names the offending bits.
+        use core::fmt::Write as _;
+        let mut buf = crate::fmt::FmtBuf::<64>::new();
+        write!(buf, "{}", UnknownBits { bits: 0b1000 }).unwrap();
+        assert_eq!(buf.as_str(), "unknown flag bits 0b00001000");
     }
 }
