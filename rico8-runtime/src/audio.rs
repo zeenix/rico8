@@ -8,8 +8,26 @@
 use crate::assets::{MusicPattern, Sfx, SfxEffect, Waveform, CHANNELS, SFX_LEN};
 use std::sync::{Arc, Mutex};
 
-/// Steps are timed in 1/128ths of a second, like the SFX `speed` field.
-const TICKS_PER_SECOND: f32 = 128.0;
+/// PICO-8 synthesizes at this fixed internal rate; the synth core runs here
+/// and `next_sample` resamples up to the device rate.
+const INTERNAL_RATE: f32 = 22050.0;
+
+/// PICO-8: one speed-unit tick is 183 samples at the internal rate.
+const SAMPLES_PER_TICK: f32 = 183.0;
+
+/// Anti-click: a voice's amplitude ramps toward its target volume at a
+/// fixed rate (full 0..1 scale in this many seconds), and starts from zero
+/// on onset, matching PICO-8's smooth note-change/onset transitions.
+const ANTICLICK_RAMP_SECONDS: f32 = 0.0025;
+
+/// PICO-8's noise low-pass scale (= internal rate / frequency of key 63);
+/// the noise cutoff tracks the note frequency through this. (zepto8.)
+const NOISE_CUTOFF_SCALE: f32 = 8.858923;
+
+/// The noise voice plays below its PICO-8 nominal amplitude: at RICO-8's
+/// output level the broadband noise (and its resampling images) would
+/// otherwise read as crackle, so it is held down to sit smoothly in the mix.
+const NOISE_GAIN: f32 = 0.3;
 
 fn pitch_to_freq(pitch: f32) -> f32 {
     // Pitch 33 = A-4 = 440 Hz, 12 steps per octave.
@@ -35,47 +53,82 @@ fn sfx_steps(sfx: &Sfx) -> usize {
 
 /// One play-through of the SFX in seconds, used to time music patterns.
 fn sfx_duration(sfx: &Sfx) -> f32 {
-    sfx_steps(sfx) as f32 * sfx.speed.max(1) as f32 / TICKS_PER_SECOND
+    sfx_steps(sfx) as f32 * sfx.speed.max(1) as f32 * SAMPLES_PER_TICK / INTERNAL_RATE
 }
 
-/// One sample of a deterministic (non-noise) waveform at `phase` in `[0, 1)`.
-/// Factored out so the `detune` filter can run a second oscillator through it.
-fn tonal_wave(wave: Waveform, phase: f32) -> f32 {
+/// One sample of a deterministic (non-noise) waveform, matching PICO-8's exact
+/// shapes and per-waveform amplitudes. `t` is the phase in `[0, 1)`; `buzz`
+/// selects the buzz-filter variant; `t_phaser` is the phase of the phaser's
+/// slightly-detuned second oscillator (ignored by the other waveforms).
+fn tonal_wave(wave: Waveform, t: f32, buzz: bool, t_phaser: f32) -> f32 {
     match wave {
-        Waveform::Triangle => 4.0 * (phase - 0.5).abs() - 1.0,
-        Waveform::TiltedSaw => {
-            if phase < 0.875 {
-                phase / 0.875 * 2.0 - 1.0
-            } else {
-                (1.0 - phase) / 0.125 * 2.0 - 1.0
+        Waveform::Triangle => {
+            let mut ret = 1.0 - (4.0 * t - 2.0).abs();
+            if buzz {
+                let a = 0.875;
+                let bret = if t < a {
+                    2.0 * t / a - 1.0
+                } else {
+                    2.0 * (1.0 - t) / (1.0 - a) - 1.0
+                };
+                ret = ret * 0.75 + bret * 0.25;
             }
+            ret * 0.5
         }
-        Waveform::Saw => 2.0 * phase - 1.0,
-        Waveform::Square => {
-            if phase < 0.5 {
-                1.0
+        Waveform::TiltedSaw => {
+            let a = if buzz { 0.975 } else { 0.875 };
+            let ret = if t < a {
+                2.0 * t / a - 1.0
             } else {
-                -1.0
+                2.0 * (1.0 - t) / (1.0 - a) - 1.0
+            };
+            ret * 0.5
+        }
+        Waveform::Saw => {
+            // PICO-8's buzz adds a tiny per-period DC offset that needs
+            // cross-period state; we keep its 0.83 scale and omit that offset.
+            let base = if t < 0.5 { t } else { t - 1.0 };
+            let ret = if buzz { base * 0.83 } else { base };
+            0.653 * ret
+        }
+        Waveform::Square => {
+            if t < if buzz { 0.4 } else { 0.5 } {
+                0.25
+            } else {
+                -0.25
             }
         }
         Waveform::Pulse => {
-            if phase < 0.3125 {
-                1.0
+            if t < if buzz { 0.255 } else { 0.316 } {
+                0.25
             } else {
-                -1.0
+                -0.25
             }
         }
         Waveform::Organ => {
-            let t1 = 4.0 * (phase - 0.5).abs() - 1.0;
-            let p2 = (phase * 0.5).fract();
-            let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
-            (t1 + t2) * 0.5
+            let mut ret = if t < 0.5 {
+                3.0 - (24.0 * t - 6.0).abs()
+            } else {
+                1.0 - (16.0 * t - 12.0).abs()
+            };
+            if buzz {
+                ret = if t < 0.5 { ret * 2.0 + 3.0 } else { ret };
+                ret = if t < 0.5 && ret > -1.875 {
+                    ret * 0.2 - 1.0
+                } else {
+                    ret + 0.5
+                };
+            }
+            ret / 9.0
         }
         Waveform::Phaser => {
-            let t1 = 4.0 * (phase - 0.5).abs() - 1.0;
-            let p2 = (phase * 1.01).fract();
-            let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
-            (t1 + t2) * 0.5
+            let mut ret = 2.0 - (8.0 * t - 4.0).abs();
+            ret += 1.0 - (4.0 * t_phaser - 2.0).abs();
+            if buzz {
+                ret += 0.25 - ((2.0 * t + 0.5).fract() - 0.5).abs();
+                ret += 0.125 - (0.5 * (4.0 * t).fract() - 0.25).abs();
+            }
+            ret / 6.0
         }
         // Noise is stateful; handled directly in `Voice::sample`.
         Waveform::Noise => 0.0,
@@ -104,10 +157,15 @@ struct Voice {
     step: usize,
     /// Seconds elapsed within the current step.
     t_in_step: f32,
+    /// Current, slewed output amplitude; ramps toward the note's target
+    /// volume to avoid clicks at onsets and note changes (anti-click).
+    amp: f32,
     /// Oscillator phase in `[0, 1)`.
     phase: f32,
     /// Phase of the detuned second oscillator (`detune` filter).
     phase2: f32,
+    /// Phase of the phaser waveform's slightly-detuned (109/110) oscillator.
+    phase_b: f32,
     /// Pitch of the previous step, for slides.
     prev_pitch: f32,
     /// True when this voice was started by the music sequencer.
@@ -124,22 +182,26 @@ struct Voice {
 }
 
 impl Voice {
-    fn new(sfx_index: usize, sfx: Sfx, from_music: bool, sample_rate: f32) -> Self {
+    fn new(sfx_index: usize, sfx: Sfx, from_music: bool) -> Self {
         let first_pitch = sfx.notes[0].pitch as f32;
-        // Reverb delays by 2 or 4 ticks; size the ring buffer to suit.
+        // Reverb delays by 2 or 4 ticks; size the ring buffer to suit. The
+        // delay is in internal-sample units (independent of the device rate).
         let echo_ticks = match sfx.reverb {
             1 => 2.0,
             2 => 4.0,
             _ => 0.0,
         };
-        let echo_len = (echo_ticks / TICKS_PER_SECOND * sample_rate).round() as usize;
+        let echo_len = (echo_ticks * SAMPLES_PER_TICK).round() as usize;
         Self {
             sfx_index,
             sfx,
             step: 0,
             t_in_step: 0.0,
+            // Start silent so the first note ramps up from zero (anti-click).
+            amp: 0.0,
             phase: 0.0,
             phase2: 0.0,
+            phase_b: 0.0,
             prev_pitch: first_pitch,
             from_music,
             noise: 0x1234_5678,
@@ -151,7 +213,7 @@ impl Voice {
     }
 
     fn step_duration(&self) -> f32 {
-        self.sfx.speed.max(1) as f32 / TICKS_PER_SECOND
+        self.sfx.speed.max(1) as f32 * SAMPLES_PER_TICK / INTERNAL_RATE
     }
 
     /// Render one sample; returns `None` when the voice has finished.
@@ -208,40 +270,49 @@ impl Voice {
 
         // Advance oscillator.
         self.phase = (self.phase + freq * dt).fract();
-        let mut raw = if let Some(w) = &drawn {
-            drawn_wave(w, self.phase)
+        // The phaser's second oscillator runs slightly detuned (109/110).
+        self.phase_b = (self.phase_b + freq * (109.0 / 110.0) * dt).fract();
+        let raw = if let Some(w) = &drawn {
+            drawn_wave(w, self.phase) * 0.5
         } else if wave == Waveform::Noise {
+            // PICO-8's noise is a one-pole low-pass of white noise whose cutoff
+            // tracks the note frequency (a leaky integrator), so it stays smooth
+            // instead of the hard sample-and-hold steps that crackle. (zepto8.)
+            self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
+            let white = (self.noise >> 16) as f32 / 32768.0 - 1.0;
+            let scale = freq * dt * NOISE_CUTOFF_SCALE;
+            self.noise_level = (self.noise_level + scale * white) / (1.0 + scale);
+            let factor = 1.0 - pitch / 63.0;
+            let mut n = self.noise_level * 1.5 * (1.0 + factor * factor) * NOISE_GAIN;
             if self.sfx.noiz {
-                // `noiz` swaps the pitched noise for pure white noise.
-                self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
-                (self.noise >> 16) as f32 / 32768.0 - 1.0
-            } else {
-                // Resample an LFSR at the note frequency for pitched noise.
-                if self.phase < freq * dt {
-                    self.noise = self.noise.wrapping_mul(1664525).wrapping_add(1013904223);
-                    self.noise_level = (self.noise >> 16) as f32 / 32768.0 - 1.0;
-                }
-                self.noise_level
+                // `noiz` brightens the noise: amplitude-modulate by a triangle of
+                // the phase.
+                n *= 2.0
+                    * if self.phase < 0.5 {
+                        self.phase
+                    } else {
+                        self.phase - 1.0
+                    };
             }
+            n
         } else {
-            let mut s = tonal_wave(wave, self.phase);
+            let mut s = tonal_wave(wave, self.phase, self.sfx.buzz, self.phase_b);
             // `detune` mixes in a second oscillator a little (or an octave)
             // off the first.
             if self.sfx.detune > 0 {
                 let ratio = if self.sfx.detune == 1 { 1.0073 } else { 2.0 };
                 self.phase2 = (self.phase2 + freq * ratio * dt).fract();
-                s = (s + tonal_wave(wave, self.phase2)) * 0.5;
+                s = (s + tonal_wave(wave, self.phase2, self.sfx.buzz, self.phase_b)) * 0.5;
             }
             s
         };
 
-        // `buzz` adds harmonics with a soft overdrive (normalized to unity).
-        if self.sfx.buzz {
-            const DRIVE: f32 = 2.5;
-            raw = (raw * DRIVE).tanh() / DRIVE.tanh();
-        }
+        // Anti-click: ramp the amplitude toward the target instead of jumping,
+        // so note onsets and volume changes between steps don't click.
+        let max_step = dt / ANTICLICK_RAMP_SECONDS;
+        self.amp += (vol - self.amp).clamp(-max_step, max_step);
 
-        let mut out = raw * vol * 0.25;
+        let mut out = raw * self.amp;
 
         // `dampen` is a one-pole low-pass at one of two cutoffs.
         if self.sfx.dampen > 0 {
@@ -280,7 +351,8 @@ impl Voice {
                 self.step = SFX_LEN;
             }
         }
-        Some(out)
+        // PICO-8 clamps each channel before mixing.
+        Some(out.clamp(-1.0, 1.0))
     }
 }
 
@@ -313,6 +385,14 @@ pub struct Synth {
     stop_when_silent: bool,
     /// Channels reserved for music (bit i = channel i); auto-routed sfx skip them.
     reserved_channels: u8,
+    /// Resampler position between `prev_internal` and `cur_internal`.
+    resample_frac: f32,
+    /// Previous and current internal-rate samples bracketing the output.
+    prev_internal: f32,
+    cur_internal: f32,
+    /// Two cascaded one-pole low-pass states for reconstruction filtering.
+    lp1: f32,
+    lp2: f32,
 }
 
 impl Synth {
@@ -331,6 +411,12 @@ impl Synth {
             music_gain_step: 0.0,
             stop_when_silent: false,
             reserved_channels: 0,
+            // Start at 1.0 so the first call renders an internal sample.
+            resample_frac: 1.0,
+            prev_internal: 0.0,
+            cur_internal: 0.0,
+            lp1: 0.0,
+            lp2: 0.0,
         }
     }
 
@@ -378,7 +464,7 @@ impl Synth {
             let any_free = (0..CHANNELS).rev().find(|&i| free(i));
             idle.or(non_music).or(any_free).unwrap_or(CHANNELS - 1)
         };
-        self.voices[ch] = Some(Voice::new(n as usize, sfx, false, self.sample_rate));
+        self.voices[ch] = Some(Voice::new(n as usize, sfx, false));
     }
 
     /// Start music at pattern `n` (mints and returns a nonzero play-token) or,
@@ -421,7 +507,7 @@ impl Synth {
             let fade_seconds = fade_duration as f32 / 1000.0;
             self.music_gain = 0.0;
             self.music_gain_target = 1.0;
-            self.music_gain_step = 1.0 / (fade_seconds * self.sample_rate);
+            self.music_gain_step = 1.0 / (fade_seconds * INTERNAL_RATE);
         }
     }
 
@@ -436,7 +522,7 @@ impl Synth {
         }
         let fade_seconds = fade_duration as f32 / 1000.0;
         self.music_gain_target = 0.0;
-        self.music_gain_step = -1.0 / (fade_seconds * self.sample_rate);
+        self.music_gain_step = -1.0 / (fade_seconds * INTERNAL_RATE);
         self.stop_when_silent = true;
     }
 
@@ -500,8 +586,7 @@ impl Synth {
                     if timekeeper.is_none() && !sfx_loops(&sfx) {
                         timekeeper = Some(dur);
                     }
-                    self.voices[ch] =
-                        Some(Voice::new(*sfx_idx as usize, sfx, true, self.sample_rate));
+                    self.voices[ch] = Some(Voice::new(*sfx_idx as usize, sfx, true));
                 }
             } else if self.voices[ch].as_ref().is_some_and(|v| v.from_music) {
                 self.voices[ch] = None;
@@ -545,9 +630,38 @@ impl Synth {
         }
     }
 
-    /// Render one mono sample.
+    /// Render one mono sample at the device rate.
+    ///
+    /// The synth core runs at `INTERNAL_RATE`; this resamples up to the
+    /// device rate with linear interpolation, then applies a two-pole
+    /// reconstruction low-pass to suppress interpolation imaging and match
+    /// PICO-8's clean top end. Calling it N times advances device time by
+    /// `N / sample_rate` seconds.
     pub fn next_sample(&mut self) -> f32 {
-        let dt = 1.0 / self.sample_rate;
+        // Internal samples consumed per output sample (< 1 when upsampling).
+        let ratio = INTERNAL_RATE / self.sample_rate;
+        self.resample_frac += ratio;
+        while self.resample_frac >= 1.0 {
+            self.prev_internal = self.cur_internal;
+            self.cur_internal = self.render_internal();
+            self.resample_frac -= 1.0;
+        }
+        let mut out =
+            self.prev_internal + (self.cur_internal - self.prev_internal) * self.resample_frac;
+        // Two-pole reconstruction low-pass at ~11 kHz on the device-rate
+        // stream: lp1 filters `out`, then lp2 filters lp1.
+        let fc = 11_000.0;
+        let dt_dev = 1.0 / self.sample_rate;
+        let alpha = dt_dev / (1.0 / (2.0 * std::f32::consts::PI * fc) + dt_dev);
+        self.lp1 += alpha * (out - self.lp1);
+        self.lp2 += alpha * (self.lp1 - self.lp2);
+        out = self.lp2;
+        out
+    }
+
+    /// Render one mono sample at the internal rate.
+    fn render_internal(&mut self) -> f32 {
+        let dt = 1.0 / INTERNAL_RATE;
         self.t += dt;
 
         if let Some(state) = &mut self.music_state {
@@ -739,7 +853,7 @@ mod tests {
             peak = peak.max(synth.next_sample().abs());
         }
         assert!(peak > 0.01, "voice should be audible");
-        // Default speed 16 -> 32 steps * 0.125 s = 4 s; play 5 s.
+        // Default speed 16 -> 32 steps * 16 * 183 / 22050 s ~= 4.25 s; play 5 s.
         for _ in 0..(44100 * 5) {
             synth.next_sample();
         }
@@ -801,6 +915,102 @@ mod tests {
     }
 
     #[test]
+    fn noise_is_smooth_not_crackly() {
+        // Mirror airwolf's percussion: every step a wave-6 (noise) note at a
+        // fixed pitch, full speed, with buzz on. The old hard sample-and-hold
+        // noise (resampled LFSR + tanh overdrive) slams steps into the rails,
+        // crackling; PICO-8's leaky-integrator noise stays smooth.
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        for note in sfx[0].notes.iter_mut() {
+            *note = Note {
+                pitch: 17,
+                wave: 6,
+                volume: 7,
+                effect: 0,
+            };
+        }
+        sfx[0].speed = 16;
+        sfx[0].buzz = true;
+        sfx[0].noiz = false;
+
+        let mut synth = Synth::new(48000.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+
+        // Render ~0.5 s; skip the first 256 samples (anti-click onset ramp).
+        let mut buf = Vec::with_capacity(24000);
+        for _ in 0..24000 {
+            buf.push(synth.next_sample());
+        }
+        let mut max_jump = 0.0f32;
+        for i in 257..buf.len() {
+            max_jump = max_jump.max((buf[i] - buf[i - 1]).abs());
+        }
+        let peak = buf[256..].iter().fold(0.0f32, |m, s| m.max(s.abs()));
+
+        // Measured max sample-to-sample jump at PICO-8 gain (volume/7, no 0.25
+        // master, so noise is ~4x louder than the old `* 0.25` staging): the
+        // leaky integrator is smooth at ~0.070, while the old hard
+        // sample-and-hold (~0.146 at the old gain) would be ~0.58 here. 0.15
+        // sits cleanly between, so this still distinguishes crackle from smooth.
+        assert!(peak > 0.01, "noise should be audible: peak {peak}");
+        assert!(
+            max_jump < 0.15,
+            "noise should be smooth, not crackly: max jump {max_jump}"
+        );
+    }
+
+    #[test]
+    fn note_transitions_do_not_click() {
+        // A hard amplitude transition (volume 7 -> 0 between steps) on a
+        // click-free triangle wave: the triangle has no in-waveform
+        // discontinuity, so any large sample-to-sample jump can only come
+        // from an un-ramped amplitude boundary (onset or note change).
+        let mut sfx = vec![Sfx::default(); SFX_COUNT];
+        sfx[0].speed = 16;
+        sfx[0].notes[0] = Note {
+            pitch: 33,
+            wave: 0,
+            volume: 7,
+            effect: 0,
+        };
+        sfx[0].notes[1] = Note {
+            pitch: 33,
+            wave: 0,
+            volume: 0,
+            effect: 0,
+        };
+        let mut synth = Synth::new(48000.0);
+        synth.load(sfx, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+
+        // Step length = 16 * 183 / 22050 ~= 0.133 s; render ~0.3 s so we
+        // cross both the onset and the note0 -> note1 boundary.
+        let mut buf = Vec::with_capacity(14400);
+        for _ in 0..14400 {
+            buf.push(synth.next_sample());
+        }
+        let mut max_jump = 0.0f32;
+        for i in 1..buf.len() {
+            max_jump = max_jump.max((buf[i] - buf[i - 1]).abs());
+        }
+        let peak = buf.iter().fold(0.0f32, |m, s| m.max(s.abs()));
+
+        // Measured at this device rate and at PICO-8 gain (triangle peaks ~0.5,
+        // ~2x louder than the old `* 0.25` staging): an un-ramped amplitude
+        // jump (onset and the note0 -> note1 boundary, smeared by the
+        // 22050 -> 48000 resampler) would be ~0.134, while the 2.5 ms ramp
+        // leaves max_jump ~= 0.020, dominated by the ramp's own per-sample step
+        // near peak rather than a discontinuity. The 0.04 threshold sits
+        // cleanly between (3x below the un-ramped, 2x above the ramped).
+        assert!(
+            max_jump < 0.04,
+            "amplitude jump should be smooth: {max_jump}"
+        );
+        assert!(peak > 0.01, "the note should still be audible: {peak}");
+    }
+
+    #[test]
     fn empty_sfx_slot_is_ignored() {
         let mut synth = Synth::new(44100.0);
         synth.load(test_sfx(), vec![]);
@@ -843,8 +1053,8 @@ mod tests {
 
     #[test]
     fn pattern_length_follows_first_non_looping_channel() {
-        // ch0 is the timekeeper at speed 4 (1.0s); ch1 is four times longer.
-        // The pattern must end with ch0, not stretch to ch1.
+        // ch0 is the timekeeper at speed 4 (32*4*183/22050 ~= 1.062s); ch1 is
+        // four times longer. The pattern must end with ch0, not stretch to ch1.
         let mut sfx = vec![Sfx::default(); SFX_COUNT];
         for (i, &spd) in [4u8, 16].iter().enumerate() {
             sfx[i].speed = spd;
@@ -870,7 +1080,7 @@ mod tests {
         }
         let secs = n as f32 / 44100.0;
         assert!(
-            (secs - 1.0).abs() < 0.1,
+            (secs - 1.062).abs() < 0.03,
             "pattern should track ch0, got {secs}s"
         );
     }
@@ -934,7 +1144,8 @@ mod tests {
         synth.play_sfx(0, 0);
         // After starting, channel 0 is on step 0.
         assert_eq!(synth.channel_step()[0], Some(0));
-        // Default speed 16 -> 0.125 s/step; advance ~0.2 s, expect step 1.
+        // Default speed 16 -> 16*183/22050 ~= 0.133 s/step; advance ~0.2 s,
+        // expect step 1.
         for _ in 0..(44100 / 5) {
             synth.next_sample();
         }
@@ -1073,6 +1284,96 @@ mod tests {
         assert_eq!(synth.channel_sfx()[0], Some(1), "explicit request wins");
     }
 
+    /// Goertzel single-bin DFT magnitude of `freq` (Hz) in `samples` at rate
+    /// `fs`. Used to measure spectral content without a full FFT.
+    fn goertzel(samples: &[f32], freq: f32, fs: f32) -> f32 {
+        let omega = 2.0 * std::f32::consts::PI * freq / fs;
+        let coeff = 2.0 * omega.cos();
+        let mut s_prev = 0.0f32;
+        let mut s_prev2 = 0.0f32;
+        for &x in samples {
+            let s = x + coeff * s_prev - s_prev2;
+            s_prev2 = s_prev;
+            s_prev = s;
+        }
+        let real = s_prev - s_prev2 * omega.cos();
+        let imag = s_prev2 * omega.sin();
+        (real * real + imag * imag).sqrt()
+    }
+
+    #[test]
+    fn tick_duration_matches_pico8() {
+        // PICO-8 times a speed-unit tick as 183 samples at 22050 Hz, not
+        // 1/128 s. A 32-note, speed-16, non-looping SFX should last exactly
+        // 32 * 16 * 183 / 22050 seconds. This fails on the old 1/128 timing.
+        let mut sfx = Sfx {
+            speed: 16,
+            ..Default::default()
+        };
+        for n in sfx.notes.iter_mut() {
+            *n = Note {
+                pitch: 33,
+                wave: 0,
+                volume: 5,
+                effect: 0,
+            };
+        }
+        let expected = 32.0 * 16.0 * 183.0 / 22050.0;
+        assert!((sfx_duration(&sfx) - expected).abs() < 1e-4);
+    }
+
+    #[test]
+    fn no_aliasing_above_internal_nyquist() {
+        // A sustained max-pitch (pitch 63) saw has its fundamental near
+        // 2490 Hz; its harmonics 5-8 sit at ~12.4/14.9/17.4/19.9 kHz, well
+        // above the 11025 Hz internal Nyquist. Rendered pointwise at 48 kHz
+        // those harmonics ring loudly; synthesizing at 22050 Hz and
+        // reconstruction-filtering on the way up must crush them.
+        //
+        // The high band probes those four harmonics. Threshold:
+        // high-band/fundamental ratio < 0.30. Measured with this fixture:
+        // the naive 48 kHz code gives ~0.70 (high=580, fund=835); after the
+        // fix it drops to ~0.034 (high=25, fund=747). 0.30 sits cleanly
+        // between the two — FAILS before / PASSES after (verified both ways).
+        let mut sfx = Sfx {
+            speed: 1,
+            ..Default::default()
+        };
+        for n in sfx.notes.iter_mut() {
+            *n = Note {
+                pitch: 63,
+                wave: 2,
+                volume: 7,
+                effect: 0,
+            };
+        }
+        let mut all = vec![Sfx::default(); SFX_COUNT];
+        all[0] = sfx;
+        let fs = 48000.0;
+        let mut synth = Synth::new(fs);
+        synth.load(all, vec![MusicPattern::default(); 64]);
+        synth.play_sfx(0, 0);
+        let mut buf = Vec::with_capacity(24000);
+        for i in 0..24000 {
+            let s = synth.next_sample();
+            if i >= 512 {
+                buf.push(s);
+            }
+        }
+        // Pitch-63 saw fundamental, and its harmonics 5-8 (above the internal
+        // Nyquist) as the high-band probes.
+        let fund = goertzel(&buf, 2490.0, fs);
+        let high: f32 = [12445.0, 14934.0, 17423.0, 19912.0]
+            .iter()
+            .map(|&f| goertzel(&buf, f, fs))
+            .sum();
+        let ratio = high / fund;
+        assert!(
+            ratio < 0.30,
+            "high-band/fundamental ratio {ratio} should be small (fund={fund}, high={high})"
+        );
+    }
+
     #[test]
     fn start_is_allowed_while_fading_out() {
         let mut synth = Synth::new(44100.0);
@@ -1090,5 +1391,51 @@ mod tests {
             !synth.stop_when_silent,
             "the new song plays at full, not fading"
         );
+    }
+
+    #[test]
+    fn waveform_amplitudes_match_pico8() {
+        // Each non-noise waveform must peak at PICO-8's per-waveform amplitude
+        // (baked into `tonal_wave` directly), not the old uniform +-1.0.
+        let cases = [
+            (Waveform::Triangle, 0.5),
+            (Waveform::TiltedSaw, 0.5),
+            (Waveform::Saw, 0.327),
+            (Waveform::Square, 0.25),
+            (Waveform::Pulse, 0.25),
+            (Waveform::Organ, 0.333),
+        ];
+        for (wave, expected) in cases {
+            let mut peak = 0.0f32;
+            for i in 0..10000 {
+                let t = i as f32 / 10000.0;
+                peak = peak.max(tonal_wave(wave, t, false, t).abs());
+            }
+            assert!(
+                (peak - expected).abs() <= 0.02,
+                "{wave:?} peak {peak} should match {expected}"
+            );
+        }
+        // Phaser's peak depends on the two oscillators' alignment, so just
+        // bound it rather than asserting an exact value.
+        let mut peak = 0.0f32;
+        for i in 0..10000 {
+            let t = i as f32 / 10000.0;
+            peak = peak.max(tonal_wave(Waveform::Phaser, t, false, t).abs());
+        }
+        assert!(
+            (0.25..=0.85).contains(&peak),
+            "Phaser peak {peak} should be in 0.25..=0.85"
+        );
+    }
+
+    #[test]
+    fn buzz_changes_duty_cycle() {
+        // Buzz narrows the square and pulse duty cycles, flipping the sign at a
+        // phase that straddles the old vs. new duty edge.
+        assert!(tonal_wave(Waveform::Square, 0.45, false, 0.0) > 0.0);
+        assert!(tonal_wave(Waveform::Square, 0.45, true, 0.0) < 0.0);
+        assert!(tonal_wave(Waveform::Pulse, 0.28, false, 0.0) > 0.0);
+        assert!(tonal_wave(Waveform::Pulse, 0.28, true, 0.0) < 0.0);
     }
 }
