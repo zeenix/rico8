@@ -12,8 +12,8 @@ use std::sync::{Arc, Mutex};
 /// and `next_sample` resamples up to the device rate.
 const INTERNAL_RATE: f32 = 22050.0;
 
-/// Steps are timed in 1/128ths of a second, like the SFX `speed` field.
-const TICKS_PER_SECOND: f32 = 128.0;
+/// PICO-8: one speed-unit tick is 183 samples at the internal rate.
+const SAMPLES_PER_TICK: f32 = 183.0;
 
 fn pitch_to_freq(pitch: f32) -> f32 {
     // Pitch 33 = A-4 = 440 Hz, 12 steps per octave.
@@ -39,7 +39,7 @@ fn sfx_steps(sfx: &Sfx) -> usize {
 
 /// One play-through of the SFX in seconds, used to time music patterns.
 fn sfx_duration(sfx: &Sfx) -> f32 {
-    sfx_steps(sfx) as f32 * sfx.speed.max(1) as f32 / TICKS_PER_SECOND
+    sfx_steps(sfx) as f32 * sfx.speed.max(1) as f32 * SAMPLES_PER_TICK / INTERNAL_RATE
 }
 
 /// One sample of a deterministic (non-noise) waveform at `phase` in `[0, 1)`.
@@ -130,13 +130,14 @@ struct Voice {
 impl Voice {
     fn new(sfx_index: usize, sfx: Sfx, from_music: bool) -> Self {
         let first_pitch = sfx.notes[0].pitch as f32;
-        // Reverb delays by 2 or 4 ticks; size the ring buffer to suit.
+        // Reverb delays by 2 or 4 ticks; size the ring buffer to suit. The
+        // delay is in internal-sample units (independent of the device rate).
         let echo_ticks = match sfx.reverb {
             1 => 2.0,
             2 => 4.0,
             _ => 0.0,
         };
-        let echo_len = (echo_ticks / TICKS_PER_SECOND * INTERNAL_RATE).round() as usize;
+        let echo_len = (echo_ticks * SAMPLES_PER_TICK).round() as usize;
         Self {
             sfx_index,
             sfx,
@@ -155,7 +156,7 @@ impl Voice {
     }
 
     fn step_duration(&self) -> f32 {
-        self.sfx.speed.max(1) as f32 / TICKS_PER_SECOND
+        self.sfx.speed.max(1) as f32 * SAMPLES_PER_TICK / INTERNAL_RATE
     }
 
     /// Render one sample; returns `None` when the voice has finished.
@@ -785,7 +786,7 @@ mod tests {
             peak = peak.max(synth.next_sample().abs());
         }
         assert!(peak > 0.01, "voice should be audible");
-        // Default speed 16 -> 32 steps * 0.125 s = 4 s; play 5 s.
+        // Default speed 16 -> 32 steps * 16 * 183 / 22050 s ~= 4.25 s; play 5 s.
         for _ in 0..(44100 * 5) {
             synth.next_sample();
         }
@@ -889,8 +890,8 @@ mod tests {
 
     #[test]
     fn pattern_length_follows_first_non_looping_channel() {
-        // ch0 is the timekeeper at speed 4 (1.0s); ch1 is four times longer.
-        // The pattern must end with ch0, not stretch to ch1.
+        // ch0 is the timekeeper at speed 4 (32*4*183/22050 ~= 1.062s); ch1 is
+        // four times longer. The pattern must end with ch0, not stretch to ch1.
         let mut sfx = vec![Sfx::default(); SFX_COUNT];
         for (i, &spd) in [4u8, 16].iter().enumerate() {
             sfx[i].speed = spd;
@@ -916,7 +917,7 @@ mod tests {
         }
         let secs = n as f32 / 44100.0;
         assert!(
-            (secs - 1.0).abs() < 0.1,
+            (secs - 1.062).abs() < 0.03,
             "pattern should track ch0, got {secs}s"
         );
     }
@@ -980,7 +981,8 @@ mod tests {
         synth.play_sfx(0, 0);
         // After starting, channel 0 is on step 0.
         assert_eq!(synth.channel_step()[0], Some(0));
-        // Default speed 16 -> 0.125 s/step; advance ~0.2 s, expect step 1.
+        // Default speed 16 -> 16*183/22050 ~= 0.133 s/step; advance ~0.2 s,
+        // expect step 1.
         for _ in 0..(44100 / 5) {
             synth.next_sample();
         }
@@ -1134,6 +1136,27 @@ mod tests {
         let real = s_prev - s_prev2 * omega.cos();
         let imag = s_prev2 * omega.sin();
         (real * real + imag * imag).sqrt()
+    }
+
+    #[test]
+    fn tick_duration_matches_pico8() {
+        // PICO-8 times a speed-unit tick as 183 samples at 22050 Hz, not
+        // 1/128 s. A 32-note, speed-16, non-looping SFX should last exactly
+        // 32 * 16 * 183 / 22050 seconds. This fails on the old 1/128 timing.
+        let mut sfx = Sfx {
+            speed: 16,
+            ..Default::default()
+        };
+        for n in sfx.notes.iter_mut() {
+            *n = Note {
+                pitch: 33,
+                wave: 0,
+                volume: 5,
+                effect: 0,
+            };
+        }
+        let expected = 32.0 * 16.0 * 183.0 / 22050.0;
+        assert!((sfx_duration(&sfx) - expected).abs() < 1e-4);
     }
 
     #[test]
