@@ -24,6 +24,11 @@ const ANTICLICK_RAMP_SECONDS: f32 = 0.0025;
 /// the noise cutoff tracks the note frequency through this. (zepto8.)
 const NOISE_CUTOFF_SCALE: f32 = 8.858923;
 
+/// The noise voice plays below its PICO-8 nominal amplitude: at RICO-8's
+/// output level the broadband noise (and its resampling images) would
+/// otherwise read as crackle, so it is held down to sit smoothly in the mix.
+const NOISE_GAIN: f32 = 0.3;
+
 fn pitch_to_freq(pitch: f32) -> f32 {
     // Pitch 33 = A-4 = 440 Hz, 12 steps per octave.
     440.0 * ((pitch - 33.0) / 12.0).exp2()
@@ -51,44 +56,79 @@ fn sfx_duration(sfx: &Sfx) -> f32 {
     sfx_steps(sfx) as f32 * sfx.speed.max(1) as f32 * SAMPLES_PER_TICK / INTERNAL_RATE
 }
 
-/// One sample of a deterministic (non-noise) waveform at `phase` in `[0, 1)`.
-/// Factored out so the `detune` filter can run a second oscillator through it.
-fn tonal_wave(wave: Waveform, phase: f32) -> f32 {
+/// One sample of a deterministic (non-noise) waveform, matching PICO-8's exact
+/// shapes and per-waveform amplitudes. `t` is the phase in `[0, 1)`; `buzz`
+/// selects the buzz-filter variant; `t_phaser` is the phase of the phaser's
+/// slightly-detuned second oscillator (ignored by the other waveforms).
+fn tonal_wave(wave: Waveform, t: f32, buzz: bool, t_phaser: f32) -> f32 {
     match wave {
-        Waveform::Triangle => 4.0 * (phase - 0.5).abs() - 1.0,
-        Waveform::TiltedSaw => {
-            if phase < 0.875 {
-                phase / 0.875 * 2.0 - 1.0
-            } else {
-                (1.0 - phase) / 0.125 * 2.0 - 1.0
+        Waveform::Triangle => {
+            let mut ret = 1.0 - (4.0 * t - 2.0).abs();
+            if buzz {
+                let a = 0.875;
+                let bret = if t < a {
+                    2.0 * t / a - 1.0
+                } else {
+                    2.0 * (1.0 - t) / (1.0 - a) - 1.0
+                };
+                ret = ret * 0.75 + bret * 0.25;
             }
+            ret * 0.5
         }
-        Waveform::Saw => 2.0 * phase - 1.0,
-        Waveform::Square => {
-            if phase < 0.5 {
-                1.0
+        Waveform::TiltedSaw => {
+            let a = if buzz { 0.975 } else { 0.875 };
+            let ret = if t < a {
+                2.0 * t / a - 1.0
             } else {
-                -1.0
+                2.0 * (1.0 - t) / (1.0 - a) - 1.0
+            };
+            ret * 0.5
+        }
+        Waveform::Saw => {
+            // PICO-8's buzz adds a tiny per-period DC offset that needs
+            // cross-period state; we keep its 0.83 scale and omit that offset.
+            let base = if t < 0.5 { t } else { t - 1.0 };
+            let ret = if buzz { base * 0.83 } else { base };
+            0.653 * ret
+        }
+        Waveform::Square => {
+            if t < if buzz { 0.4 } else { 0.5 } {
+                0.25
+            } else {
+                -0.25
             }
         }
         Waveform::Pulse => {
-            if phase < 0.3125 {
-                1.0
+            if t < if buzz { 0.255 } else { 0.316 } {
+                0.25
             } else {
-                -1.0
+                -0.25
             }
         }
         Waveform::Organ => {
-            let t1 = 4.0 * (phase - 0.5).abs() - 1.0;
-            let p2 = (phase * 0.5).fract();
-            let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
-            (t1 + t2) * 0.5
+            let mut ret = if t < 0.5 {
+                3.0 - (24.0 * t - 6.0).abs()
+            } else {
+                1.0 - (16.0 * t - 12.0).abs()
+            };
+            if buzz {
+                ret = if t < 0.5 { ret * 2.0 + 3.0 } else { ret };
+                ret = if t < 0.5 && ret > -1.875 {
+                    ret * 0.2 - 1.0
+                } else {
+                    ret + 0.5
+                };
+            }
+            ret / 9.0
         }
         Waveform::Phaser => {
-            let t1 = 4.0 * (phase - 0.5).abs() - 1.0;
-            let p2 = (phase * 1.01).fract();
-            let t2 = 4.0 * (p2 - 0.5).abs() - 1.0;
-            (t1 + t2) * 0.5
+            let mut ret = 2.0 - (8.0 * t - 4.0).abs();
+            ret += 1.0 - (4.0 * t_phaser - 2.0).abs();
+            if buzz {
+                ret += 0.25 - ((2.0 * t + 0.5).fract() - 0.5).abs();
+                ret += 0.125 - (0.5 * (4.0 * t).fract() - 0.25).abs();
+            }
+            ret / 6.0
         }
         // Noise is stateful; handled directly in `Voice::sample`.
         Waveform::Noise => 0.0,
@@ -124,6 +164,8 @@ struct Voice {
     phase: f32,
     /// Phase of the detuned second oscillator (`detune` filter).
     phase2: f32,
+    /// Phase of the phaser waveform's slightly-detuned (109/110) oscillator.
+    phase_b: f32,
     /// Pitch of the previous step, for slides.
     prev_pitch: f32,
     /// True when this voice was started by the music sequencer.
@@ -159,6 +201,7 @@ impl Voice {
             amp: 0.0,
             phase: 0.0,
             phase2: 0.0,
+            phase_b: 0.0,
             prev_pitch: first_pitch,
             from_music,
             noise: 0x1234_5678,
@@ -227,8 +270,10 @@ impl Voice {
 
         // Advance oscillator.
         self.phase = (self.phase + freq * dt).fract();
-        let mut raw = if let Some(w) = &drawn {
-            drawn_wave(w, self.phase)
+        // The phaser's second oscillator runs slightly detuned (109/110).
+        self.phase_b = (self.phase_b + freq * (109.0 / 110.0) * dt).fract();
+        let raw = if let Some(w) = &drawn {
+            drawn_wave(w, self.phase) * 0.5
         } else if wave == Waveform::Noise {
             // PICO-8's noise is a one-pole low-pass of white noise whose cutoff
             // tracks the note frequency (a leaky integrator), so it stays smooth
@@ -238,7 +283,7 @@ impl Voice {
             let scale = freq * dt * NOISE_CUTOFF_SCALE;
             self.noise_level = (self.noise_level + scale * white) / (1.0 + scale);
             let factor = 1.0 - pitch / 63.0;
-            let mut n = self.noise_level * 1.5 * (1.0 + factor * factor);
+            let mut n = self.noise_level * 1.5 * (1.0 + factor * factor) * NOISE_GAIN;
             if self.sfx.noiz {
                 // `noiz` brightens the noise: amplitude-modulate by a triangle of
                 // the phase.
@@ -251,29 +296,23 @@ impl Voice {
             }
             n
         } else {
-            let mut s = tonal_wave(wave, self.phase);
+            let mut s = tonal_wave(wave, self.phase, self.sfx.buzz, self.phase_b);
             // `detune` mixes in a second oscillator a little (or an octave)
             // off the first.
             if self.sfx.detune > 0 {
                 let ratio = if self.sfx.detune == 1 { 1.0073 } else { 2.0 };
                 self.phase2 = (self.phase2 + freq * ratio * dt).fract();
-                s = (s + tonal_wave(wave, self.phase2)) * 0.5;
+                s = (s + tonal_wave(wave, self.phase2, self.sfx.buzz, self.phase_b)) * 0.5;
             }
             s
         };
-
-        // `buzz` adds harmonics with a soft overdrive (normalized to unity).
-        if self.sfx.buzz && wave != Waveform::Noise {
-            const DRIVE: f32 = 2.5;
-            raw = (raw * DRIVE).tanh() / DRIVE.tanh();
-        }
 
         // Anti-click: ramp the amplitude toward the target instead of jumping,
         // so note onsets and volume changes between steps don't click.
         let max_step = dt / ANTICLICK_RAMP_SECONDS;
         self.amp += (vol - self.amp).clamp(-max_step, max_step);
 
-        let mut out = raw * self.amp * 0.25;
+        let mut out = raw * self.amp;
 
         // `dampen` is a one-pole low-pass at one of two cutoffs.
         if self.sfx.dampen > 0 {
@@ -312,7 +351,8 @@ impl Voice {
                 self.step = SFX_LEN;
             }
         }
-        Some(out)
+        // PICO-8 clamps each channel before mixing.
+        Some(out.clamp(-1.0, 1.0))
     }
 }
 
@@ -908,13 +948,14 @@ mod tests {
         }
         let peak = buf[256..].iter().fold(0.0f32, |m, s| m.max(s.abs()));
 
-        // Measured max sample-to-sample jump at the current gain (still the
-        // `* 0.25` master): the leaky integrator is smooth at ~0.018, while the
-        // old hard sample-and-hold would be ~0.146 here. 0.03 sits cleanly
-        // between, so this distinguishes crackle from smooth.
+        // Measured max sample-to-sample jump at PICO-8 gain (volume/7, no 0.25
+        // master, so noise is ~4x louder than the old `* 0.25` staging): the
+        // leaky integrator is smooth at ~0.070, while the old hard
+        // sample-and-hold (~0.146 at the old gain) would be ~0.58 here. 0.15
+        // sits cleanly between, so this still distinguishes crackle from smooth.
         assert!(peak > 0.01, "noise should be audible: peak {peak}");
         assert!(
-            max_jump < 0.03,
+            max_jump < 0.15,
             "noise should be smooth, not crackly: max jump {max_jump}"
         );
     }
@@ -955,14 +996,15 @@ mod tests {
         }
         let peak = buf.iter().fold(0.0f32, |m, s| m.max(s.abs()));
 
-        // Measured at this device rate and at the current gain (waveforms still
-        // +-1.0, master still `* 0.25`): an un-ramped amplitude jump (onset and
-        // the note0 -> note1 boundary, smeared by the 22050 -> 48000 resampler)
-        // is ~0.067, while the 2.5 ms ramp leaves max_jump ~= 0.010, dominated
-        // by the ramp's own per-sample step near peak rather than a
-        // discontinuity. The 0.02 threshold sits cleanly between.
+        // Measured at this device rate and at PICO-8 gain (triangle peaks ~0.5,
+        // ~2x louder than the old `* 0.25` staging): an un-ramped amplitude
+        // jump (onset and the note0 -> note1 boundary, smeared by the
+        // 22050 -> 48000 resampler) would be ~0.134, while the 2.5 ms ramp
+        // leaves max_jump ~= 0.020, dominated by the ramp's own per-sample step
+        // near peak rather than a discontinuity. The 0.04 threshold sits
+        // cleanly between (3x below the un-ramped, 2x above the ramped).
         assert!(
-            max_jump < 0.02,
+            max_jump < 0.04,
             "amplitude jump should be smooth: {max_jump}"
         );
         assert!(peak > 0.01, "the note should still be audible: {peak}");
@@ -1349,5 +1391,51 @@ mod tests {
             !synth.stop_when_silent,
             "the new song plays at full, not fading"
         );
+    }
+
+    #[test]
+    fn waveform_amplitudes_match_pico8() {
+        // Each non-noise waveform must peak at PICO-8's per-waveform amplitude
+        // (baked into `tonal_wave` directly), not the old uniform +-1.0.
+        let cases = [
+            (Waveform::Triangle, 0.5),
+            (Waveform::TiltedSaw, 0.5),
+            (Waveform::Saw, 0.327),
+            (Waveform::Square, 0.25),
+            (Waveform::Pulse, 0.25),
+            (Waveform::Organ, 0.333),
+        ];
+        for (wave, expected) in cases {
+            let mut peak = 0.0f32;
+            for i in 0..10000 {
+                let t = i as f32 / 10000.0;
+                peak = peak.max(tonal_wave(wave, t, false, t).abs());
+            }
+            assert!(
+                (peak - expected).abs() <= 0.02,
+                "{wave:?} peak {peak} should match {expected}"
+            );
+        }
+        // Phaser's peak depends on the two oscillators' alignment, so just
+        // bound it rather than asserting an exact value.
+        let mut peak = 0.0f32;
+        for i in 0..10000 {
+            let t = i as f32 / 10000.0;
+            peak = peak.max(tonal_wave(Waveform::Phaser, t, false, t).abs());
+        }
+        assert!(
+            (0.25..=0.85).contains(&peak),
+            "Phaser peak {peak} should be in 0.25..=0.85"
+        );
+    }
+
+    #[test]
+    fn buzz_changes_duty_cycle() {
+        // Buzz narrows the square and pulse duty cycles, flipping the sign at a
+        // phase that straddles the old vs. new duty edge.
+        assert!(tonal_wave(Waveform::Square, 0.45, false, 0.0) > 0.0);
+        assert!(tonal_wave(Waveform::Square, 0.45, true, 0.0) < 0.0);
+        assert!(tonal_wave(Waveform::Pulse, 0.28, false, 0.0) > 0.0);
+        assert!(tonal_wave(Waveform::Pulse, 0.28, true, 0.0) < 0.0);
     }
 }
