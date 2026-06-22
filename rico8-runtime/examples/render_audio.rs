@@ -48,7 +48,7 @@ fn main() {
 fn render_music(assets: &Assets) -> Vec<f32> {
     let mut synth = Synth::new(SR);
     synth.load(assets.sfx.clone(), assets.music.clone());
-    synth.play_music(0);
+    synth.play_music(0, 0, 0, 0);
     let mut samples = Vec::new();
     let mut last = None;
     for _ in 0..(MUSIC_SECS * SR) as usize {

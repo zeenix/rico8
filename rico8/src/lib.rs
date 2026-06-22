@@ -43,6 +43,7 @@ mod fmt;
 mod glue;
 pub mod memstat;
 mod motion;
+mod music;
 
 // Install the live-tracking allocator for `std` carts. It lives here, not in
 // the `game!` macro, so the `feature = "std"` cfg is evaluated in this crate
@@ -58,6 +59,7 @@ use crate::flags::bitflag_enum;
 pub use crate::flags::{BitFlag, BitFlags, UnknownBits};
 pub use glue::__internal;
 pub use motion::Body;
+pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
 
 /// The screen is 128x128 pixels.
 pub const SCREEN_W: i32 = 128;
@@ -312,14 +314,12 @@ impl Context {
         unsafe { ffi::sfx(-1, channel as i32) }
     }
 
-    /// Start music at a pattern; it plays until it loops or stops itself.
-    pub fn music(&mut self, m: MusicId) {
-        unsafe { ffi::music(m.0 as i32) }
-    }
-
-    /// Stop the music.
-    pub fn music_stop(&mut self) {
-        unsafe { ffi::music(-1) }
+    /// Begin a music-playback request for pattern `m`.
+    ///
+    /// Nothing plays until [`Music::play`]; set a fade-in or reserved channels
+    /// on the returned [`Music`] first.
+    pub fn music(&mut self, m: MusicId) -> Music {
+        Music::new(m)
     }
 
     /// Seconds since the cart started, in `1/`[`FRAME_RATE`] steps (1/60 s

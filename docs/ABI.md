@@ -137,7 +137,7 @@ camera), so set them in `rico8_init` or each frame as needed.
 | function | signature                | notes                                                                     |
 | -------- | ------------------------ | ------------------------------------------------------------------------- |
 | `sfx`    | `(n: i32, channel: i32)` | play SFX `n`; `channel < 0` picks a free channel; `n < 0` stops `channel` |
-| `music`  | `(n: i32)`               | start music at pattern `n`; `n < 0` stops                                 |
+| `music`  | `(n: i32, fade_duration: i32, channel_mask: i32, token: i32) -> i32` | start pattern `n` (`n<0` = stop); `fade_duration` ms fade in (start) / out (stop), 0 = instant; `channel_mask` reserves channels (bits 0..3) for music on start; start returns a nonzero play-token or 0 if a song is already playing; stop's `token` selects the song (≤0 = unconditional) |
 
 ### Misc
 

@@ -299,6 +299,20 @@ pub struct Synth {
     music: Vec<MusicPattern>,
     voices: [Option<Voice>; CHANNELS],
     music_state: Option<MusicState>,
+    /// Monotonic counter; each start mints the next play-token.
+    token_counter: i32,
+    /// The current song's play-token (`0` when nothing is playing).
+    current_token: i32,
+    /// Gain applied to music voices (`0.0`..=`1.0`), for fades.
+    music_gain: f32,
+    /// Where `music_gain` is heading.
+    music_gain_target: f32,
+    /// Per-sample step toward the target (`0.0` once settled).
+    music_gain_step: f32,
+    /// True while fading out: stop the music when the gain reaches zero.
+    stop_when_silent: bool,
+    /// Channels reserved for music (bit i = channel i); auto-routed sfx skip them.
+    reserved_channels: u8,
 }
 
 impl Synth {
@@ -310,6 +324,13 @@ impl Synth {
             music: Vec::new(),
             voices: [None, None, None, None],
             music_state: None,
+            token_counter: 0,
+            current_token: 0,
+            music_gain: 1.0,
+            music_gain_target: 1.0,
+            music_gain_step: 0.0,
+            stop_when_silent: false,
+            reserved_channels: 0,
         }
     }
 
@@ -323,6 +344,12 @@ impl Synth {
     pub fn stop_all(&mut self) {
         self.voices = [None, None, None, None];
         self.music_state = None;
+        self.current_token = 0;
+        self.music_gain = 1.0;
+        self.music_gain_target = 1.0;
+        self.music_gain_step = 0.0;
+        self.stop_when_silent = false;
+        self.reserved_channels = 0;
     }
 
     /// Play SFX `n`. `channel < 0` picks a free channel (preferring ones not
@@ -340,26 +367,98 @@ impl Synth {
         let ch = if (0..CHANNELS as i32).contains(&channel) {
             channel as usize
         } else {
-            // Prefer an idle channel, then one playing a one-shot SFX;
-            // steal a music channel only as a last resort.
-            let idle = (0..CHANNELS).find(|&i| self.voices[i].is_none());
-            let non_music =
-                (0..CHANNELS).find(|&i| self.voices[i].as_ref().is_some_and(|v| !v.from_music));
-            match idle.or(non_music) {
-                Some(i) => i,
-                None => CHANNELS - 1,
-            }
+            // Prefer an idle non-reserved channel, then one playing a one-shot
+            // SFX, then any non-reserved channel; steal a reserved one only when
+            // every channel is reserved.
+            let reserved = self.reserved_channels;
+            let free = |i: usize| reserved & (1 << i) == 0;
+            let idle = (0..CHANNELS).find(|&i| self.voices[i].is_none() && free(i));
+            let non_music = (0..CHANNELS)
+                .find(|&i| free(i) && self.voices[i].as_ref().is_some_and(|v| !v.from_music));
+            let any_free = (0..CHANNELS).rev().find(|&i| free(i));
+            idle.or(non_music).or(any_free).unwrap_or(CHANNELS - 1)
         };
         self.voices[ch] = Some(Voice::new(n as usize, sfx, false, self.sample_rate));
     }
 
-    /// Start music at pattern `n`, or stop when `n < 0`.
-    pub fn play_music(&mut self, n: i32) {
+    /// Start music at pattern `n` (mints and returns a nonzero play-token) or,
+    /// when `n < 0`, stop. A start is refused — returns `0` — while a song is
+    /// already playing and not fading out. A stop acts only when `token <= 0`
+    /// (unconditional) or `token` equals the current song's play-token.
+    /// `channel_mask` bits 0-3 mark which channels are reserved for music;
+    /// auto-routed sfx will skip those channels while music is playing.
+    pub fn play_music(&mut self, n: i32, fade_duration: i32, channel_mask: i32, token: i32) -> i32 {
         if n < 0 {
+            let matches = token <= 0 || (self.current_token != 0 && token == self.current_token);
+            if matches {
+                self.begin_stop(fade_duration);
+            }
+            return 0;
+        }
+        // Refuse a second start only while a song is live (not already fading out).
+        if self.music_state.is_some() && !self.stop_when_silent {
+            return 0;
+        }
+        self.reserved_channels = (channel_mask & 0x0F) as u8;
+        self.start_pattern(n as usize);
+        self.setup_fade_in(fade_duration);
+        self.token_counter = self.token_counter.wrapping_add(1);
+        if self.token_counter == 0 {
+            self.token_counter = 1;
+        }
+        self.current_token = self.token_counter;
+        self.current_token
+    }
+
+    /// Arm the fade-in (or instant full volume) for a freshly started song.
+    fn setup_fade_in(&mut self, fade_duration: i32) {
+        self.stop_when_silent = false;
+        if fade_duration <= 0 {
+            self.music_gain = 1.0;
+            self.music_gain_target = 1.0;
+            self.music_gain_step = 0.0;
+        } else {
+            let fade_seconds = fade_duration as f32 / 1000.0;
+            self.music_gain = 0.0;
+            self.music_gain_target = 1.0;
+            self.music_gain_step = 1.0 / (fade_seconds * self.sample_rate);
+        }
+    }
+
+    /// Stop now, or ramp to silence over `fade_duration` ms then stop.
+    fn begin_stop(&mut self, fade_duration: i32) {
+        if self.music_state.is_none() {
+            return;
+        }
+        if fade_duration <= 0 {
             self.stop_music();
             return;
         }
-        self.start_pattern(n as usize);
+        let fade_seconds = fade_duration as f32 / 1000.0;
+        self.music_gain_target = 0.0;
+        self.music_gain_step = -1.0 / (fade_seconds * self.sample_rate);
+        self.stop_when_silent = true;
+    }
+
+    /// Advance the music-gain envelope one sample; stop the song if a fade-out
+    /// has reached silence.
+    fn advance_music_gain(&mut self) {
+        if self.music_gain_step == 0.0 {
+            return;
+        }
+        self.music_gain += self.music_gain_step;
+        let reached = if self.music_gain_step > 0.0 {
+            self.music_gain >= self.music_gain_target
+        } else {
+            self.music_gain <= self.music_gain_target
+        };
+        if reached {
+            self.music_gain = self.music_gain_target;
+            self.music_gain_step = 0.0;
+            if self.stop_when_silent {
+                self.stop_music();
+            }
+        }
     }
 
     pub fn stop_music(&mut self) {
@@ -369,6 +468,12 @@ impl Synth {
             }
         }
         self.music_state = None;
+        self.current_token = 0;
+        self.music_gain = 1.0;
+        self.music_gain_target = 1.0;
+        self.music_gain_step = 0.0;
+        self.stop_when_silent = false;
+        self.reserved_channels = 0;
     }
 
     /// Index of the playing music pattern, if any.
@@ -463,16 +568,25 @@ impl Synth {
             }
         }
 
-        let mut mix = 0.0;
+        let mut music_mix = 0.0;
+        let mut sfx_mix = 0.0;
         for v in &mut self.voices {
             if let Some(voice) = v {
+                let from_music = voice.from_music;
                 match voice.sample(dt, self.t, &inst_waves, &inst_drawn) {
-                    Some(s) => mix += s,
+                    Some(s) => {
+                        if from_music {
+                            music_mix += s;
+                        } else {
+                            sfx_mix += s;
+                        }
+                    }
                     None => *v = None,
                 }
             }
         }
-        mix.clamp(-1.0, 1.0)
+        self.advance_music_gain();
+        (sfx_mix + music_mix * self.music_gain).clamp(-1.0, 1.0)
     }
 
     /// Which SFX index is playing on each channel (for editor UI).
@@ -530,8 +644,8 @@ impl AudioHandle {
         self.with_synth(|s| s.channel_step())
     }
 
-    pub fn play_music(&self, n: i32) {
-        self.with_synth(|s| s.play_music(n));
+    pub fn play_music(&self, n: i32, fade_duration: i32, channel_mask: i32, token: i32) -> i32 {
+        self.with_synth(|s| s.play_music(n, fade_duration, channel_mask, token))
     }
 
     pub fn stop_all(&self) {
@@ -703,7 +817,7 @@ mod tests {
         music[0].channels[0] = Some(0);
         music[0].stop_at_end = true;
         synth.load(test_sfx(), music);
-        synth.play_music(0);
+        synth.play_music(0, 0, 0, 0);
         assert_eq!(synth.playing_pattern(), Some(0));
         for _ in 0..(44100 * 5) {
             synth.next_sample();
@@ -720,7 +834,7 @@ mod tests {
         music[1].channels[0] = Some(0);
         music[1].loop_back = true;
         synth.load(test_sfx(), music);
-        synth.play_music(1);
+        synth.play_music(1, 0, 0, 0);
         for _ in 0..(44100 * 5) {
             synth.next_sample();
         }
@@ -748,7 +862,7 @@ mod tests {
         music[0].stop_at_end = true;
         let mut synth = Synth::new(44100.0);
         synth.load(sfx, music);
-        synth.play_music(0);
+        synth.play_music(0, 0, 0, 0);
         let mut n = 0;
         while synth.playing_pattern().is_some() && n < 44100 * 5 {
             synth.next_sample();
@@ -769,7 +883,7 @@ mod tests {
         let mut music = vec![MusicPattern::default(); 64];
         music[0].channels[0] = Some(0);
         synth.load(sfx, music);
-        synth.play_music(0);
+        synth.play_music(0, 0, 0, 0);
         synth.play_sfx(1, -1);
         let chans = synth.channel_sfx();
         assert_eq!(chans[0], Some(0), "music keeps channel 0");
@@ -825,5 +939,156 @@ mod tests {
             synth.next_sample();
         }
         assert_eq!(synth.channel_step()[0], Some(1));
+    }
+
+    #[test]
+    fn second_start_is_refused_while_playing() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[1].channels[0] = Some(0);
+        synth.load(test_sfx(), music);
+        let token = synth.play_music(0, 0, 0, 0);
+        assert!(token != 0, "first start mints a nonzero token");
+        // A second start while a song plays is refused.
+        assert_eq!(synth.play_music(1, 0, 0, 0), 0);
+        assert_eq!(synth.playing_pattern(), Some(0), "first song keeps playing");
+    }
+
+    #[test]
+    fn stale_token_does_not_stop_a_later_song() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[0].stop_at_end = true; // one-shot: ends on its own
+        music[1].channels[0] = Some(0);
+        synth.load(test_sfx(), music);
+        let stale = synth.play_music(0, 0, 0, 0);
+        for _ in 0..(44100 * 5) {
+            synth.next_sample(); // let song 0 finish
+        }
+        assert_eq!(synth.playing_pattern(), None, "one-shot ended on its own");
+        let fresh = synth.play_music(1, 0, 0, 0);
+        assert!(fresh != 0 && fresh != stale, "new song gets a fresh token");
+        // A stop carrying the stale token must NOT stop the new song.
+        synth.play_music(-1, 0, 0, stale);
+        assert_eq!(synth.playing_pattern(), Some(1), "stale token is a no-op");
+        // The fresh token stops it.
+        synth.play_music(-1, 0, 0, fresh);
+        assert_eq!(synth.playing_pattern(), None);
+    }
+
+    #[test]
+    fn music_fades_in_from_silence() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        // Loop the song so it never ends on its own during the measurement window.
+        music[0].channels[0] = Some(0);
+        music[0].loop_start = true;
+        music[1].channels[0] = Some(0);
+        music[1].loop_back = true;
+        synth.load(test_sfx(), music);
+        synth.play_music(0, 1000, 0, 0); // 1s fade-in
+        assert!(
+            synth.music_gain < 0.05,
+            "starts near silent: {}",
+            synth.music_gain
+        );
+        for _ in 0..(44100 / 2) {
+            synth.next_sample();
+        }
+        assert!(
+            synth.music_gain > 0.4 && synth.music_gain < 0.6,
+            "~half after 0.5s: {}",
+            synth.music_gain
+        );
+        for _ in 0..44100 {
+            synth.next_sample();
+        }
+        assert!(
+            (synth.music_gain - 1.0).abs() < 1e-3,
+            "reaches full: {}",
+            synth.music_gain
+        );
+    }
+
+    #[test]
+    fn music_fades_out_then_stops() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[0].loop_start = true; // loops, so it never ends on its own
+        music[1].channels[0] = Some(0);
+        music[1].loop_back = true;
+        synth.load(test_sfx(), music);
+        let token = synth.play_music(0, 0, 0, 0);
+        synth.play_music(-1, 1000, 0, token); // 1s fade-out
+        assert!(synth.stop_when_silent, "fading out");
+        assert_eq!(
+            synth.playing_pattern(),
+            Some(0),
+            "still playing while fading"
+        );
+        for _ in 0..(44100 / 2) {
+            synth.next_sample();
+        }
+        assert!(synth.playing_pattern().is_some(), "still fading at 0.5s");
+        for _ in 0..(44100 / 2 + 200) {
+            synth.next_sample();
+        }
+        assert_eq!(synth.playing_pattern(), None, "stops once silent");
+    }
+
+    #[test]
+    fn reserved_channel_is_not_auto_selected_for_sfx() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0); // music plays on channel 0
+        synth.load(test_sfx(), music);
+        // Reserve channel 1, which is IDLE — so only the reservation (not mere
+        // occupancy) can keep an auto-routed sfx off it. Without reservation the
+        // router would pick idle channel 1 first.
+        synth.play_music(0, 0, 0b0010, 0);
+        synth.play_sfx(1, -1); // auto-routed
+        let chans = synth.channel_sfx();
+        assert_ne!(
+            chans[1],
+            Some(1),
+            "sfx must avoid the reserved idle channel 1"
+        );
+        assert!(
+            chans[2..].contains(&Some(1)),
+            "sfx landed on a free channel"
+        );
+    }
+
+    #[test]
+    fn explicit_channel_overrides_reservation() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        synth.load(test_sfx(), music);
+        synth.play_music(0, 0, 0b0001, 0); // reserve channel 0
+        synth.play_sfx(1, 0); // explicit channel 0
+        assert_eq!(synth.channel_sfx()[0], Some(1), "explicit request wins");
+    }
+
+    #[test]
+    fn start_is_allowed_while_fading_out() {
+        let mut synth = Synth::new(44100.0);
+        let mut music = vec![MusicPattern::default(); 64];
+        music[0].channels[0] = Some(0);
+        music[0].loop_start = true;
+        music[1].channels[0] = Some(0);
+        music[1].loop_back = true;
+        synth.load(test_sfx(), music);
+        let a = synth.play_music(0, 0, 0, 0);
+        synth.play_music(-1, 1000, 0, a); // fade A out
+        let b = synth.play_music(0, 0, 0, 0); // start during the fade
+        assert!(b != 0 && b != a, "took over during fade-out");
+        assert!(
+            !synth.stop_when_silent,
+            "the new song plays at full, not fading"
+        );
     }
 }
