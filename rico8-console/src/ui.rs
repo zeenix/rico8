@@ -74,8 +74,42 @@ const TABS: [(&rui::Icon, Mode); 5] = [
     (&rui::ICON_MUSIC, Mode::Music),
 ];
 
+/// Leftmost and rightmost lit columns of an icon (its ink bounds, 0..8).
+fn ink_bounds(icon: &rui::Icon) -> (i32, i32) {
+    let mut lo = 8;
+    let mut hi = -1;
+    for &row in icon.iter() {
+        for c in 0..8 {
+            if row & (0x80 >> c) != 0 {
+                lo = lo.min(c);
+                hi = hi.max(c);
+            }
+        }
+    }
+    (lo, hi)
+}
+
+/// X offset of each tab's 8×8 cell, packed right-aligned so adjacent icons'
+/// ink is always one blank pixel apart — each icon's own edge margin is
+/// absorbed rather than added, keeping every icon equidistant.
+fn tab_positions() -> [i32; TABS.len()] {
+    /// Blank pixels between one icon's last ink column and the next's first.
+    const GAP: i32 = 1;
+    /// Rightmost ink column of the last icon (1px in from the screen edge).
+    const RIGHT: i32 = WIDTH - 2;
+    let n = TABS.len();
+    let mut xs = [0i32; TABS.len()];
+    xs[n - 1] = RIGHT - ink_bounds(TABS[n - 1].0).1;
+    for i in (0..n - 1).rev() {
+        let hi = ink_bounds(TABS[i].0).1;
+        let lo_next = ink_bounds(TABS[i + 1].0).0;
+        xs[i] = xs[i + 1] + lo_next - hi - (GAP + 1);
+    }
+    xs
+}
+
 fn tab_x(i: usize) -> i32 {
-    WIDTH - 5 * 9 + i as i32 * 9
+    tab_positions()[i]
 }
 
 /// Top bar: title on the left, the five editor tab icons on the right.
@@ -293,5 +327,20 @@ mod tests {
             col::RED,
             "no background box behind the active tab"
         );
+    }
+
+    #[test]
+    fn tabs_are_equidistant_by_ink() {
+        // Every adjacent pair of icons is separated by exactly one blank column
+        // between their ink, regardless of each bitmap's own edge margins.
+        let xs = tab_positions();
+        let gaps: Vec<i32> = (0..TABS.len() - 1)
+            .map(|i| {
+                let this_right = xs[i] + ink_bounds(TABS[i].0).1;
+                let next_left = xs[i + 1] + ink_bounds(TABS[i + 1].0).0;
+                next_left - this_right - 1
+            })
+            .collect();
+        assert!(gaps.iter().all(|&g| g == 1), "uneven tab gaps: {gaps:?}");
     }
 }

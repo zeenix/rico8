@@ -41,26 +41,16 @@ pub fn selection(fb: &mut Framebuffer, x0: i32, y0: i32, x1: i32, y1: i32, fg: u
 /// Order matches `TAB_ICONS`' documentation: code, sprite, map, sfx, music.
 pub type Icon = [u8; 8];
 
-/// `(*)` brackets-ish glyph: the code editor.
-pub const ICON_CODE: Icon = [
-    0b00000000, 0b01100110, 0b11000011, 0b10000001, 0b10000001, 0b11000011, 0b01100110, 0b00000000,
-];
-/// Checkered square: the sprite editor.
-pub const ICON_SPRITE: Icon = [
-    0b11111111, 0b10101011, 0b11010101, 0b10101011, 0b11010101, 0b10101011, 0b11010101, 0b11111111,
-];
+/// `R`: the code editor.
+pub const ICON_CODE: Icon = [0x00, 0x7C, 0x42, 0x44, 0x78, 0x44, 0x42, 0x00];
+/// A crab: the sprite editor.
+pub const ICON_SPRITE: Icon = [0x00, 0xA5, 0x42, 0x7E, 0xDB, 0x7E, 0x24, 0x00];
 /// Tile grid: the map editor.
-pub const ICON_MAP: Icon = [
-    0b11111111, 0b10010011, 0b10010011, 0b11111111, 0b10010011, 0b10010011, 0b11111111, 0b00000000,
-];
+pub const ICON_MAP: Icon = [0x00, 0xFF, 0x91, 0xFF, 0x91, 0x91, 0xFF, 0x00];
 /// Speaker: the SFX editor.
-pub const ICON_SFX: Icon = [
-    0b00000110, 0b00001110, 0b01111110, 0b01111110, 0b01111110, 0b00001110, 0b00000110, 0b00000000,
-];
+pub const ICON_SFX: Icon = [0x00, 0x06, 0x0E, 0x7E, 0x7E, 0x0E, 0x06, 0x00];
 /// Note: the music editor.
-pub const ICON_MUSIC: Icon = [
-    0b00111110, 0b00100010, 0b00100010, 0b00100010, 0b01100110, 0b11101110, 0b01000100, 0b00000000,
-];
+pub const ICON_MUSIC: Icon = [0x00, 0x3C, 0x24, 0x20, 0x20, 0xE0, 0xE0, 0x00];
 
 /// Draw an icon in one color (bits set = pixels drawn).
 pub fn icon(fb: &mut Framebuffer, icon: &Icon, x: i32, y: i32, color: u8) {
@@ -118,6 +108,31 @@ pub fn cursor(fb: &mut Framebuffer, x: i32, y: i32) {
                     fb.pset(x + rx, y + ry as i32, color);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn tab_icons_share_a_uniform_envelope() {
+        for (name, icon) in [
+            ("code", &ICON_CODE),
+            ("sprite", &ICON_SPRITE),
+            ("map", &ICON_MAP),
+            ("sfx", &ICON_SFX),
+            ("music", &ICON_MUSIC),
+        ] {
+            assert_eq!(
+                icon[0], 0,
+                "{name} icon: row 0 must be blank for even top spacing"
+            );
+            assert_eq!(
+                icon[7], 0,
+                "{name} icon: row 7 must be blank for even bottom spacing"
+            );
         }
     }
 }
