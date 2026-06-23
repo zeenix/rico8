@@ -36,6 +36,9 @@ pub struct SpriteEditor {
     tool: Tool,
     page: u32,
     fullscreen: bool,
+    /// Last-known cursor position in screen pixels (for hover / status bar).
+    mx: i32,
+    my: i32,
 }
 
 impl SpriteEditor {
@@ -46,6 +49,8 @@ impl SpriteEditor {
             tool: Tool::Pencil,
             page: 0,
             fullscreen: false,
+            mx: -16,
+            my: -16,
         }
     }
 
@@ -141,6 +146,8 @@ impl SpriteEditor {
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
+        self.mx = mouse.x;
+        self.my = mouse.y;
         let m = *mouse;
         // View-toggle buttons in the top bar (normal | fullscreen).
         if m.left_pressed && m.y < 8 {
@@ -325,7 +332,7 @@ impl SpriteEditor {
             fb.rect(x, y, x + 7, y + 7, col::WHITE);
         }
 
-        ui::status_bar(fb, &format!("Spr {:03} flags {:08b}", self.sprite, flags));
+        self.draw_status(fb, assets);
     }
 
     /// Fullscreen view: the selected 8x8 sprite magnified to fill the editor
@@ -349,8 +356,59 @@ impl SpriteEditor {
             false,
         );
         fb.reset_transparency();
-        let flags = assets.sprites.flags(self.sprite);
-        ui::status_bar(fb, &format!("Spr {:03} flags {:08b}", self.sprite, flags));
+        self.draw_status(fb, assets);
+    }
+
+    /// The tool whose toolbar icon is under the cursor, if any.
+    fn tool_under_cursor(&self) -> Option<Tool> {
+        // The toolbar is hidden in fullscreen, so no tool can be under the cursor.
+        if self.fullscreen {
+            return None;
+        }
+        [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Picker]
+            .iter()
+            .enumerate()
+            .find_map(|(i, &tool)| {
+                let x = 3 + i as i32 * 10;
+                (self.mx >= x && self.mx <= x + 7 && self.my >= 9 && self.my <= 17).then_some(tool)
+            })
+    }
+
+    /// The sprite-local pixel (0..8, 0..8) under the cursor, if any.
+    fn canvas_pixel_under_cursor(&self) -> Option<(i32, i32)> {
+        let (cx, cy, z) = self.canvas();
+        let size = z * 8;
+        if self.mx >= cx && self.mx < cx + size && self.my >= cy && self.my < cy + size {
+            Some(((self.mx - cx) / z, (self.my - cy) / z))
+        } else {
+            None
+        }
+    }
+
+    /// Render the status bar: tool label when hovering a tool icon, pixel info
+    /// when hovering the canvas, sprite/flags summary otherwise.
+    fn draw_status(&self, fb: &mut Framebuffer, assets: &Assets) {
+        let text = if let Some(tool) = self.tool_under_cursor() {
+            tool_label(tool).to_string()
+        } else if let Some((px, py)) = self.canvas_pixel_under_cursor() {
+            let (ox, oy) = self.sheet_origin();
+            let c = assets.sprites.get(ox + px, oy + py);
+            format!("#{:03} x{} y{} c{:02}", self.sprite, px, py, c)
+        } else {
+            let flags = assets.sprites.flags(self.sprite);
+            format!("Spr {:03} flags {:08b}", self.sprite, flags)
+        };
+        ui::status_bar(fb, &text);
+    }
+}
+
+/// The tool's display name and keyboard shortcut, shown in the status bar.
+fn tool_label(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Pencil => "Pencil (p)",
+        Tool::Eraser => "Eraser (e)",
+        Tool::Fill => "Fill (f)",
+        Tool::Picker => "Picker (i)",
     }
 }
 
@@ -421,5 +479,53 @@ mod tests {
         ed.key(Key::Tab, Mods::default(), &mut a);
         ed.tick(&press(9, 9), &mut a);
         assert_eq!(a.sprites.get(8, 0), 7);
+    }
+
+    #[test]
+    fn hovering_a_tool_reports_its_label() {
+        // Eraser is slot 1: x = 3 + 1*10 = 13, y in 9..=17.
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        let hover = Mouse {
+            x: 13,
+            y: 13,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        // Hovering does not select the tool.
+        assert_eq!(ed.tool, Tool::Pencil);
+        assert_eq!(ed.tool_under_cursor(), Some(Tool::Eraser));
+        assert_eq!(tool_label(Tool::Eraser), "Eraser (e)");
+    }
+
+    #[test]
+    fn tool_under_cursor_is_none_in_fullscreen() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        // Toggle fullscreen.
+        ed.key(Key::Tab, Mods::default(), &mut a);
+        // Hover where the Eraser icon would be in normal view.
+        let hover = Mouse {
+            x: 13,
+            y: 13,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        assert_eq!(ed.tool_under_cursor(), None);
+    }
+
+    #[test]
+    fn canvas_pixel_maps_screen_to_sprite_pixel() {
+        // Normal view: canvas origin (3, 20), zoom 8.
+        // Screen (3 + 8*2 + 1, 20 + 8*3 + 1) = (20, 45) -> sprite pixel (2, 3).
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        let hover = Mouse {
+            x: 3 + 8 * 2 + 1,
+            y: 20 + 8 * 3 + 1,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        assert_eq!(ed.canvas_pixel_under_cursor(), Some((2, 3)));
     }
 }
