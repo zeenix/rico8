@@ -63,6 +63,8 @@ pub struct Project {
     /// Crate name (also the wasm artifact name, with `-` mapped to `_`).
     pub name: String,
     pub code: String,
+    /// Path (relative to `src/`) of the file currently held in `code`.
+    pub current: String,
     pub assets: Assets,
 }
 
@@ -135,6 +137,7 @@ panic = "abort"
             dir: dir.to_path_buf(),
             name,
             code: TEMPLATE_CODE.to_string(),
+            current: "lib.rs".into(),
             assets,
         };
         project.save()?;
@@ -161,15 +164,82 @@ panic = "abort"
             dir: dir.to_path_buf(),
             name,
             code,
+            current: "lib.rs".into(),
             assets,
         })
     }
 
-    /// Write code and assets back to disk.
+    /// Write the open file and assets back to disk.
     pub fn save(&self) -> Result<()> {
-        fs::write(self.dir.join("src/lib.rs"), &self.code)?;
+        fs::write(self.dir.join("src").join(&self.current), &self.code)?;
         fs::write(self.dir.join("assets.rico8"), encode_assets(&self.assets)?)?;
         Ok(())
+    }
+
+    /// The `*.rs` files directly under `src/`, sorted with `lib.rs` first.
+    pub fn file_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = fs::read_dir(self.dir.join("src"))
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter_map(|e| {
+                let path = e.path();
+                if path.extension().is_some_and(|x| x == "rs") {
+                    path.file_name().map(|n| n.to_string_lossy().into_owned())
+                } else {
+                    None
+                }
+            })
+            .collect();
+        names.sort();
+        if let Some(i) = names.iter().position(|n| n == "lib.rs") {
+            let lib = names.remove(i);
+            names.insert(0, lib);
+        }
+        names
+    }
+
+    /// Persist nothing here; load `src/<name>` into `code` and make it current.
+    pub fn switch_to(&mut self, name: &str) -> Result<()> {
+        let path = self.dir.join("src").join(name);
+        let code = fs::read_to_string(&path)
+            .with_context(|| format!("could not read {}", path.display()))?;
+        self.current = name.to_string();
+        self.code = code;
+        Ok(())
+    }
+
+    /// Create a new flat module under `src/`, wire it into `lib.rs`, and open it.
+    pub fn create_file(&mut self, name: &str) -> Result<String> {
+        let file = normalize_file_name(name)?;
+        let path = self.dir.join("src").join(&file);
+        if path.exists() {
+            bail!("{file} already exists");
+        }
+        // `normalize_file_name` guarantees the `.rs` suffix.
+        let stem = file.strip_suffix(".rs").unwrap();
+        // Wire the module into lib.rs, read fresh from disk so an unrelated open
+        // file's buffer cannot clobber external edits to lib.rs. The `mod` must
+        // go after any leading inner attributes (e.g. `#![no_std]`), which have
+        // to stay at the very top or the crate fails to compile.
+        let lib_path = self.dir.join("src/lib.rs");
+        let mut lib = fs::read_to_string(&lib_path).unwrap_or_default();
+        lib.insert_str(module_insert_offset(&lib), &format!("mod {stem};\n"));
+        fs::write(&lib_path, &lib)?;
+        fs::write(&path, "")?;
+        self.current = file.clone();
+        self.code = String::new();
+        Ok(file)
+    }
+
+    /// The `lib.rs` source, regardless of which file is open. Used for the
+    /// source embedded in an exported cart.
+    pub fn lib_source(&self) -> String {
+        if self.current == "lib.rs" {
+            self.code.clone()
+        } else {
+            fs::read_to_string(self.dir.join("src/lib.rs")).unwrap_or_default()
+        }
     }
 
     /// Where `cargo build --release --target wasm32-unknown-unknown` puts
@@ -226,6 +296,39 @@ fn sanitize_name(name: &str) -> Result<String> {
         bail!("project names must be [a-z_][a-z0-9_]*");
     }
     Ok(name)
+}
+
+/// Validate a new source-file name and return it with a `.rs` suffix. Flat
+/// module names only: `[a-z_][a-z0-9_]*`, optionally already suffixed `.rs`.
+fn normalize_file_name(name: &str) -> Result<String> {
+    let name = name.trim();
+    let stem = name.strip_suffix(".rs").unwrap_or(name);
+    if stem.is_empty()
+        || stem.contains(['/', '\\', '.'])
+        || !stem
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+        || stem.starts_with(|c: char| c.is_ascii_digit())
+    {
+        bail!("file name must be a module name, e.g. enemy or enemy.rs");
+    }
+    Ok(format!("{stem}.rs"))
+}
+
+/// Byte offset in `lib.rs` at which to insert a `mod` declaration: past any
+/// leading inner attributes (`#![...]`), inner doc comments and blank lines,
+/// which must precede every item or the crate fails to compile.
+fn module_insert_offset(lib: &str) -> usize {
+    let mut offset = 0;
+    for line in lib.split_inclusive('\n') {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("#![") || trimmed.starts_with("//") || trimmed.trim().is_empty() {
+            offset += line.len();
+        } else {
+            break;
+        }
+    }
+    offset
 }
 
 fn parse_crate_name(manifest: &str) -> Option<String> {
@@ -336,6 +439,55 @@ mod tests {
             cfg.contains("[build]") && cfg.contains("target = \"wasm32-unknown-unknown\""),
             "config: {cfg}"
         );
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn lists_creates_and_switches_files() {
+        let dir = std::env::temp_dir().join(format!("rico8_files_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        let mut p = Project::create(&dir.join("g"), "g").unwrap();
+        assert_eq!(p.current, "lib.rs");
+        assert_eq!(p.file_names(), vec!["lib.rs".to_string()]);
+
+        // Create a new module: file on disk, `mod` wired into lib.rs, opened.
+        let new = p.create_file("enemy").unwrap();
+        assert_eq!(new, "enemy.rs");
+        assert_eq!(p.current, "enemy.rs");
+        assert_eq!(p.code, "");
+        assert!(dir.join("g/src/enemy.rs").exists());
+        let lib = fs::read_to_string(dir.join("g/src/lib.rs")).unwrap();
+        // The `#![no_std]` inner attribute must stay at the very top; the `mod`
+        // is wired in after it, or the crate would not compile.
+        assert!(lib.starts_with("#![no_std]"), "lib.rs:\n{lib}");
+        assert!(lib.contains("\nmod enemy;\n"), "lib.rs:\n{lib}");
+        assert!(
+            lib.find("#![no_std]") < lib.find("mod enemy;"),
+            "mod must come after the inner attribute:\n{lib}"
+        );
+        assert_eq!(p.lib_source(), lib);
+
+        // Listing shows both, lib.rs first.
+        assert_eq!(
+            p.file_names(),
+            vec!["lib.rs".to_string(), "enemy.rs".to_string()]
+        );
+
+        // Edit the new file, save, switch away and back.
+        p.code = "// enemy code\n".into();
+        p.save().unwrap();
+        p.switch_to("lib.rs").unwrap();
+        assert_eq!(p.current, "lib.rs");
+        assert!(p.code.starts_with("#![no_std]"));
+        assert!(p.code.contains("\nmod enemy;\n"));
+        p.switch_to("enemy.rs").unwrap();
+        assert_eq!(p.code, "// enemy code\n");
+
+        // Duplicate and invalid names are rejected.
+        assert!(p.create_file("enemy").is_err());
+        assert!(p.create_file("9bad").is_err());
+        assert!(p.create_file("a/b").is_err());
+        assert!(p.create_file("Enemy").is_err());
         fs::remove_dir_all(&dir).unwrap();
     }
 }
