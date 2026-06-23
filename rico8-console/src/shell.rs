@@ -20,7 +20,7 @@ use rico8_runtime::{
     assets::Assets,
     audio::AudioHandle,
     cart::{self, Cart},
-    fb::{Framebuffer, HEIGHT},
+    fb::Framebuffer,
     font,
     palette::col,
     project::{decode_assets, encode_assets, Project},
@@ -1451,9 +1451,8 @@ impl Shell {
                                 self.run_picker_action(action);
                             }
                         } else if !self.loaded_none() {
-                            // Click the bottom status bar to open the picker (projects only).
-                            if mouse.left_pressed
-                                && mouse.y >= HEIGHT - 8
+                            // Click the top-left filename to open the picker (projects only).
+                            if ui::filename_clicked(&mouse, &self.current_file_name())
                                 && matches!(self.loaded, Loaded::Project(_))
                             {
                                 self.open_file_picker();
@@ -1723,12 +1722,12 @@ impl Shell {
                 match self.mode {
                     Mode::Code => {
                         let code = self.code().unwrap_or_default().to_string();
-                        let file = self.current_file_name();
-                        self.code_ed.draw(&mut self.fb, &code, &file);
+                        self.code_ed.draw(&mut self.fb, &code);
                         if self.file_picker.is_open() {
                             let files = self.project_file_names();
                             let refs: Vec<&str> = files.iter().map(String::as_str).collect();
-                            self.file_picker.draw(&mut self.fb, &refs, &file);
+                            let current = self.current_file_name();
+                            self.file_picker.draw(&mut self.fb, &refs, &current);
                         }
                     }
                     Mode::Sprite => {
@@ -1754,10 +1753,13 @@ impl Shell {
                     _ => {}
                 }
                 ui::draw_tab_bar(&mut self.fb, self.mode);
-                // The audio editors show PICO-8's pitch/tracker mode buttons in
-                // the top-left (the music editor's are decorative).
+                // Per-editor top-left content: the code filename (click to pick
+                // a file) and the SFX pitch/tracker mode buttons.
                 match self.mode {
-                    Mode::Music => ui::mode_buttons(&mut self.fb, true),
+                    Mode::Code => {
+                        let name = self.current_file_name();
+                        ui::code_filename(&mut self.fb, &name);
+                    }
                     Mode::Sfx => ui::mode_buttons(&mut self.fb, self.sfx_ed.is_pitch()),
                     _ => {}
                 }
@@ -2338,6 +2340,36 @@ mod tests {
         shell.key(Key::Char('o'), ctrl);
         shell.key(Key::Enter, Mods::default()); // sel 0 == lib.rs
         assert!(shell.code().unwrap().contains("\nmod enemy;\n"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn clicking_the_filename_opens_the_picker() {
+        let dir = std::env::temp_dir().join(format!("rico8_fnclick_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game").unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load project");
+        shell.switch_editor(Mode::Code);
+
+        assert!(!shell.file_picker.is_open());
+        // A left-press on the top-left filename.
+        let name = shell.current_file_name();
+        shell.mouse = Mouse {
+            x: 3,
+            y: 2,
+            left_pressed: true,
+            ..Default::default()
+        };
+        assert!(ui::filename_clicked(&shell.mouse, &name));
+        shell.tick();
+        assert!(
+            shell.file_picker.is_open(),
+            "filename click opens the picker"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }

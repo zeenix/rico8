@@ -6,6 +6,7 @@ use crate::shell::Mode;
 use rico8_runtime::{
     assets::Note,
     fb::{Framebuffer, HEIGHT, WIDTH},
+    font,
     palette::col,
     ui as rui,
 };
@@ -128,6 +129,37 @@ pub fn draw_tab_bar(fb: &mut Framebuffer, active: Mode) {
         };
         rui::icon(fb, icon, x, 0, color);
     }
+}
+
+/// Left edge of the filename label in the tab bar.
+const FILENAME_X: i32 = 2;
+
+/// The filename label's right-edge limit: it stays one blank column clear of
+/// the leftmost tab icon, so a long name never overdraws the tabs or shares a
+/// click with them.
+fn filename_limit() -> i32 {
+    tab_x(0) - 2
+}
+
+/// Draw the code editor's current filename in the top-left of the tab bar, in
+/// peach to match the highlighted code tab. Truncated to stay clear of the tab
+/// icons; empty when no project file is open (a loaded cart), so nothing shows.
+pub fn code_filename(fb: &mut Framebuffer, name: &str) {
+    let max = ((filename_limit() - FILENAME_X) / font::GLYPH_W).max(0) as usize;
+    let shown: String = name.chars().take(max).collect();
+    fb.print(&shown, FILENAME_X, 1, col::PEACH);
+}
+
+/// Whether a left-press landed on the top-left filename (the click target that
+/// opens the file picker). False for an empty name; the region is clamped clear
+/// of the tab icons so one click never routes to both.
+pub fn filename_clicked(mouse: &Mouse, name: &str) -> bool {
+    !name.is_empty()
+        && mouse.left_pressed
+        && mouse.y < 8
+        && mouse.x >= 1
+        && mouse.x < filename_limit()
+        && mouse.x <= FILENAME_X + font::text_width(name)
 }
 
 /// The tab index whose 8×8 cell contains screen-x `x`, if any.
@@ -381,6 +413,36 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(tab_bar_hover(&below), None);
+    }
+
+    #[test]
+    fn code_filename_draws_and_is_clickable() {
+        let mut fb = Framebuffer::new();
+        code_filename(&mut fb, "lib.rs");
+        // Some pixel in the label band is lit peach.
+        let lit = (2..2 + font::text_width("lib.rs"))
+            .any(|x| (1..7).any(|y| fb.pget(x, y) == col::PEACH));
+        assert!(lit, "filename should render in peach");
+
+        let press = Mouse {
+            x: 3,
+            y: 2,
+            left_pressed: true,
+            ..Default::default()
+        };
+        assert!(filename_clicked(&press, "lib.rs"));
+        // Empty name: nothing to click.
+        assert!(!filename_clicked(&press, ""));
+        // Past the text, below the bar, and a non-press are all rejected.
+        let far = Mouse { x: 120, ..press };
+        assert!(!filename_clicked(&far, "lib.rs"));
+        let below = Mouse { y: 9, ..press };
+        assert!(!filename_clicked(&below, "lib.rs"));
+        let hover = Mouse {
+            left_pressed: false,
+            ..press
+        };
+        assert!(!filename_clicked(&hover, "lib.rs"));
     }
 
     #[test]
