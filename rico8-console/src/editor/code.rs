@@ -364,7 +364,7 @@ impl CodeEditor {
         }
     }
 
-    pub fn draw(&self, fb: &mut Framebuffer, code: &str) {
+    pub fn draw(&self, fb: &mut Framebuffer, code: &str, file: &str) {
         let lines: Vec<&str> = if code.is_empty() {
             vec![""]
         } else {
@@ -434,15 +434,22 @@ impl CodeEditor {
             }
         }
 
-        ui::status_bar(
-            fb,
-            &format!(
+        let status = if file.is_empty() {
+            format!(
                 "Line {}/{} col {}",
                 self.line + 1,
                 lines.len(),
                 self.col + 1
-            ),
-        );
+            )
+        } else {
+            format!(
+                "{file}  L{}/{} C{}",
+                self.line + 1,
+                lines.len(),
+                self.col + 1
+            )
+        };
+        ui::status_bar(fb, &status);
     }
 }
 
