@@ -264,6 +264,29 @@ pub fn view_buttons(fb: &mut Framebuffer, fullscreen: bool) {
     fb.rect(15, 1, 21, 6, full);
 }
 
+/// The music grid's Pat/Sfx toggle, drawn in the top bar: two labels flanking a
+/// slide switch whose raised knob sits on the active side (the active label is
+/// white). The whole switch is one click target (handled by the music editor).
+pub fn pat_sfx_toggle(fb: &mut Framebuffer, sfx_active: bool) {
+    let pat_c = if sfx_active {
+        col::DARK_PURPLE
+    } else {
+        col::WHITE
+    };
+    let sfx_c = if sfx_active {
+        col::WHITE
+    } else {
+        col::DARK_PURPLE
+    };
+    fb.print("Pat", 28, 1, pat_c);
+    // A thin recessed groove with a knob standing proud of it on the active
+    // side — so it reads as a slide switch, not a filled bar.
+    fb.rectfill(43, 3, 56, 4, col::DARK_PURPLE);
+    let kx = if sfx_active { 51 } else { 43 };
+    fb.rectfill(kx, 1, kx + 5, 6, col::WHITE);
+    fb.print("Sfx", 59, 1, sfx_c);
+}
+
 /// A channel enable toggle: a 5x5 light-grey box with a white centre when on.
 pub fn radio(fb: &mut Framebuffer, x: i32, y: i32, on: bool) {
     fb.rect(x, y, x + 4, y + 4, col::LIGHT_GREY);

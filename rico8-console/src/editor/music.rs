@@ -9,7 +9,7 @@ use crate::{
     ui::{self, Mouse},
 };
 use rico8_runtime::{
-    assets::{Assets, CHANNELS, MUSIC_COUNT, SFX_LEN},
+    assets::{Assets, Sfx, CHANNELS, MUSIC_COUNT, SFX_LEN},
     audio::AudioHandle,
     fb::Framebuffer,
     palette::col,
@@ -24,6 +24,11 @@ const ROW_PITCH: i32 = 8;
 const MAX_ROWS: usize = 11;
 /// Per-channel colour for the activity dots and the playhead.
 const CHAN_COL: [u8; CHANNELS] = [col::ORANGE, col::YELLOW, col::GREEN, col::BLUE];
+// Grid view: a Pat/Sfx toggle above an 8x8 grid of all 64 patterns or SFX.
+const G_X: i32 = 4;
+const G_Y: i32 = 31;
+const G_CELL_W: i32 = 15;
+const G_CELL_H: i32 = 11;
 
 pub struct MusicEditor {
     pattern: usize,
@@ -33,6 +38,10 @@ pub struct MusicEditor {
     /// Set when the user clicks a channel's pencil; the shell reads it to jump
     /// to that SFX in the SFX editor.
     edit_request: Option<usize>,
+    /// View toggle: false = note columns, true = the 64-cell grid.
+    grid: bool,
+    /// In grid view: false = patterns (Pat), true = SFX.
+    grid_sfx: bool,
 }
 
 impl MusicEditor {
@@ -42,7 +51,19 @@ impl MusicEditor {
             channel: 0,
             last_sfx: [0; CHANNELS],
             edit_request: None,
+            grid: false,
+            grid_sfx: false,
         }
+    }
+
+    /// Whether the 64-cell grid view is active (vs. the note-columns view).
+    pub fn is_grid(&self) -> bool {
+        self.grid
+    }
+
+    /// Whether the grid is showing SFX (vs. patterns); for the shell's top-bar toggle.
+    pub fn grid_sfx(&self) -> bool {
+        self.grid_sfx
     }
 
     /// Take a pending "edit this channel's SFX" request, if any.
@@ -105,6 +126,7 @@ impl MusicEditor {
                 let p = &mut assets.music[self.pattern];
                 p.stop_at_end = !p.stop_at_end;
             }
+            Key::Tab => self.grid = !self.grid,
             _ => {}
         }
     }
@@ -116,17 +138,35 @@ impl MusicEditor {
             self.pattern = p;
         }
         let m = *mouse;
+        // Top-bar buttons: notes|grid view toggle, and (in grid view) the Pat/Sfx toggle.
+        if m.left_pressed && m.y < 8 {
+            if m.over(4, 0, 12, 7) {
+                self.grid = false;
+                return;
+            } else if m.over(13, 0, 22, 7) {
+                self.grid = true;
+                return;
+            } else if self.grid && m.over(28, 0, 40, 7) {
+                self.grid_sfx = false;
+                return;
+            } else if self.grid && m.over(58, 0, 71, 7) {
+                self.grid_sfx = true;
+                return;
+            } else if self.grid && m.over(41, 0, 57, 7) {
+                self.grid_sfx = !self.grid_sfx;
+                return;
+            }
+        }
         if !m.left_pressed && !m.right_pressed {
             return;
         }
-        let delta: i32 = if m.right_pressed { -1 } else { 1 };
-        // Pattern navigator arrows.
+        // Pattern navigator arrows (both views).
         if m.over(35, 12, 38, 17) && m.left_pressed {
             self.pattern = (self.pattern + MUSIC_COUNT - 1) % MUSIC_COUNT;
         } else if m.over(94, 12, 98, 17) && m.left_pressed {
             self.pattern = (self.pattern + 1) % MUSIC_COUNT;
         }
-        // Pattern boxes.
+        // Pattern boxes (both views).
         let first = self.first_pattern();
         for i in 0..5 {
             let x = 40 + i as i32 * 11;
@@ -134,7 +174,7 @@ impl MusicEditor {
                 self.pattern = first + i;
             }
         }
-        // Flow buttons (loop-start / loop-back / stop).
+        // Flow buttons (both views).
         if m.left_pressed {
             let pat = &mut assets.music[self.pattern];
             if m.over(102, 12, 108, 19) {
@@ -145,23 +185,44 @@ impl MusicEditor {
                 pat.stop_at_end = !pat.stop_at_end;
             }
         }
-        // Per-channel header controls.
+        // Per-channel header controls (both views; the SFX-number nudge is notes-only,
+        // since grid view picks SFX from the grid).
+        let delta: i32 = if m.right_pressed { -1 } else { 1 };
         for (ch, &x) in PANEL_X.iter().enumerate() {
             if m.over(x + 2, 24, x + 6, 28) && m.left_pressed {
                 self.channel = ch;
                 self.toggle_channel(assets, ch);
             } else if m.over(x + 9, 23, x + 18, 29) {
                 self.channel = ch;
-                self.nudge_sfx(assets, ch, delta);
+                if !self.grid {
+                    self.nudge_sfx(assets, ch, delta);
+                }
             } else if m.over(x + 21, 23, x + 27, 29) && m.left_pressed {
                 if let Some(n) = assets.music[self.pattern].channels[ch] {
                     self.edit_request = Some(n as usize);
                 }
             }
         }
-        // Click in a note panel selects that channel; double-use as play toggle
-        // is via the keyboard.
+        if self.grid {
+            self.grid_tick(&m, assets);
+        }
         let _ = audio;
+    }
+
+    /// Handle a click on a grid cell: pick a pattern (Pat) or assign an SFX to the
+    /// current channel (Sfx).
+    fn grid_tick(&mut self, m: &Mouse, assets: &mut Assets) {
+        if !m.left_pressed {
+            return;
+        }
+        if let Some(n) = grid_cell(m.x, m.y) {
+            if self.grid_sfx {
+                assets.music[self.pattern].channels[self.channel] = Some(n as u8);
+                self.last_sfx[self.channel] = n as u8;
+            } else {
+                self.pattern = n;
+            }
+        }
     }
 
     /// First pattern shown in the 5-box navigator (centred on the current one).
@@ -174,7 +235,7 @@ impl MusicEditor {
         let playing = audio.with_synth(|s| s.playing_pattern());
         let steps = audio.channel_step();
 
-        // --- Pattern strip ---
+        // --- Pattern strip (both views) ---
         fb.print("Pattern", 4, 13, col::LIGHT_GREY);
         ui::arrow_l(fb, 35, 13, col::PINK);
         let first = self.first_pattern();
@@ -196,16 +257,14 @@ impl MusicEditor {
             fb.print(&format!("{p:02}"), x + 1, 13, c);
         }
         ui::arrow_r(fb, 95, 13, col::PINK);
-        // Flow buttons: the colour itself shows on/off — light blue when the
-        // flag is set, dark blue when not (matching PICO-8).
+        // Flow buttons: the colour itself shows on/off.
         ui::blit(fb, 100, 12, &ui::FLOW);
         recolor_flow(fb, 100, 108, pat.loop_start);
         recolor_flow(fb, 109, 116, pat.loop_back);
         recolor_flow(fb, 117, 126, pat.stop_at_end);
 
-        // --- Channels: header + note column ---
-        for ch in 0..CHANNELS {
-            let x = PANEL_X[ch];
+        // --- Channel headers (both views): radio + SFX# + pencil ---
+        for (ch, &x) in PANEL_X.iter().enumerate() {
             let slot = pat.channels[ch];
             ui::radio(fb, x + 2, 24, slot.is_some());
             if let Some(n) = slot {
@@ -213,6 +272,21 @@ impl MusicEditor {
                 fb.print(&format!("{n:02}"), x + 10, 24, col::WHITE);
                 ui::pencil(fb, x + 22, 24);
             }
+        }
+
+        if self.grid {
+            // Box the current channel — the SFX grid's assign target.
+            let hx = PANEL_X[self.channel];
+            fb.rect(hx, 22, hx + PANEL_W, 30, col::PINK);
+            self.draw_grid(fb, assets, audio);
+            ui::status_bar(fb, "Tab notes  click a cell to pick");
+            return;
+        }
+
+        // --- Notes view: per-channel note panel + column ---
+        for ch in 0..CHANNELS {
+            let x = PANEL_X[ch];
+            let slot = pat.channels[ch];
             // Note panel: filled black when active, black-bordered box when empty.
             if slot.is_some() {
                 fb.rectfill(x, GRID_TOP - 2, x + PANEL_W, GRID_BOT, col::BLACK);
@@ -249,6 +323,61 @@ impl MusicEditor {
 
         ui::status_bar(fb, "Spc play  pgup/dn pat  x ch");
     }
+
+    /// The grid view: an 8x8 grid of all 64 patterns or SFX, the current one boxed
+    /// white. Pattern cells show the number + per-channel activity dots; SFX cells
+    /// show a pitch thumbnail (or the number when empty) and, during playback, a
+    /// white playhead sweeping each playing channel's SFX cell.
+    fn draw_grid(&self, fb: &mut Framebuffer, assets: &Assets, audio: &AudioHandle) {
+        let cur_sfx = assets.music[self.pattern].channels[self.channel];
+        for n in 0..64usize {
+            let x = G_X + (n % 8) as i32 * G_CELL_W;
+            let y = G_Y + (n / 8) as i32 * G_CELL_H;
+            fb.rectfill(x, y, x + G_CELL_W - 2, y + G_CELL_H - 2, col::DARK_BLUE);
+            let sel = if self.grid_sfx {
+                cur_sfx == Some(n as u8)
+            } else {
+                n == self.pattern
+            };
+            if sel {
+                fb.rect(x - 1, y - 1, x + G_CELL_W - 1, y + G_CELL_H - 1, col::WHITE);
+            }
+            let c = if sel { col::WHITE } else { col::LIGHT_GREY };
+            if self.grid_sfx {
+                let sfx = &assets.sfx[n];
+                if sfx.notes.iter().all(|nt| nt.volume == 0) {
+                    fb.print(&format!("{n:02}"), x + 1, y + 1, c);
+                } else {
+                    draw_sfx_thumb(fb, sfx, x, y);
+                }
+            } else {
+                fb.print(&format!("{n:02}"), x + 1, y + 1, c);
+                for (ch, c) in CHAN_COL.iter().enumerate() {
+                    if assets.music[n].channels[ch].is_some() {
+                        fb.pset(x + 1 + ch as i32 * 3, y + G_CELL_H - 3, *c);
+                    }
+                }
+            }
+        }
+        // Playheads: in SFX mode, while the shown pattern plays, sweep each playing
+        // channel's SFX cell at its current step.
+        if self.grid_sfx && audio.with_synth(|s| s.playing_pattern()) == Some(self.pattern) {
+            let steps = audio.channel_step();
+            let channels = &assets.music[self.pattern].channels;
+            for (chan_slot, step_slot) in channels.iter().zip(steps.iter()) {
+                let (Some(n), Some(step)) = (chan_slot, step_slot) else {
+                    continue;
+                };
+                let cell = *n as usize;
+                let cx = G_X + (cell % 8) as i32 * G_CELL_W;
+                let cy = G_Y + (cell / 8) as i32 * G_CELL_H;
+                let sfx = &assets.sfx[cell];
+                let total = note_rows(sfx.loop_start, sfx.loop_end).max(1) as i32;
+                let off = (*step as i32 * (G_CELL_W - 2) / total).clamp(0, G_CELL_W - 2);
+                fb.line(cx + off, cy, cx + off, cy + G_CELL_H - 2, col::WHITE);
+            }
+        }
+    }
 }
 
 /// Recolour a flow button's pixels (blue/dark-blue) to show its on/off state:
@@ -276,9 +405,131 @@ fn note_rows(loop_start: u8, loop_end: u8) -> usize {
     }
 }
 
+/// The cell index (0..64) under screen point (x, y) in the grid, if any.
+fn grid_cell(x: i32, y: i32) -> Option<usize> {
+    let (cx, cy) = (x - G_X, y - G_Y);
+    if cx < 0 || cy < 0 || cx >= 8 * G_CELL_W || cy >= 8 * G_CELL_H {
+        return None;
+    }
+    Some(((cy / G_CELL_H) * 8 + cx / G_CELL_W) as usize)
+}
+
+/// A connected pitch line of an SFX's notes, filling its grid cell. The caller
+/// draws this only for non-empty SFX (empty ones show their number instead).
+fn draw_sfx_thumb(fb: &mut Framebuffer, sfx: &Sfx, x: i32, y: i32) {
+    let top = y + 1;
+    let bot = y + G_CELL_H - 2;
+    let span = bot - top;
+    let w = G_CELL_W - 2;
+    let mut prev: Option<i32> = None;
+    for col_i in 0..w {
+        let step = (col_i as usize * SFX_LEN) / w as usize;
+        let note = sfx.notes[step.min(SFX_LEN - 1)];
+        if note.volume == 0 {
+            prev = None;
+            continue;
+        }
+        let py = bot - note.pitch.min(63) as i32 * span / 63;
+        match prev {
+            Some(p) => fb.line(x + col_i, p, x + col_i, py, col::PINK),
+            None => fb.pset(x + col_i, py, col::PINK),
+        }
+        prev = Some(py);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn dummy() -> AudioHandle {
+        AudioHandle::dummy()
+    }
+
+    fn press(x: i32, y: i32) -> Mouse {
+        Mouse {
+            x,
+            y,
+            left: true,
+            left_pressed: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tab_toggles_grid_view() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        assert!(!ed.is_grid());
+        ed.key(Key::Tab, Mods::default(), &mut a, &dummy());
+        assert!(ed.is_grid());
+        ed.key(Key::Tab, Mods::default(), &mut a, &dummy());
+        assert!(!ed.is_grid());
+    }
+
+    #[test]
+    fn view_buttons_toggle_grid() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        ed.tick(&press(15, 2), &mut a, &dummy()); // grid button
+        assert!(ed.is_grid());
+        ed.tick(&press(6, 2), &mut a, &dummy()); // notes button
+        assert!(!ed.is_grid());
+    }
+
+    #[test]
+    fn pat_sfx_toggle_switches_grid_mode() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        ed.grid = true;
+        // The toggle now lives in the top bar (y < 8): Pat at x28..40, Sfx at x58..71.
+        ed.tick(&press(60, 3), &mut a, &dummy()); // "Sfx"
+        assert!(ed.grid_sfx);
+        ed.tick(&press(30, 3), &mut a, &dummy()); // "Pat"
+        assert!(!ed.grid_sfx);
+        // Clicking the switch body (between the labels) flips the mode.
+        ed.tick(&press(49, 3), &mut a, &dummy());
+        assert!(ed.grid_sfx);
+        ed.tick(&press(49, 3), &mut a, &dummy());
+        assert!(!ed.grid_sfx);
+    }
+
+    #[test]
+    fn clicking_a_channel_header_selects_it_in_grid() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        a.music[0].channels[2] = Some(5);
+        ed.grid = true;
+        ed.grid_sfx = true;
+        // Channel 2's SFX-number region: PANEL_X[2]=64, x+9..x+18 = 73..82, y23..29.
+        ed.tick(&press(75, 25), &mut a, &dummy());
+        assert_eq!(ed.channel, 2, "header click selects the channel");
+        assert_eq!(a.music[0].channels[2], Some(5), "no nudge in grid view");
+    }
+
+    #[test]
+    fn clicking_a_pat_cell_selects_the_pattern() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        // Pat mode (default): cell 10 is col 2, row 1.
+        // x = G_X + 2*G_CELL_W + 1 = 35, y = G_Y + G_CELL_H + 1 = 43.
+        ed.grid = true;
+        ed.tick(&press(35, 43), &mut a, &dummy());
+        assert_eq!(ed.pattern, 10);
+    }
+
+    #[test]
+    fn clicking_an_sfx_cell_assigns_to_the_current_channel() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        ed.grid = true;
+        ed.grid_sfx = true;
+        ed.channel = 1;
+        // Cell 12 -> col 4, row 1: x = G_X + 4*G_CELL_W + 1 = 65, y = G_Y + G_CELL_H + 1 = 43.
+        ed.tick(&press(65, 43), &mut a, &dummy());
+        assert_eq!(a.music[ed.pattern].channels[1], Some(12));
+        assert_eq!(ed.last_sfx[1], 12);
+    }
 
     #[test]
     fn note_rows_handles_loop_len_and_full() {
@@ -308,5 +559,19 @@ mod tests {
         a.music[0].channels[1] = None;
         ed.nudge_sfx(&mut a, 1, 1);
         assert_eq!(a.music[0].channels[1], None, "disabled channel untouched");
+    }
+
+    #[test]
+    fn grid_view_draws_without_panic() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        a.sfx[1].notes[0].pitch = 40;
+        a.sfx[1].notes[0].volume = 5;
+        ed.grid = true;
+        ed.grid_sfx = true;
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a, &dummy()); // exercises thumbnails + playhead path.
+        ed.grid_sfx = false;
+        ed.draw(&mut fb, &a, &dummy()); // exercises pattern cells + activity dots.
     }
 }
