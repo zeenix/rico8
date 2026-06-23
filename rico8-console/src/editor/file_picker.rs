@@ -31,10 +31,15 @@ enum Mode {
 const LINE_H: i32 = font::GLYPH_H + 1;
 /// Overlay width in pixels.
 const BOX_W: i32 = 90;
+/// The most rows shown at once: as many as fit between the tab bar (y=9)
+/// and the status bar (y=120), after the panel's 4px of chrome. Longer
+/// lists scroll.
+const MAX_VIS_ROWS: usize = ((120 - 9 - 4) / LINE_H) as usize; // 13
 
 pub struct FilePicker {
     open: bool,
     sel: usize,
+    scroll: usize,
     mode: Mode,
     input: String,
 }
@@ -44,6 +49,7 @@ impl FilePicker {
         Self {
             open: false,
             sel: 0,
+            scroll: 0,
             mode: Mode::List,
             input: String::new(),
         }
@@ -61,6 +67,20 @@ impl FilePicker {
         self.mode = Mode::List;
         self.input.clear();
         self.sel = Self::initial_sel(files, current, previous);
+        self.scroll = 0;
+        self.clamp_scroll(files.len() + 1);
+    }
+
+    /// Keep the selected row inside the visible window for `n` total rows.
+    fn clamp_scroll(&mut self, n: usize) {
+        let vis = n.min(MAX_VIS_ROWS);
+        if self.sel < self.scroll {
+            self.scroll = self.sel;
+        } else if self.sel >= self.scroll + vis {
+            self.scroll = self.sel + 1 - vis;
+        }
+        // Never leave a gap below the last row when near the end.
+        self.scroll = self.scroll.min(n.saturating_sub(vis));
     }
 
     fn initial_sel(files: &[&str], current: &str, previous: Option<&str>) -> usize {
@@ -87,10 +107,12 @@ impl FilePicker {
                 match key {
                     Key::Up => {
                         self.sel = (self.sel + n - 1) % n;
+                        self.clamp_scroll(n);
                         None
                     }
                     Key::Down => {
                         self.sel = (self.sel + 1) % n;
+                        self.clamp_scroll(n);
                         None
                     }
                     Key::Escape => {
@@ -144,9 +166,10 @@ impl FilePicker {
         if self.mode != Mode::List {
             return None;
         }
+        let vis = (n.min(MAX_VIS_ROWS)) as i32;
         let row = (mouse.y - (y0 + 2)) / LINE_H;
-        if (0..n as i32).contains(&row) {
-            self.sel = row as usize;
+        if (0..vis).contains(&row) {
+            self.sel = self.scroll + row as usize;
             return self.confirm_selection(files);
         }
         None
@@ -181,9 +204,11 @@ impl FilePicker {
             return;
         }
 
-        // Each file row, then the trailing synthetic "+ new file" entry.
-        for i in 0..n {
-            let y = y0 + 2 + i as i32 * LINE_H;
+        // Render the visible window of rows.
+        let vis = n.min(MAX_VIS_ROWS);
+        for row in 0..vis {
+            let i = self.scroll + row;
+            let y = y0 + 2 + row as i32 * LINE_H;
             let selected = i == self.sel;
             if selected {
                 fb.rectfill(x0 + 1, y - 1, x1 - 1, y + LINE_H - 2, col::DARK_PURPLE);
@@ -203,20 +228,93 @@ impl FilePicker {
             };
             fb.print(text, x0 + 3, y, color);
         }
+        // Scroll hints when content is hidden above or below.
+        if self.scroll > 0 {
+            scroll_marker(fb, x1 - 5, y0 + 2, true, col::LIGHT_GREY);
+        }
+        if self.scroll + vis < n {
+            scroll_marker(fb, x1 - 5, y1 - 4, false, col::LIGHT_GREY);
+        }
     }
 
     /// Box rectangle (inclusive) for `n` rows, centered, clamped below the bar.
     fn geom(n: usize) -> (i32, i32, i32, i32) {
-        let h = n as i32 * LINE_H + 4;
+        let vis = n.min(MAX_VIS_ROWS);
+        let h = vis as i32 * LINE_H + 4;
         let x0 = (WIDTH - BOX_W) / 2;
         let y0 = ((HEIGHT - h) / 2).max(9);
         (x0, y0, x0 + BOX_W - 1, y0 + h - 1)
     }
 }
 
+/// A 5x3 triangle hint that the list scrolls further up (`up`) or down.
+fn scroll_marker(fb: &mut Framebuffer, cx: i32, y: i32, up: bool, color: u8) {
+    for r in 0..3 {
+        let half = if up { r } else { 2 - r };
+        for dx in -half..=half {
+            fb.pset(cx + dx, y + r, color);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn large_list_scrolls_to_keep_selection_visible() {
+        // Build a list longer than MAX_VIS_ROWS.
+        let names: Vec<String> = (0..20).map(|i| format!("file{i}.rs")).collect();
+        let files: Vec<&str> = names.iter().map(|s| s.as_str()).collect();
+        let mut p = FilePicker::new();
+        p.open(&files, "", None);
+        let n = files.len() + 1;
+        // Press Down until we've visited every row.
+        for _ in 0..n {
+            // Invariant: selection is always within the visible window.
+            assert!(p.scroll <= p.sel, "scroll={} sel={}", p.scroll, p.sel);
+            assert!(
+                p.sel < p.scroll + MAX_VIS_ROWS,
+                "scroll={} sel={} MAX_VIS_ROWS={}",
+                p.scroll,
+                p.sel,
+                MAX_VIS_ROWS
+            );
+            p.key(Key::Down, Mods::default(), &files);
+        }
+        // After a full loop we should be back at sel==0.
+        assert_eq!(p.sel, 0);
+        // Wrap-around: from sel==0 one Up wraps to the last row (the "+ new file" row).
+        p.key(Key::Up, Mods::default(), &files);
+        assert_eq!(
+            p.sel,
+            files.len(),
+            "sel should be on the last (+ new file) row"
+        );
+        // The scroll window must include the last row.
+        assert!(p.scroll <= p.sel, "scroll={} sel={}", p.scroll, p.sel);
+        assert!(
+            p.sel < p.scroll + MAX_VIS_ROWS,
+            "scroll={} sel={} MAX_VIS_ROWS={}",
+            p.scroll,
+            p.sel,
+            MAX_VIS_ROWS
+        );
+    }
+
+    #[test]
+    fn box_stays_on_screen_for_large_lists() {
+        // Large list: box must stay within the usable area (9..=119).
+        let (_, y0, _, y1) = FilePicker::geom(25);
+        assert!(y0 >= 9, "y0={y0} must be >= 9");
+        assert!(y1 <= 119, "y1={y1} must be <= 119");
+        // Small list: height should equal n * LINE_H + 4 and be centered.
+        let n: usize = 3;
+        let expected_h = n as i32 * LINE_H + 4;
+        let (_, y0_small, _, y1_small) = FilePicker::geom(n);
+        let actual_h = y1_small - y0_small + 1;
+        assert_eq!(actual_h, expected_h, "small list height mismatch");
+    }
 
     #[test]
     fn arrows_move_and_enter_switches() {
