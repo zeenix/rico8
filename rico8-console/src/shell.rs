@@ -1762,6 +1762,14 @@ impl Shell {
                     _ => {}
                 }
                 self.draw_toast();
+                // Name the hovered view in the bottom bar, but not while the
+                // file picker is open — its tabs are inert then, so a hint
+                // would invite a click that does nothing.
+                if !self.file_picker.is_open() {
+                    if let Some(i) = ui::tab_bar_hover(&mouse) {
+                        ui::status_bar(&mut self.fb, ui::tab_name(i));
+                    }
+                }
                 ui::draw_cursor(&mut self.fb, &mouse);
                 &self.fb
             }

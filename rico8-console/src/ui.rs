@@ -112,18 +112,11 @@ fn tab_x(i: usize) -> i32 {
     tab_positions()[i]
 }
 
-/// Top bar: title on the left, the five editor tab icons on the right.
+/// Top bar: the red strip and the five editor tab icons, right-aligned.
+/// Per-editor top-left content (the code filename, the SFX mode buttons) is
+/// drawn by the shell on top of this.
 pub fn draw_tab_bar(fb: &mut Framebuffer, active: Mode) {
     fb.rectfill(0, 0, WIDTH - 1, 7, col::RED);
-    // The SFX/music editors draw their own top-left chrome (the pitch/tracker
-    // mode buttons), so leave their title blank here.
-    let title = match active {
-        Mode::Code => "Code",
-        Mode::Sprite => "Sprite",
-        Mode::Map => "Map",
-        _ => "",
-    };
-    fb.print(title, 2, 1, col::DARK_PURPLE);
     // The active tab is distinguished by icon colour only (peach), never a
     // background box — a box in the inactive-icon colour just melds with them.
     for (i, (icon, mode)) in TABS.iter().enumerate() {
@@ -137,12 +130,31 @@ pub fn draw_tab_bar(fb: &mut Framebuffer, active: Mode) {
     }
 }
 
+/// The tab index whose 8×8 cell contains screen-x `x`, if any.
+fn tab_at(x: i32) -> Option<usize> {
+    (0..TABS.len()).find(|&i| x >= tab_x(i) - 1 && x <= tab_x(i) + 7)
+}
+
 /// Which tab (index into `EDITOR_MODES`) was clicked this frame, if any.
 pub fn tab_bar_click(mouse: &Mouse) -> Option<usize> {
     if !mouse.left_pressed || mouse.y >= 8 {
         return None;
     }
-    (0..5).find(|&i| mouse.x >= tab_x(i) - 1 && mouse.x <= tab_x(i) + 7)
+    tab_at(mouse.x)
+}
+
+/// The tab the cursor hovers in the top bar, if any (for the bottom-bar hint).
+pub fn tab_bar_hover(mouse: &Mouse) -> Option<usize> {
+    if mouse.y >= 8 {
+        return None;
+    }
+    tab_at(mouse.x)
+}
+
+/// Display name for tab `i`, in `TABS` order.
+pub fn tab_name(i: usize) -> &'static str {
+    const NAMES: [&str; TABS.len()] = ["Code", "Sprite", "Map", "SFX", "Music"];
+    NAMES[i]
 }
 
 /// Bottom status bar with a single line of text.
@@ -327,6 +339,48 @@ mod tests {
             col::RED,
             "no background box behind the active tab"
         );
+    }
+
+    #[test]
+    fn tab_bar_has_no_title_text() {
+        // The old "Code" label sat at (2, 1); that area must now be plain red.
+        let mut fb = Framebuffer::new();
+        draw_tab_bar(&mut fb, Mode::Code);
+        for x in 2..18 {
+            assert_eq!(fb.pget(x, 1), col::RED, "title row must be blank at x={x}");
+        }
+    }
+
+    #[test]
+    fn hover_maps_x_to_the_tab_and_its_name() {
+        // Inside the first tab's cell -> index 0 ("Code"); off the tabs -> None.
+        let over_first = Mouse {
+            x: tab_x(0) + 3,
+            y: 3,
+            ..Default::default()
+        };
+        assert_eq!(tab_bar_hover(&over_first), Some(0));
+        assert_eq!(tab_name(tab_bar_hover(&over_first).unwrap()), "Code");
+        let last = TABS.len() - 1;
+        let over_last = Mouse {
+            x: tab_x(last) + 3,
+            y: 3,
+            ..Default::default()
+        };
+        assert_eq!(tab_name(tab_bar_hover(&over_last).unwrap()), "Music");
+        // Far left (over the filename area) and below the bar are not tabs.
+        let off = Mouse {
+            x: 1,
+            y: 3,
+            ..Default::default()
+        };
+        assert_eq!(tab_bar_hover(&off), None);
+        let below = Mouse {
+            x: tab_x(0) + 3,
+            y: 8,
+            ..Default::default()
+        };
+        assert_eq!(tab_bar_hover(&below), None);
     }
 
     #[test]
