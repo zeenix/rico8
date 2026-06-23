@@ -445,6 +445,15 @@ impl Shell {
             .unwrap_or_else(|| "no cart".into())
     }
 
+    /// The OS window title: the loaded cart's name plus the console name, or
+    /// just the console name when nothing is loaded.
+    pub fn window_title(&self) -> String {
+        match &self.loaded {
+            Loaded::None => "RICO-8".into(),
+            _ => format!("{} - RICO-8", self.cart_name()),
+        }
+    }
+
     // -----------------------------------------------------------------
     // Input
     // -----------------------------------------------------------------
@@ -1715,6 +1724,22 @@ mod tests {
     fn test_shell() -> Shell {
         let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rico8");
         Shell::new(AudioHandle::dummy(), sdk)
+    }
+
+    #[test]
+    fn window_title_reflects_loaded_cart() {
+        let dir = std::env::temp_dir().join(format!("rico8_title_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        assert_eq!(shell.window_title(), "RICO-8");
+
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game").unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load project");
+        assert_eq!(shell.window_title(), "game - RICO-8");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Ctrl+S in an editor saves, flashes feedback, kicks off a real
