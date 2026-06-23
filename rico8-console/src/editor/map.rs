@@ -417,7 +417,7 @@ impl MapEditor {
                 fb.rectfill(x - 1, TOOLBAR_Y, x + 8, TOOLBAR_Y + 8, col::BLACK);
                 col::WHITE
             } else {
-                col::DARK_PURPLE
+                col::LAVENDER
             };
             draw_icon8(fb, icon, x, TOOLBAR_Y + 1, color);
         }
@@ -445,7 +445,7 @@ impl MapEditor {
             let c = if p == self.page {
                 col::WHITE
             } else {
-                col::DARK_PURPLE
+                col::LAVENDER
             };
             fb.rectfill(x, PAGE_Y, x + 4, PAGE_Y + 4, c);
         }
@@ -742,6 +742,19 @@ mod tests {
             left_pressed: true,
             ..Default::default()
         }
+    }
+
+    #[test]
+    fn inactive_tool_icon_is_lavender() {
+        // Tool 0 (Draw) is active; tool 1 (Paste/stamp) is inactive. The first
+        // row of ICON_STAMP is 0x38 = 0b00111000, which lights rx=2,3,4. Assert
+        // that the pixel at (tool_x(1)+2, TOOLBAR_Y+1) — a lit icon pixel — is
+        // lavender on the dark-grey toolbar.
+        let ed = MapEditor::new();
+        let a = Assets::default();
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a);
+        assert_eq!(fb.pget(tool_x(1) + 2, TOOLBAR_Y + 1), col::LAVENDER);
     }
 
     #[test]

@@ -226,7 +226,7 @@ impl SpriteEditor {
             let color = if *tool == self.tool {
                 col::WHITE
             } else {
-                col::DARK_PURPLE
+                col::LAVENDER
             };
             if *tool == self.tool {
                 fb.rectfill(x - 1, 9, x + 8, 17, col::BLACK);
@@ -283,7 +283,7 @@ impl SpriteEditor {
                 x + 2,
                 FLAGS.1 + 2,
                 2,
-                if on { col::RED } else { col::DARK_PURPLE },
+                if on { col::RED } else { col::LAVENDER },
             );
         }
 
@@ -293,7 +293,7 @@ impl SpriteEditor {
             let c = if p == self.page {
                 col::WHITE
             } else {
-                col::DARK_PURPLE
+                col::LAVENDER
             };
             fb.rectfill(x, PAGE_BTNS.1, x + 4, PAGE_BTNS.1 + 4, c);
         }
@@ -398,6 +398,17 @@ mod tests {
         assert!(ed.is_fullscreen());
         ed.tick(&press(6, 2), &mut a); // normal button
         assert!(!ed.is_fullscreen());
+    }
+
+    #[test]
+    fn inactive_page_dot_is_lavender() {
+        // Page 0 is active (white) by default; page 1 is inactive and must be
+        // lavender on the dark-grey panel.
+        let ed = SpriteEditor::new();
+        let a = Assets::default();
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a);
+        assert_eq!(fb.pget(PAGE_BTNS.0 + 6, PAGE_BTNS.1), col::LAVENDER);
     }
 
     #[test]
