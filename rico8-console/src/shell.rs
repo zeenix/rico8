@@ -1774,6 +1774,7 @@ impl Shell {
                     }
                     Mode::Sfx => ui::mode_buttons(&mut self.fb, self.sfx_ed.is_pitch()),
                     Mode::Sprite => ui::view_buttons(&mut self.fb, self.sprite_ed.is_fullscreen()),
+                    Mode::Map => ui::view_buttons(&mut self.fb, self.map_ed.is_fullscreen()),
                     _ => {}
                 }
                 self.draw_toast();
