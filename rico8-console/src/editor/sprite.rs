@@ -18,6 +18,10 @@ const FLAGS: (i32, i32) = (76, 72); // 8 toggle dots
 const SHEET_Y: i32 = 88; // 4 rows of sprites (one page)
 const PAGE_BTNS: (i32, i32) = (104, 81); // 4 page dots
 
+// Fullscreen canvas: the 8x8 sprite at 14x zoom (112x112), filling rows 8..119.
+const FS_CANVAS: (i32, i32) = (8, 8);
+const FS_ZOOM: i32 = 14;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tool {
     Pencil,
@@ -31,6 +35,7 @@ pub struct SpriteEditor {
     color: u8,
     tool: Tool,
     page: u32,
+    fullscreen: bool,
 }
 
 impl SpriteEditor {
@@ -40,6 +45,21 @@ impl SpriteEditor {
             color: 7,
             tool: Tool::Pencil,
             page: 0,
+            fullscreen: false,
+        }
+    }
+
+    /// Whether the fullscreen (bare-canvas) view is active.
+    pub fn is_fullscreen(&self) -> bool {
+        self.fullscreen
+    }
+
+    /// Canvas origin and per-pixel zoom for the active view.
+    fn canvas(&self) -> (i32, i32, i32) {
+        if self.fullscreen {
+            (FS_CANVAS.0, FS_CANVAS.1, FS_ZOOM)
+        } else {
+            (CANVAS.0, CANVAS.1, 8)
         }
     }
 
@@ -75,6 +95,7 @@ impl SpriteEditor {
             Key::Char('e') => self.tool = Tool::Eraser,
             Key::Char('f') => self.tool = Tool::Fill,
             Key::Char('i') => self.tool = Tool::Picker,
+            Key::Tab => self.fullscreen = !self.fullscreen,
             _ => {}
         }
         // Keep the strip showing the selected sprite when moved by keys.
@@ -121,17 +142,31 @@ impl SpriteEditor {
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
         let m = *mouse;
-        // Canvas painting (drag-friendly).
-        if (m.left || m.right) && m.over(CANVAS.0, CANVAS.1, CANVAS.0 + 63, CANVAS.1 + 63) {
-            let px = (m.x - CANVAS.0) / 8;
-            let py = (m.y - CANVAS.1) / 8;
+        // View-toggle buttons in the top bar (normal | fullscreen).
+        if m.left_pressed && m.y < 8 {
+            if m.over(4, 0, 12, 7) {
+                self.fullscreen = false;
+                return;
+            } else if m.over(13, 0, 22, 7) {
+                self.fullscreen = true;
+                return;
+            }
+        }
+        // Canvas painting (drag-friendly), through the active view's origin/zoom.
+        let (cx, cy, z) = self.canvas();
+        let size = z * 8;
+        if (m.left || m.right) && m.over(cx, cy, cx + size - 1, cy + size - 1) {
+            let px = (m.x - cx) / z;
+            let py = (m.y - cy) / z;
             // Fill and picker should fire once per click, not per frame.
             let one_shot = matches!(self.tool, Tool::Fill | Tool::Picker);
             if !one_shot || m.left_pressed || m.right_pressed {
                 self.apply_tool(assets, px, py, m.right && !m.left);
             }
         }
-        if !m.left_pressed {
+        // The palette, tools, flags, page dots and sheet exist only in the
+        // normal view; fullscreen is a bare canvas.
+        if !m.left_pressed || self.fullscreen {
             return;
         }
         // Palette.
@@ -175,6 +210,10 @@ impl SpriteEditor {
     }
 
     pub fn draw(&self, fb: &mut Framebuffer, assets: &Assets) {
+        if self.fullscreen {
+            self.draw_fullscreen(fb, assets);
+            return;
+        }
         // Tool icons.
         let tools = [
             (Tool::Pencil, ICON_PENCIL),
@@ -288,6 +327,31 @@ impl SpriteEditor {
 
         ui::status_bar(fb, &format!("Spr {:03} flags {:08b}", self.sprite, flags));
     }
+
+    /// Fullscreen view: the selected 8x8 sprite magnified to fill the editor
+    /// area, with no palette/flags/sheet. The shell paints the dark-grey
+    /// background; we draw the sprite (colour 0 shown as black) and the status.
+    fn draw_fullscreen(&self, fb: &mut Framebuffer, assets: &Assets) {
+        let (ox, oy) = self.sheet_origin();
+        let (cx, cy, z) = self.canvas();
+        fb.set_transparent_color(0, false);
+        fb.sspr(
+            &assets.sprites,
+            ox,
+            oy,
+            8,
+            8,
+            cx,
+            cy,
+            z * 8,
+            z * 8,
+            false,
+            false,
+        );
+        fb.reset_transparency();
+        let flags = assets.sprites.flags(self.sprite);
+        ui::status_bar(fb, &format!("Spr {:03} flags {:08b}", self.sprite, flags));
+    }
 }
 
 const ICON_ERASER: Icon8 = [
@@ -299,3 +363,52 @@ const ICON_FILL: Icon8 = [
 const ICON_PICKER: Icon8 = [
     0b00000111, 0b00000111, 0b00001110, 0b00011100, 0b00111000, 0b01110000, 0b01100000, 0b00000000,
 ];
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rico8_runtime::assets::Assets;
+
+    fn press(x: i32, y: i32) -> Mouse {
+        Mouse {
+            x,
+            y,
+            left: true,
+            left_pressed: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn tab_toggles_fullscreen() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        assert!(!ed.is_fullscreen());
+        ed.key(Key::Tab, Mods::default(), &mut a);
+        assert!(ed.is_fullscreen());
+        ed.key(Key::Tab, Mods::default(), &mut a);
+        assert!(!ed.is_fullscreen());
+    }
+
+    #[test]
+    fn view_buttons_toggle_fullscreen() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.tick(&press(15, 2), &mut a); // fullscreen button
+        assert!(ed.is_fullscreen());
+        ed.tick(&press(6, 2), &mut a); // normal button
+        assert!(!ed.is_fullscreen());
+    }
+
+    #[test]
+    fn fullscreen_drag_draws_through_the_zoomed_canvas() {
+        // Default sprite is 1 (sheet origin (8, 0)), pencil, colour 7. In
+        // fullscreen the canvas origin is (8, 8) at 14x zoom, so screen (9, 9)
+        // maps to sprite pixel (0, 0) -> sheet pixel (8, 0).
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.key(Key::Tab, Mods::default(), &mut a);
+        ed.tick(&press(9, 9), &mut a);
+        assert_eq!(a.sprites.get(8, 0), 7);
+    }
+}

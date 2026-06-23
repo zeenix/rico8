@@ -247,6 +247,23 @@ pub fn mode_buttons(fb: &mut Framebuffer, pitch_active: bool) {
     }
 }
 
+/// The two top-left view buttons for the sprite/map editors: a panelled layout
+/// glyph (normal, a box with a divider strip) and a hollow box (fullscreen). The
+/// active one is peach, the other dark-purple. Hit regions match `mode_buttons`:
+/// `over(4, 0, 12, 7)` for normal, `over(13, 0, 22, 7)` for fullscreen.
+pub fn view_buttons(fb: &mut Framebuffer, fullscreen: bool) {
+    let (normal, full) = if fullscreen {
+        (col::DARK_PURPLE, col::PEACH)
+    } else {
+        (col::PEACH, col::DARK_PURPLE)
+    };
+    // Normal: a small panel with a divider near the bottom (canvas + sheet).
+    fb.rect(5, 1, 11, 6, normal);
+    fb.line(5, 4, 11, 4, normal);
+    // Fullscreen: a single hollow box (the whole screen, no panels).
+    fb.rect(15, 1, 21, 6, full);
+}
+
 /// A channel enable toggle: a 5x5 light-grey box with a white centre when on.
 pub fn radio(fb: &mut Framebuffer, x: i32, y: i32, on: bool) {
     fb.rect(x, y, x + 4, y + 4, col::LIGHT_GREY);
@@ -443,6 +460,20 @@ mod tests {
             ..press
         };
         assert!(!filename_clicked(&hover, "lib.rs"));
+    }
+
+    #[test]
+    fn view_buttons_light_the_active_view() {
+        // Normal active: the layout glyph is peach, the box glyph dark-purple.
+        let mut fb = Framebuffer::new();
+        view_buttons(&mut fb, false);
+        assert_eq!(fb.pget(5, 1), col::PEACH);
+        assert_eq!(fb.pget(15, 1), col::DARK_PURPLE);
+        // Fullscreen active: the colours swap.
+        let mut fb2 = Framebuffer::new();
+        view_buttons(&mut fb2, true);
+        assert_eq!(fb2.pget(5, 1), col::DARK_PURPLE);
+        assert_eq!(fb2.pget(15, 1), col::PEACH);
     }
 
     #[test]

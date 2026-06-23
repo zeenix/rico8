@@ -1766,13 +1766,14 @@ impl Shell {
                 }
                 ui::draw_tab_bar(&mut self.fb, self.mode);
                 // Per-editor top-left content: the code filename (click to pick
-                // a file) and the SFX pitch/tracker mode buttons.
+                // a file), the SFX mode buttons, and the sprite/map view buttons.
                 match self.mode {
                     Mode::Code => {
                         let name = self.current_file_name();
                         ui::code_filename(&mut self.fb, &name);
                     }
                     Mode::Sfx => ui::mode_buttons(&mut self.fb, self.sfx_ed.is_pitch()),
+                    Mode::Sprite => ui::view_buttons(&mut self.fb, self.sprite_ed.is_fullscreen()),
                     _ => {}
                 }
                 self.draw_toast();
