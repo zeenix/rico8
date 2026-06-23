@@ -482,6 +482,8 @@ impl Shell {
     }
 
     /// Persist the open file, switch to `name`, and re-point the code watcher.
+    /// If saving the open file fails, surface the error and stay put rather than
+    /// dropping the unsaved buffer.
     fn select_file(&mut self, name: &str) {
         enum R {
             NoOp,
@@ -491,10 +493,12 @@ impl Shell {
         let r = match &mut self.loaded {
             Loaded::Project(p) if p.current != name => {
                 let previous = p.current.clone();
-                let _ = p.save();
-                match p.switch_to(name) {
-                    Ok(()) => R::Ok(p.code.clone(), p.dir.join("src").join(name), previous),
-                    Err(e) => R::Err(format!("{e}")),
+                match p.save() {
+                    Err(e) => R::Err(format!("could not save {previous}: {e}")),
+                    Ok(()) => match p.switch_to(name) {
+                        Ok(()) => R::Ok(p.code.clone(), p.dir.join("src").join(name), previous),
+                        Err(e) => R::Err(format!("{e}")),
+                    },
                 }
             }
             _ => R::NoOp,
@@ -510,7 +514,10 @@ impl Shell {
                     w.source_tree.sync();
                 }
             }
-            R::Err(msg) => self.say(&msg, col::RED),
+            R::Err(msg) => {
+                self.say(&msg, col::RED);
+                self.toast(&msg, col::RED, 3.0);
+            }
             R::NoOp => {}
         }
     }
@@ -524,10 +531,12 @@ impl Shell {
         let r = match &mut self.loaded {
             Loaded::Project(p) => {
                 let previous = p.current.clone();
-                let _ = p.save();
-                match p.create_file(name) {
-                    Ok(new) => R::Ok(p.code.clone(), p.dir.join("src").join(&new), previous),
-                    Err(e) => R::Err(format!("{e}")),
+                match p.save() {
+                    Err(e) => R::Err(format!("could not save {previous}: {e}")),
+                    Ok(()) => match p.create_file(name) {
+                        Ok(new) => R::Ok(p.code.clone(), p.dir.join("src").join(&new), previous),
+                        Err(e) => R::Err(format!("{e}")),
+                    },
                 }
             }
             _ => return,
@@ -542,7 +551,10 @@ impl Shell {
                     w.source_tree.sync();
                 }
             }
-            R::Err(msg) => self.say(&msg, col::RED),
+            R::Err(msg) => {
+                self.say(&msg, col::RED);
+                self.toast(&msg, col::RED, 3.0);
+            }
         }
     }
 
@@ -2370,6 +2382,55 @@ mod tests {
             shell.file_picker.is_open(),
             "filename click opens the picker"
         );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    /// A save failure during a file switch aborts the switch and surfaces the
+    /// error via both the console log and the toast bar.
+    #[test]
+    fn select_file_save_failure_aborts_and_reports() {
+        let dir = std::env::temp_dir().join(format!("rico8_savefail_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game").unwrap();
+
+        // Write a second source file so there is something to switch to.
+        std::fs::write(project_dir.join("src/other.rs"), "").unwrap();
+
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load project");
+        shell.switch_editor(Mode::Code);
+
+        // Sabotage save: replace src/lib.rs (file) with a directory of the
+        // same name so that fs::write fails with EISDIR.
+        let lib_path = project_dir.join("src/lib.rs");
+        std::fs::remove_file(&lib_path).unwrap();
+        std::fs::create_dir(&lib_path).unwrap();
+
+        // Attempt to switch to other.rs — save fails, switch must be aborted.
+        shell.select_file("other.rs");
+
+        // The current file must not have changed.
+        assert_eq!(
+            shell.current_file_name(),
+            "lib.rs",
+            "switch must be aborted when save fails"
+        );
+
+        // The error must be surfaced via the toast bar in red.
+        let toast = shell
+            .toast
+            .as_ref()
+            .expect("toast must be set on save error");
+        assert_eq!(toast.1, col::RED, "toast must be red");
+        assert!(
+            toast.0.contains("lib.rs"),
+            "toast must name the file that failed to save; got: {}",
+            toast.0
+        );
+
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
