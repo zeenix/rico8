@@ -269,6 +269,7 @@ impl SpriteEditor {
             false,
         );
         fb.reset_transparency();
+        self.draw_canvas_hover(fb);
 
         // Palette grid.
         for c in 0u8..16 {
@@ -356,7 +357,20 @@ impl SpriteEditor {
             false,
         );
         fb.reset_transparency();
+        self.draw_canvas_hover(fb);
         self.draw_status(fb, assets);
+    }
+
+    /// Outline the magnified pixel block under the cursor, snapped to the block
+    /// grid and clamped to the canvas — the pixel-editing selection marker. Not
+    /// shown over the sheet strip, which is a sprite picker, not an edit grid.
+    fn draw_canvas_hover(&self, fb: &mut Framebuffer) {
+        let Some((px, py)) = self.canvas_pixel_under_cursor() else {
+            return;
+        };
+        let (cx, cy, z) = self.canvas();
+        let (bx, by) = (cx + px * z, cy + py * z);
+        fb.rect(bx, by, bx + z - 1, by + z - 1, col::WHITE);
     }
 
     /// The tool whose toolbar icon is under the cursor, if any.
@@ -527,5 +541,40 @@ mod tests {
         };
         ed.tick(&hover, &mut a);
         assert_eq!(ed.canvas_pixel_under_cursor(), Some((2, 3)));
+    }
+
+    #[test]
+    fn canvas_hover_outlines_the_snapped_pixel_block() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        // Hover sprite pixel (2, 3): canvas origin (3, 20), zoom 8 -> block
+        // top-left (3 + 2*8, 20 + 3*8) = (19, 44).
+        let hover = Mouse {
+            x: 3 + 8 * 2 + 1,
+            y: 20 + 8 * 3 + 1,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a);
+        // The snapped block's top-left corner is on the white outline; the pixel
+        // just left of it (the neighbouring block) is not — the marker sticks to
+        // one block and never bleeds into the adjacent one.
+        assert_eq!(fb.pget(19, 44), col::WHITE);
+        assert_ne!(fb.pget(18, 44), col::WHITE);
+    }
+
+    #[test]
+    fn no_canvas_hover_when_over_the_palette() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        // Over the palette, not the canvas: no pixel-block marker is produced.
+        let on_palette = Mouse {
+            x: PAL.0 + 1,
+            y: PAL.1 + 1,
+            ..Default::default()
+        };
+        ed.tick(&on_palette, &mut a);
+        assert_eq!(ed.canvas_pixel_under_cursor(), None);
     }
 }
