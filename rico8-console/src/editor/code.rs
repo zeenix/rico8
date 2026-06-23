@@ -436,12 +436,7 @@ impl CodeEditor {
 
         ui::status_bar(
             fb,
-            &format!(
-                "Line {}/{} col {}",
-                self.line + 1,
-                lines.len(),
-                self.col + 1
-            ),
+            &format!("L{}/{} C{}", self.line + 1, lines.len(), self.col + 1),
         );
     }
 }

@@ -298,6 +298,7 @@ fn run_windowed(load: Option<String>, auto_run: bool) -> Result<()> {
         gpu: None,
         shell,
         mods: Mods::default(),
+        last_title: String::new(),
         next_tick: Instant::now(),
         #[cfg(feature = "audio")]
         _audio_out: audio_out,
@@ -311,6 +312,7 @@ struct App {
     gpu: Option<gpu::Gpu>,
     shell: Shell,
     mods: Mods,
+    last_title: String,
     next_tick: Instant,
     #[cfg(feature = "audio")]
     _audio_out: Option<rico8_runtime::audio::AudioOutput>,
@@ -472,6 +474,13 @@ impl ApplicationHandler for App {
             return;
         }
         if ticked {
+            let title = self.shell.window_title();
+            if title != self.last_title {
+                if let Some(w) = &self.window {
+                    w.set_title(&title);
+                }
+                self.last_title = title;
+            }
             if let Some(w) = &self.window {
                 w.request_redraw();
             }

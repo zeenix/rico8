@@ -6,6 +6,7 @@ use crate::shell::Mode;
 use rico8_runtime::{
     assets::Note,
     fb::{Framebuffer, HEIGHT, WIDTH},
+    font,
     palette::col,
     ui as rui,
 };
@@ -74,22 +75,49 @@ const TABS: [(&rui::Icon, Mode); 5] = [
     (&rui::ICON_MUSIC, Mode::Music),
 ];
 
-fn tab_x(i: usize) -> i32 {
-    WIDTH - 5 * 9 + i as i32 * 9
+/// Leftmost and rightmost lit columns of an icon (its ink bounds, 0..8).
+fn ink_bounds(icon: &rui::Icon) -> (i32, i32) {
+    let mut lo = 8;
+    let mut hi = -1;
+    for &row in icon.iter() {
+        for c in 0..8 {
+            if row & (0x80 >> c) != 0 {
+                lo = lo.min(c);
+                hi = hi.max(c);
+            }
+        }
+    }
+    (lo, hi)
 }
 
-/// Top bar: title on the left, the five editor tab icons on the right.
+/// X offset of each tab's 8×8 cell, packed right-aligned so adjacent icons'
+/// ink is always one blank pixel apart — each icon's own edge margin is
+/// absorbed rather than added, keeping every icon equidistant.
+fn tab_positions() -> [i32; TABS.len()] {
+    /// Blank pixels between one icon's last ink column and the next's first.
+    const GAP: i32 = 1;
+    /// Rightmost ink column of the last icon (1px in from the screen edge).
+    const RIGHT: i32 = WIDTH - 2;
+    let n = TABS.len();
+    let mut xs = [0i32; TABS.len()];
+    xs[n - 1] = RIGHT - ink_bounds(TABS[n - 1].0).1;
+    for i in (0..n - 1).rev() {
+        let hi = ink_bounds(TABS[i].0).1;
+        let lo_next = ink_bounds(TABS[i + 1].0).0;
+        xs[i] = xs[i + 1] + lo_next - hi - (GAP + 1);
+    }
+    xs
+}
+
+fn tab_x(i: usize) -> i32 {
+    tab_positions()[i]
+}
+
+/// Top bar: the red strip and the five editor tab icons, right-aligned.
+/// Per-editor top-left content (the code filename, the SFX mode buttons) is
+/// drawn by the shell on top of this.
 pub fn draw_tab_bar(fb: &mut Framebuffer, active: Mode) {
     fb.rectfill(0, 0, WIDTH - 1, 7, col::RED);
-    // The SFX/music editors draw their own top-left chrome (the pitch/tracker
-    // mode buttons), so leave their title blank here.
-    let title = match active {
-        Mode::Code => "Code",
-        Mode::Sprite => "Sprite",
-        Mode::Map => "Map",
-        _ => "",
-    };
-    fb.print(title, 2, 1, col::DARK_PURPLE);
     // The active tab is distinguished by icon colour only (peach), never a
     // background box — a box in the inactive-icon colour just melds with them.
     for (i, (icon, mode)) in TABS.iter().enumerate() {
@@ -103,12 +131,62 @@ pub fn draw_tab_bar(fb: &mut Framebuffer, active: Mode) {
     }
 }
 
+/// Left edge of the filename label in the tab bar.
+const FILENAME_X: i32 = 2;
+
+/// The filename label's right-edge limit: it stays one blank column clear of
+/// the leftmost tab icon, so a long name never overdraws the tabs or shares a
+/// click with them.
+fn filename_limit() -> i32 {
+    tab_x(0) - 2
+}
+
+/// Draw the code editor's current filename in the top-left of the tab bar, in
+/// peach to match the highlighted code tab. Truncated to stay clear of the tab
+/// icons; empty when no project file is open (a loaded cart), so nothing shows.
+pub fn code_filename(fb: &mut Framebuffer, name: &str) {
+    let max = ((filename_limit() - FILENAME_X) / font::GLYPH_W).max(0) as usize;
+    let shown: String = name.chars().take(max).collect();
+    fb.print(&shown, FILENAME_X, 1, col::PEACH);
+}
+
+/// Whether a left-press landed on the top-left filename (the click target that
+/// opens the file picker). False for an empty name; the region is clamped clear
+/// of the tab icons so one click never routes to both.
+pub fn filename_clicked(mouse: &Mouse, name: &str) -> bool {
+    !name.is_empty()
+        && mouse.left_pressed
+        && mouse.y < 8
+        && mouse.x >= 1
+        && mouse.x < filename_limit()
+        && mouse.x <= FILENAME_X + font::text_width(name)
+}
+
+/// The tab index whose 8×8 cell contains screen-x `x`, if any.
+fn tab_at(x: i32) -> Option<usize> {
+    (0..TABS.len()).find(|&i| x >= tab_x(i) - 1 && x <= tab_x(i) + 7)
+}
+
 /// Which tab (index into `EDITOR_MODES`) was clicked this frame, if any.
 pub fn tab_bar_click(mouse: &Mouse) -> Option<usize> {
     if !mouse.left_pressed || mouse.y >= 8 {
         return None;
     }
-    (0..5).find(|&i| mouse.x >= tab_x(i) - 1 && mouse.x <= tab_x(i) + 7)
+    tab_at(mouse.x)
+}
+
+/// The tab the cursor hovers in the top bar, if any (for the bottom-bar hint).
+pub fn tab_bar_hover(mouse: &Mouse) -> Option<usize> {
+    if mouse.y >= 8 {
+        return None;
+    }
+    tab_at(mouse.x)
+}
+
+/// Display name for tab `i`, in `TABS` order.
+pub fn tab_name(i: usize) -> &'static str {
+    const NAMES: [&str; TABS.len()] = ["Code", "Sprite", "Map", "SFX", "Music"];
+    NAMES[i]
 }
 
 /// Bottom status bar with a single line of text.
@@ -293,5 +371,92 @@ mod tests {
             col::RED,
             "no background box behind the active tab"
         );
+    }
+
+    #[test]
+    fn tab_bar_has_no_title_text() {
+        // The old "Code" label sat at (2, 1); that area must now be plain red.
+        let mut fb = Framebuffer::new();
+        draw_tab_bar(&mut fb, Mode::Code);
+        for x in 2..18 {
+            assert_eq!(fb.pget(x, 1), col::RED, "title row must be blank at x={x}");
+        }
+    }
+
+    #[test]
+    fn hover_maps_x_to_the_tab_and_its_name() {
+        // Inside the first tab's cell -> index 0 ("Code"); off the tabs -> None.
+        let over_first = Mouse {
+            x: tab_x(0) + 3,
+            y: 3,
+            ..Default::default()
+        };
+        assert_eq!(tab_bar_hover(&over_first), Some(0));
+        assert_eq!(tab_name(tab_bar_hover(&over_first).unwrap()), "Code");
+        let last = TABS.len() - 1;
+        let over_last = Mouse {
+            x: tab_x(last) + 3,
+            y: 3,
+            ..Default::default()
+        };
+        assert_eq!(tab_name(tab_bar_hover(&over_last).unwrap()), "Music");
+        // Far left (over the filename area) and below the bar are not tabs.
+        let off = Mouse {
+            x: 1,
+            y: 3,
+            ..Default::default()
+        };
+        assert_eq!(tab_bar_hover(&off), None);
+        let below = Mouse {
+            x: tab_x(0) + 3,
+            y: 8,
+            ..Default::default()
+        };
+        assert_eq!(tab_bar_hover(&below), None);
+    }
+
+    #[test]
+    fn code_filename_draws_and_is_clickable() {
+        let mut fb = Framebuffer::new();
+        code_filename(&mut fb, "lib.rs");
+        // Some pixel in the label band is lit peach.
+        let lit = (2..2 + font::text_width("lib.rs"))
+            .any(|x| (1..7).any(|y| fb.pget(x, y) == col::PEACH));
+        assert!(lit, "filename should render in peach");
+
+        let press = Mouse {
+            x: 3,
+            y: 2,
+            left_pressed: true,
+            ..Default::default()
+        };
+        assert!(filename_clicked(&press, "lib.rs"));
+        // Empty name: nothing to click.
+        assert!(!filename_clicked(&press, ""));
+        // Past the text, below the bar, and a non-press are all rejected.
+        let far = Mouse { x: 120, ..press };
+        assert!(!filename_clicked(&far, "lib.rs"));
+        let below = Mouse { y: 9, ..press };
+        assert!(!filename_clicked(&below, "lib.rs"));
+        let hover = Mouse {
+            left_pressed: false,
+            ..press
+        };
+        assert!(!filename_clicked(&hover, "lib.rs"));
+    }
+
+    #[test]
+    fn tabs_are_equidistant_by_ink() {
+        // Every adjacent pair of icons is separated by exactly one blank column
+        // between their ink, regardless of each bitmap's own edge margins.
+        let xs = tab_positions();
+        let gaps: Vec<i32> = (0..TABS.len() - 1)
+            .map(|i| {
+                let this_right = xs[i] + ink_bounds(TABS[i].0).1;
+                let next_left = xs[i + 1] + ink_bounds(TABS[i + 1].0).0;
+                next_left - this_right - 1
+            })
+            .collect();
+        assert!(gaps.iter().all(|&g| g == 1), "uneven tab gaps: {gaps:?}");
     }
 }

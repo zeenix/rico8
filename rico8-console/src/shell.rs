@@ -5,7 +5,12 @@
 use crate::{
     builder::{spawn_build, BuildJob},
     editor::{
-        code::CodeEditor, map::MapEditor, music::MusicEditor, sfx::SfxEditor, sprite::SpriteEditor,
+        code::CodeEditor,
+        file_picker::{FilePicker, PickerAction},
+        map::MapEditor,
+        music::MusicEditor,
+        sfx::SfxEditor,
+        sprite::SpriteEditor,
     },
     ui::{self, Mouse},
     watch::{FileChange, FileWatch, SourceTreeWatch},
@@ -293,6 +298,10 @@ pub struct Shell {
 
     // Editors.
     code_ed: CodeEditor,
+    file_picker: FilePicker,
+    /// The file edited just before the current one, for the picker's default
+    /// selection (alt-tab style).
+    previous_file: Option<String>,
     sprite_ed: SpriteEditor,
     map_ed: MapEditor,
     sfx_ed: SfxEditor,
@@ -341,6 +350,8 @@ impl Shell {
             cart_watch: None,
             mouse: Mouse::default(),
             code_ed: CodeEditor::new(),
+            file_picker: FilePicker::new(),
+            previous_file: None,
             sprite_ed: SpriteEditor::new(),
             map_ed: MapEditor::new(),
             sfx_ed: SfxEditor::new(),
@@ -439,10 +450,115 @@ impl Shell {
         }
     }
 
+    fn project_file_names(&self) -> Vec<String> {
+        match &self.loaded {
+            Loaded::Project(p) => p.file_names(),
+            _ => Vec::new(),
+        }
+    }
+
+    fn current_file_name(&self) -> String {
+        match &self.loaded {
+            Loaded::Project(p) => p.current.clone(),
+            _ => String::new(),
+        }
+    }
+
+    fn run_picker_action(&mut self, action: PickerAction) {
+        match action {
+            PickerAction::Switch(name) => self.select_file(&name),
+            PickerAction::Create(name) => self.create_file_in_project(&name),
+        }
+    }
+
+    /// Open the file picker for the current project, pre-selecting the most
+    /// likely target (the previously edited file, else the first non-current).
+    fn open_file_picker(&mut self) {
+        let files = self.project_file_names();
+        let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+        let current = self.current_file_name();
+        self.file_picker
+            .open(&refs, &current, self.previous_file.as_deref());
+    }
+
+    /// Persist the open file, switch to `name`, and re-point the code watcher.
+    fn select_file(&mut self, name: &str) {
+        enum R {
+            NoOp,
+            Err(String),
+            Ok(String, PathBuf, String),
+        }
+        let r = match &mut self.loaded {
+            Loaded::Project(p) if p.current != name => {
+                let previous = p.current.clone();
+                let _ = p.save();
+                match p.switch_to(name) {
+                    Ok(()) => R::Ok(p.code.clone(), p.dir.join("src").join(name), previous),
+                    Err(e) => R::Err(format!("{e}")),
+                }
+            }
+            _ => R::NoOp,
+        };
+        match r {
+            R::Ok(code, path, previous) => {
+                self.previous_file = Some(previous);
+                self.code_ed.set_text(&code);
+                if let Some(w) = &mut self.project_watch {
+                    w.code = FileWatch::new(path, code.into_bytes());
+                    // Saving the previous file bumped its mtime; absorb it so a
+                    // plain file switch does not trigger a rebuild.
+                    w.source_tree.sync();
+                }
+            }
+            R::Err(msg) => self.say(&msg, col::RED),
+            R::NoOp => {}
+        }
+    }
+
+    /// Create a new module, open it, and re-point the code watcher.
+    fn create_file_in_project(&mut self, name: &str) {
+        enum R {
+            Err(String),
+            Ok(String, PathBuf, String),
+        }
+        let r = match &mut self.loaded {
+            Loaded::Project(p) => {
+                let previous = p.current.clone();
+                let _ = p.save();
+                match p.create_file(name) {
+                    Ok(new) => R::Ok(p.code.clone(), p.dir.join("src").join(&new), previous),
+                    Err(e) => R::Err(format!("{e}")),
+                }
+            }
+            _ => return,
+        };
+        match r {
+            R::Ok(code, path, previous) => {
+                self.previous_file = Some(previous);
+                self.code_ed.set_text(&code);
+                if let Some(w) = &mut self.project_watch {
+                    w.code = FileWatch::new(path, code.into_bytes());
+                    // We wrote lib.rs + the new file ourselves; absorb the bump.
+                    w.source_tree.sync();
+                }
+            }
+            R::Err(msg) => self.say(&msg, col::RED),
+        }
+    }
+
     fn cart_name(&self) -> String {
         self.assets()
             .map(|a| a.meta.name.clone())
             .unwrap_or_else(|| "no cart".into())
+    }
+
+    /// The OS window title: the loaded cart's name plus the console name, or
+    /// just the console name when nothing is loaded.
+    pub fn window_title(&self) -> String {
+        match &self.loaded {
+            Loaded::None => "RICO-8".into(),
+            _ => format!("{} - RICO-8", self.cart_name()),
+        }
     }
 
     // -----------------------------------------------------------------
@@ -457,6 +573,15 @@ impl Shell {
     }
 
     pub fn key(&mut self, key: Key, mods: Mods) {
+        // The file picker, when open, captures all keys.
+        if self.file_picker.is_open() {
+            let files = self.project_file_names();
+            let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+            if let Some(action) = self.file_picker.key(key, mods, &refs) {
+                self.run_picker_action(action);
+            }
+            return;
+        }
         // Global shortcuts.
         if key == Key::ToggleStats {
             self.show_stats = !self.show_stats;
@@ -470,6 +595,12 @@ impl Shell {
                 }
                 Key::Char('s') => {
                     self.cmd_save_quiet();
+                    return;
+                }
+                Key::Char('o') => {
+                    if self.mode == Mode::Code && matches!(self.loaded, Loaded::Project(_)) {
+                        self.open_file_picker();
+                    }
                     return;
                 }
                 _ => {}
@@ -549,6 +680,7 @@ impl Shell {
     }
 
     pub fn switch_editor(&mut self, mode: Mode) {
+        self.file_picker.close();
         // Abandon any in-progress map-editor drag so it can't commit a stale
         // selection or move once the editor regains focus.
         self.map_ed.cancel_drag();
@@ -1060,7 +1192,7 @@ impl Shell {
                 Ok(Cart {
                     wasm,
                     assets: p.assets.clone(),
-                    source: include_source.then(|| p.code.clone()),
+                    source: include_source.then(|| p.lib_source()),
                 })
             }
         }
@@ -1302,17 +1434,32 @@ impl Shell {
             }
             Mode::Console => {}
             _ => {
-                // Tab bar clicks work in every editor.
-                if let Some(target) = ui::tab_bar_click(&self.mouse) {
-                    self.switch_editor(EDITOR_MODES[target]);
+                // Tab bar clicks work in every editor (but not while the picker is open).
+                if !self.file_picker.is_open() {
+                    if let Some(target) = ui::tab_bar_click(&self.mouse) {
+                        self.switch_editor(EDITOR_MODES[target]);
+                    }
                 }
                 let mouse = self.mouse;
                 let audio = self.audio.clone();
                 match self.mode {
                     Mode::Code => {
-                        if !self.loaded_none() {
-                            let code = self.code().unwrap_or_default().to_string();
-                            self.code_ed.tick(&mouse, &code);
+                        if self.file_picker.is_open() {
+                            let files = self.project_file_names();
+                            let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+                            if let Some(action) = self.file_picker.tick(&mouse, &refs) {
+                                self.run_picker_action(action);
+                            }
+                        } else if !self.loaded_none() {
+                            // Click the top-left filename to open the picker (projects only).
+                            if ui::filename_clicked(&mouse, &self.current_file_name())
+                                && matches!(self.loaded, Loaded::Project(_))
+                            {
+                                self.open_file_picker();
+                            } else {
+                                let code = self.code().unwrap_or_default().to_string();
+                                self.code_ed.tick(&mouse, &code);
+                            }
                         }
                     }
                     Mode::Sprite => {
@@ -1436,7 +1583,10 @@ impl Shell {
                 }
             }
             FileChange::Conflict => {
-                self.say("src/lib.rs changed on disk;", col::ORANGE);
+                self.say(
+                    &format!("src/{} changed on disk;", self.current_file_name()),
+                    col::ORANGE,
+                );
                 self.say("Save or reload to resolve", col::ORANGE);
             }
             FileChange::None => {}
@@ -1573,6 +1723,12 @@ impl Shell {
                     Mode::Code => {
                         let code = self.code().unwrap_or_default().to_string();
                         self.code_ed.draw(&mut self.fb, &code);
+                        if self.file_picker.is_open() {
+                            let files = self.project_file_names();
+                            let refs: Vec<&str> = files.iter().map(String::as_str).collect();
+                            let current = self.current_file_name();
+                            self.file_picker.draw(&mut self.fb, &refs, &current);
+                        }
                     }
                     Mode::Sprite => {
                         if let Some(a) = assets_ref(&self.loaded) {
@@ -1597,14 +1753,25 @@ impl Shell {
                     _ => {}
                 }
                 ui::draw_tab_bar(&mut self.fb, self.mode);
-                // The audio editors show PICO-8's pitch/tracker mode buttons in
-                // the top-left (the music editor's are decorative).
+                // Per-editor top-left content: the code filename (click to pick
+                // a file) and the SFX pitch/tracker mode buttons.
                 match self.mode {
-                    Mode::Music => ui::mode_buttons(&mut self.fb, true),
+                    Mode::Code => {
+                        let name = self.current_file_name();
+                        ui::code_filename(&mut self.fb, &name);
+                    }
                     Mode::Sfx => ui::mode_buttons(&mut self.fb, self.sfx_ed.is_pitch()),
                     _ => {}
                 }
                 self.draw_toast();
+                // Name the hovered view in the bottom bar, but not while the
+                // file picker is open — its tabs are inert then, so a hint
+                // would invite a click that does nothing.
+                if !self.file_picker.is_open() {
+                    if let Some(i) = ui::tab_bar_hover(&mouse) {
+                        ui::status_bar(&mut self.fb, ui::tab_name(i));
+                    }
+                }
                 ui::draw_cursor(&mut self.fb, &mouse);
                 &self.fb
             }
@@ -1715,6 +1882,22 @@ mod tests {
     fn test_shell() -> Shell {
         let sdk = Path::new(env!("CARGO_MANIFEST_DIR")).join("../rico8");
         Shell::new(AudioHandle::dummy(), sdk)
+    }
+
+    #[test]
+    fn window_title_reflects_loaded_cart() {
+        let dir = std::env::temp_dir().join(format!("rico8_title_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        assert_eq!(shell.window_title(), "RICO-8");
+
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game").unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load project");
+        assert_eq!(shell.window_title(), "game - RICO-8");
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     /// Ctrl+S in an editor saves, flashes feedback, kicks off a real
@@ -2115,6 +2298,78 @@ mod tests {
             "disk still untouched after the second run"
         );
 
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn picker_creates_and_switches_files_in_the_shell() {
+        let dir = std::env::temp_dir().join(format!("rico8_pick_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game").unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load project");
+        shell.switch_editor(Mode::Code);
+
+        // Ctrl+O opens the picker; create a new file from it.
+        let ctrl = Mods {
+            ctrl: true,
+            ..Default::default()
+        };
+        shell.key(Key::Char('o'), ctrl);
+        assert!(shell.file_picker.is_open());
+        shell.key(Key::Down, Mods::default()); // -> "+ new file"
+        shell.key(Key::Enter, Mods::default()); // -> new-file input
+        for c in "enemy".chars() {
+            shell.key(Key::Char(c), Mods::default());
+        }
+        shell.key(Key::Enter, Mods::default()); // create
+
+        assert!(!shell.file_picker.is_open());
+        assert!(project_dir.join("src/enemy.rs").exists());
+        let lib = std::fs::read_to_string(project_dir.join("src/lib.rs")).unwrap();
+        // `mod` is wired in after the template's `#![no_std]` inner attribute.
+        assert!(lib.starts_with("#![no_std]"), "lib.rs:\n{lib}");
+        assert!(lib.contains("\nmod enemy;\n"), "lib.rs:\n{lib}");
+        // The new (empty) file is now the open buffer.
+        assert_eq!(shell.code().unwrap(), "");
+
+        // Switch back to lib.rs via the picker.
+        shell.key(Key::Char('o'), ctrl);
+        shell.key(Key::Enter, Mods::default()); // sel 0 == lib.rs
+        assert!(shell.code().unwrap().contains("\nmod enemy;\n"));
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn clicking_the_filename_opens_the_picker() {
+        let dir = std::env::temp_dir().join(format!("rico8_fnclick_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let mut shell = test_shell();
+        let project_dir = dir.join("game");
+        Project::create(&project_dir, "game").unwrap();
+        shell
+            .cmd_load(&[project_dir.to_str().unwrap()])
+            .expect("load project");
+        shell.switch_editor(Mode::Code);
+
+        assert!(!shell.file_picker.is_open());
+        // A left-press on the top-left filename.
+        let name = shell.current_file_name();
+        shell.mouse = Mouse {
+            x: 3,
+            y: 2,
+            left_pressed: true,
+            ..Default::default()
+        };
+        assert!(ui::filename_clicked(&shell.mouse, &name));
+        shell.tick();
+        assert!(
+            shell.file_picker.is_open(),
+            "filename click opens the picker"
+        );
         std::fs::remove_dir_all(&dir).unwrap();
     }
 }
