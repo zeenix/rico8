@@ -20,7 +20,6 @@ const TOOLBAR_Y: i32 = 8; // tool chrome fills y 8..=21; icons drawn at y 9.
 const VIEW_Y: i32 = 22;
 const VIEW_TILES_X: i32 = 16;
 const VIEW_TILES_Y: i32 = 8;
-const VIEW_BOTTOM: i32 = VIEW_Y + VIEW_TILES_Y * 8 - 1; // 85
 const SEP_Y: i32 = 86;
 const SHEET_Y: i32 = 88; // 4 rows of 8 px, flush with the status bar.
 const SHEET_BOTTOM: i32 = SHEET_Y + 4 * 8 - 1; // 119
@@ -107,6 +106,7 @@ enum Drag {
 
 pub struct MapEditor {
     tool: Tool,
+    fullscreen: bool,
     brush: u32,
     cam_x: i32,
     cam_y: i32,
@@ -124,6 +124,7 @@ impl MapEditor {
     pub fn new() -> Self {
         Self {
             tool: Tool::Draw,
+            fullscreen: false,
             brush: 1,
             cam_x: 0,
             cam_y: 0,
@@ -143,6 +144,42 @@ impl MapEditor {
         self.drag = Drag::None;
     }
 
+    /// Whether the fullscreen (bare-map) view is active.
+    pub fn is_fullscreen(&self) -> bool {
+        self.fullscreen
+    }
+
+    /// Top y of the map viewport for the active view.
+    fn view_y(&self) -> i32 {
+        if self.fullscreen {
+            8
+        } else {
+            VIEW_Y
+        }
+    }
+
+    /// Visible tile rows for the active view.
+    fn view_tiles_y(&self) -> i32 {
+        if self.fullscreen {
+            14
+        } else {
+            VIEW_TILES_Y
+        }
+    }
+
+    /// Bottom y (inclusive) of the map viewport for the active view.
+    fn view_bottom(&self) -> i32 {
+        self.view_y() + self.view_tiles_y() * 8 - 1
+    }
+
+    /// Switch the view, re-clamping the camera so the (taller) fullscreen view
+    /// cannot scroll past the map's edges.
+    fn set_fullscreen(&mut self, on: bool) {
+        self.fullscreen = on;
+        self.cam_x = self.cam_x.min(MAP_W as i32 - VIEW_TILES_X).max(0);
+        self.cam_y = self.cam_y.min(MAP_H as i32 - self.view_tiles_y()).max(0);
+    }
+
     /// Abandon any in-progress drag. The shell calls this on an editor switch,
     /// so a drag left mid-gesture cannot commit a stale selection or move when
     /// the map editor regains focus with the button already released.
@@ -155,7 +192,7 @@ impl MapEditor {
             Key::Left => self.cam_x = (self.cam_x - 1).max(0),
             Key::Right => self.cam_x = (self.cam_x + 1).min(MAP_W as i32 - VIEW_TILES_X),
             Key::Up => self.cam_y = (self.cam_y - 1).max(0),
-            Key::Down => self.cam_y = (self.cam_y + 1).min(MAP_H as i32 - VIEW_TILES_Y),
+            Key::Down => self.cam_y = (self.cam_y + 1).min(MAP_H as i32 - self.view_tiles_y()),
             Key::PageUp => self.page = (self.page + 3) % 4,
             Key::PageDown => self.page = (self.page + 1) % 4,
             Key::Char('c') if mods.ctrl => self.copy_selection(assets, false),
@@ -167,6 +204,7 @@ impl MapEditor {
             Key::Char('h') => self.set_tool(Tool::Pan),
             Key::Char('f') => self.set_tool(Tool::Fill),
             Key::Char('c') => self.set_tool(Tool::Circle),
+            Key::Tab => self.set_fullscreen(!self.fullscreen),
             _ => {}
         }
     }
@@ -198,7 +236,7 @@ impl MapEditor {
                 }
             }
             Tool::Select => {
-                if mouse.left_pressed && mouse.y >= VIEW_Y && mouse.y <= VIEW_BOTTOM {
+                if mouse.left_pressed && mouse.y >= self.view_y() && mouse.y <= self.view_bottom() {
                     let (cx, cy) = self.clamped_cell();
                     if self.point_in_selection(cx, cy) {
                         let s = self.sel.unwrap();
@@ -259,7 +297,7 @@ impl MapEditor {
                 }
             }
             Tool::Fill => {
-                if mouse.left_pressed && mouse.y >= VIEW_Y && mouse.y <= VIEW_BOTTOM {
+                if mouse.left_pressed && mouse.y >= self.view_y() && mouse.y <= self.view_bottom() {
                     let (cx, cy) = self.clamped_cell();
                     self.drag = Drag::Shape { ax: cx, ay: cy };
                 }
@@ -280,7 +318,7 @@ impl MapEditor {
                 }
             }
             Tool::Circle => {
-                if mouse.left_pressed && mouse.y >= VIEW_Y && mouse.y <= VIEW_BOTTOM {
+                if mouse.left_pressed && mouse.y >= self.view_y() && mouse.y <= self.view_bottom() {
                     let (cx, cy) = self.clamped_cell();
                     self.drag = Drag::Shape { ax: cx, ay: cy };
                 }
@@ -305,8 +343,8 @@ impl MapEditor {
                     if mouse.left {
                         self.cam_x =
                             (acx + (amx - mouse.x) / 8).clamp(0, MAP_W as i32 - VIEW_TILES_X);
-                        self.cam_y =
-                            (acy + (amy - mouse.y) / 8).clamp(0, MAP_H as i32 - VIEW_TILES_Y);
+                        self.cam_y = (acy + (amy - mouse.y) / 8)
+                            .clamp(0, MAP_H as i32 - self.view_tiles_y());
                     } else {
                         self.drag = Drag::None;
                     }
@@ -318,6 +356,19 @@ impl MapEditor {
     /// Handle a click on the toolbar, page dots, or sprite sheet. Returns true
     /// if the click was consumed.
     fn handle_chrome_click(&mut self, m: &Mouse) -> bool {
+        // View-toggle buttons (top-left), available in both views.
+        if m.over(4, 0, 12, 7) {
+            self.set_fullscreen(false);
+            return true;
+        } else if m.over(13, 0, 22, 7) {
+            self.set_fullscreen(true);
+            return true;
+        }
+        // Fullscreen hides the toolbar, page dots and sheet, so nothing else in
+        // the chrome is clickable there.
+        if self.fullscreen {
+            return false;
+        }
         // Tool icons.
         for (i, (tool, _)) in TOOLS.iter().enumerate() {
             let x = tool_x(i);
@@ -345,12 +396,16 @@ impl MapEditor {
     }
 
     pub fn draw(&self, fb: &mut Framebuffer, assets: &Assets) {
-        self.draw_toolbar(fb, assets);
+        if !self.fullscreen {
+            self.draw_toolbar(fb, assets);
+        }
         self.draw_view(fb, assets);
         self.draw_selection(fb);
         self.draw_shape_preview(fb);
-        fb.rectfill(0, SEP_Y, 127, SEP_Y + 1, col::LIGHT_GREY);
-        self.draw_sheet(fb, assets);
+        if !self.fullscreen {
+            fb.rectfill(0, SEP_Y, 127, SEP_Y + 1, col::LIGHT_GREY);
+            self.draw_sheet(fb, assets);
+        }
         self.draw_status(fb, assets);
     }
 
@@ -397,21 +452,21 @@ impl MapEditor {
     }
 
     fn draw_view(&self, fb: &mut Framebuffer, assets: &Assets) {
-        fb.rectfill(0, VIEW_Y, 127, VIEW_BOTTOM, col::BLACK);
+        fb.rectfill(0, self.view_y(), 127, self.view_bottom(), col::BLACK);
         fb.map(
             &assets.map,
             &assets.sprites,
             self.cam_x,
             self.cam_y,
             0,
-            VIEW_Y,
+            self.view_y(),
             VIEW_TILES_X,
-            VIEW_TILES_Y,
+            self.view_tiles_y(),
             0,
         );
         if let Some((cx, cy)) = self.hovered_cell() {
             let sx = (cx - self.cam_x) * 8;
-            let sy = VIEW_Y + (cy - self.cam_y) * 8;
+            let sy = self.view_y() + (cy - self.cam_y) * 8;
             fb.rect(sx, sy, sx + 7, sy + 7, col::WHITE);
         }
     }
@@ -421,12 +476,13 @@ impl MapEditor {
             .selection_in_progress()
             .or_else(|| self.sel.map(|s| (s.x, s.y, s.w, s.h)));
         let Some((x, y, w, h)) = rect else { return };
+        let (view_y, view_bottom) = (self.view_y(), self.view_bottom());
         let sx = (x - self.cam_x) * 8;
-        let sy = VIEW_Y + (y - self.cam_y) * 8;
+        let sy = view_y + (y - self.cam_y) * 8;
         let (x0, y0, x1, y1) = (sx, sy, sx + w * 8 - 1, sy + h * 8 - 1);
         let mut i = 0i32;
         let ant = |fb: &mut Framebuffer, px: i32, py: i32, i: &mut i32| {
-            if (0..=127).contains(&px) && (VIEW_Y..=VIEW_BOTTOM).contains(&py) {
+            if (0..=127).contains(&px) && (view_y..=view_bottom).contains(&py) {
                 let on = ((*i + (self.frame / 4) as i32) / 2) % 2 == 0;
                 fb.pset(px, py, if on { col::WHITE } else { col::BLACK });
             }
@@ -494,6 +550,10 @@ impl MapEditor {
 
     /// The tool whose toolbar icon is under the cursor, if any.
     fn tool_under_cursor(&self) -> Option<Tool> {
+        // The toolbar is hidden in fullscreen, so no tool can be under the cursor.
+        if self.fullscreen {
+            return None;
+        }
         TOOLS.iter().enumerate().find_map(|(i, (tool, _))| {
             let x = tool_x(i);
             let over =
@@ -505,8 +565,8 @@ impl MapEditor {
     /// The cursor's map cell, clamped to the visible view (for drags).
     fn clamped_cell(&self) -> (i32, i32) {
         let mx = self.mx.clamp(0, 127);
-        let my = self.my.clamp(VIEW_Y, VIEW_BOTTOM);
-        (self.cam_x + mx / 8, self.cam_y + (my - VIEW_Y) / 8)
+        let my = self.my.clamp(self.view_y(), self.view_bottom());
+        (self.cam_x + mx / 8, self.cam_y + (my - self.view_y()) / 8)
     }
 
     /// The rectangle (x, y, w, h) of an in-progress selection drag, if any.
@@ -627,18 +687,18 @@ impl MapEditor {
         let (cx, cy) = self.clamped_cell();
         let (x, y, w, h) = normalize_rect(ax, ay, cx, cy);
         let sx = (x - self.cam_x) * 8;
-        let sy = VIEW_Y + (y - self.cam_y) * 8;
+        let sy = self.view_y() + (y - self.cam_y) * 8;
         fb.rect(sx, sy, sx + w * 8 - 1, sy + h * 8 - 1, col::WHITE);
     }
 
     /// The map cell under the cursor, if the cursor is over the view.
     fn hovered_cell(&self) -> Option<(i32, i32)> {
-        if self.mx < 0 || self.mx > 127 || self.my < VIEW_Y || self.my > VIEW_BOTTOM {
+        if self.mx < 0 || self.mx > 127 || self.my < self.view_y() || self.my > self.view_bottom() {
             return None;
         }
         Some((
             self.cam_x + self.mx / 8,
-            self.cam_y + (self.my - VIEW_Y) / 8,
+            self.cam_y + (self.my - self.view_y()) / 8,
         ))
     }
 }
@@ -1004,5 +1064,56 @@ mod tests {
         // No stray band between the sheet and the status bar (which starts at
         // HEIGHT - 8); the sheet's last row is the row directly above it.
         assert_eq!(SHEET_BOTTOM + 1, rico8_runtime::fb::HEIGHT - 8);
+    }
+
+    #[test]
+    fn fullscreen_expands_the_viewport() {
+        let mut ed = MapEditor::new();
+        assert_eq!(ed.view_y(), VIEW_Y);
+        assert_eq!(ed.view_tiles_y(), VIEW_TILES_Y);
+        ed.set_fullscreen(true);
+        assert!(ed.is_fullscreen());
+        assert_eq!(ed.view_y(), 8);
+        assert_eq!(ed.view_tiles_y(), 14);
+        assert_eq!(ed.view_bottom(), 119);
+    }
+
+    #[test]
+    fn toggling_fullscreen_clamps_the_camera() {
+        let mut ed = MapEditor::new();
+        ed.cam_y = MAP_H as i32 - VIEW_TILES_Y; // 56, the normal-view max.
+        ed.set_fullscreen(true);
+        assert_eq!(ed.cam_y, MAP_H as i32 - 14, "clamped to the taller view");
+    }
+
+    #[test]
+    fn clicking_view_buttons_toggles_fullscreen() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.tick(&press(15, 2), &mut a); // fullscreen button
+        assert!(ed.is_fullscreen());
+        ed.tick(&press(6, 2), &mut a); // normal button
+        assert!(!ed.is_fullscreen());
+    }
+
+    #[test]
+    fn tab_toggles_fullscreen() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.key(Key::Tab, Mods::default(), &mut a);
+        assert!(ed.is_fullscreen());
+        ed.key(Key::Tab, Mods::default(), &mut a);
+        assert!(!ed.is_fullscreen());
+    }
+
+    #[test]
+    fn fullscreen_draw_paints_through_the_taller_viewport() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.set_fullscreen(true);
+        ed.brush = 7;
+        // In fullscreen the view top is y8; screen (1, 9) is map cell (0, 0).
+        ed.tick(&press(1, 9), &mut a);
+        assert_eq!(a.map.get(0, 0), 7);
     }
 }
