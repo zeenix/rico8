@@ -33,7 +33,7 @@ const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
 const MAX_PAYLOAD: usize = 64 * 1024 * 1024;
 /// Hard cap on a cart's compiled wasm module: 128 K, shared with the memory
 /// and fuel limits. Keeps carts small and shareable and rations dependency
-/// bloat. Enforced on both save and load via [`validate`].
+/// bloat. Enforced on both save and load.
 pub const MAX_WASM_SIZE: usize = 131_072;
 
 /// Everything inside a cartridge.
