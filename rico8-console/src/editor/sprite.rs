@@ -36,6 +36,9 @@ pub struct SpriteEditor {
     tool: Tool,
     page: u32,
     fullscreen: bool,
+    /// Last-known cursor position in screen pixels (for hover / status bar).
+    mx: i32,
+    my: i32,
 }
 
 impl SpriteEditor {
@@ -46,6 +49,8 @@ impl SpriteEditor {
             tool: Tool::Pencil,
             page: 0,
             fullscreen: false,
+            mx: -16,
+            my: -16,
         }
     }
 
@@ -141,6 +146,8 @@ impl SpriteEditor {
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
+        self.mx = mouse.x;
+        self.my = mouse.y;
         let m = *mouse;
         // View-toggle buttons in the top bar (normal | fullscreen).
         if m.left_pressed && m.y < 8 {
@@ -226,7 +233,7 @@ impl SpriteEditor {
             let color = if *tool == self.tool {
                 col::WHITE
             } else {
-                col::DARK_PURPLE
+                col::LAVENDER
             };
             if *tool == self.tool {
                 fb.rectfill(x - 1, 9, x + 8, 17, col::BLACK);
@@ -262,6 +269,7 @@ impl SpriteEditor {
             false,
         );
         fb.reset_transparency();
+        self.draw_canvas_hover(fb);
 
         // Palette grid.
         for c in 0u8..16 {
@@ -283,7 +291,7 @@ impl SpriteEditor {
                 x + 2,
                 FLAGS.1 + 2,
                 2,
-                if on { col::RED } else { col::DARK_PURPLE },
+                if on { col::RED } else { col::LAVENDER },
             );
         }
 
@@ -293,7 +301,7 @@ impl SpriteEditor {
             let c = if p == self.page {
                 col::WHITE
             } else {
-                col::DARK_PURPLE
+                col::LAVENDER
             };
             fb.rectfill(x, PAGE_BTNS.1, x + 4, PAGE_BTNS.1 + 4, c);
         }
@@ -325,7 +333,7 @@ impl SpriteEditor {
             fb.rect(x, y, x + 7, y + 7, col::WHITE);
         }
 
-        ui::status_bar(fb, &format!("Spr {:03} flags {:08b}", self.sprite, flags));
+        self.draw_status(fb, assets);
     }
 
     /// Fullscreen view: the selected 8x8 sprite magnified to fill the editor
@@ -349,8 +357,72 @@ impl SpriteEditor {
             false,
         );
         fb.reset_transparency();
-        let flags = assets.sprites.flags(self.sprite);
-        ui::status_bar(fb, &format!("Spr {:03} flags {:08b}", self.sprite, flags));
+        self.draw_canvas_hover(fb);
+        self.draw_status(fb, assets);
+    }
+
+    /// Outline the magnified pixel block under the cursor, snapped to the block
+    /// grid and clamped to the canvas — the pixel-editing selection marker. Not
+    /// shown over the sheet strip, which is a sprite picker, not an edit grid.
+    fn draw_canvas_hover(&self, fb: &mut Framebuffer) {
+        let Some((px, py)) = self.canvas_pixel_under_cursor() else {
+            return;
+        };
+        let (cx, cy, z) = self.canvas();
+        let (bx, by) = (cx + px * z, cy + py * z);
+        fb.rect(bx, by, bx + z - 1, by + z - 1, col::WHITE);
+    }
+
+    /// The tool whose toolbar icon is under the cursor, if any.
+    fn tool_under_cursor(&self) -> Option<Tool> {
+        // The toolbar is hidden in fullscreen, so no tool can be under the cursor.
+        if self.fullscreen {
+            return None;
+        }
+        [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Picker]
+            .iter()
+            .enumerate()
+            .find_map(|(i, &tool)| {
+                let x = 3 + i as i32 * 10;
+                (self.mx >= x && self.mx <= x + 7 && self.my >= 9 && self.my <= 17).then_some(tool)
+            })
+    }
+
+    /// The sprite-local pixel (0..8, 0..8) under the cursor, if any.
+    fn canvas_pixel_under_cursor(&self) -> Option<(i32, i32)> {
+        let (cx, cy, z) = self.canvas();
+        let size = z * 8;
+        if self.mx >= cx && self.mx < cx + size && self.my >= cy && self.my < cy + size {
+            Some(((self.mx - cx) / z, (self.my - cy) / z))
+        } else {
+            None
+        }
+    }
+
+    /// Render the status bar: tool label when hovering a tool icon, pixel info
+    /// when hovering the canvas, sprite/flags summary otherwise.
+    fn draw_status(&self, fb: &mut Framebuffer, assets: &Assets) {
+        let text = if let Some(tool) = self.tool_under_cursor() {
+            tool_label(tool).to_string()
+        } else if let Some((px, py)) = self.canvas_pixel_under_cursor() {
+            let (ox, oy) = self.sheet_origin();
+            let c = assets.sprites.get(ox + px, oy + py);
+            format!("#{:03} x{} y{} c{:02}", self.sprite, px, py, c)
+        } else {
+            let flags = assets.sprites.flags(self.sprite);
+            format!("Spr {:03} flags {:08b}", self.sprite, flags)
+        };
+        ui::status_bar(fb, &text);
+    }
+}
+
+/// The tool's display name and keyboard shortcut, shown in the status bar.
+fn tool_label(tool: Tool) -> &'static str {
+    match tool {
+        Tool::Pencil => "Pencil (p)",
+        Tool::Eraser => "Eraser (e)",
+        Tool::Fill => "Fill (f)",
+        Tool::Picker => "Picker (i)",
     }
 }
 
@@ -401,6 +473,17 @@ mod tests {
     }
 
     #[test]
+    fn inactive_page_dot_is_lavender() {
+        // Page 0 is active (white) by default; page 1 is inactive and must be
+        // lavender on the dark-grey panel.
+        let ed = SpriteEditor::new();
+        let a = Assets::default();
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a);
+        assert_eq!(fb.pget(PAGE_BTNS.0 + 6, PAGE_BTNS.1), col::LAVENDER);
+    }
+
+    #[test]
     fn fullscreen_drag_draws_through_the_zoomed_canvas() {
         // Default sprite is 1 (sheet origin (8, 0)), pencil, colour 7. In
         // fullscreen the canvas origin is (8, 8) at 14x zoom, so screen (9, 9)
@@ -410,5 +493,88 @@ mod tests {
         ed.key(Key::Tab, Mods::default(), &mut a);
         ed.tick(&press(9, 9), &mut a);
         assert_eq!(a.sprites.get(8, 0), 7);
+    }
+
+    #[test]
+    fn hovering_a_tool_reports_its_label() {
+        // Eraser is slot 1: x = 3 + 1*10 = 13, y in 9..=17.
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        let hover = Mouse {
+            x: 13,
+            y: 13,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        // Hovering does not select the tool.
+        assert_eq!(ed.tool, Tool::Pencil);
+        assert_eq!(ed.tool_under_cursor(), Some(Tool::Eraser));
+        assert_eq!(tool_label(Tool::Eraser), "Eraser (e)");
+    }
+
+    #[test]
+    fn tool_under_cursor_is_none_in_fullscreen() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        // Toggle fullscreen.
+        ed.key(Key::Tab, Mods::default(), &mut a);
+        // Hover where the Eraser icon would be in normal view.
+        let hover = Mouse {
+            x: 13,
+            y: 13,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        assert_eq!(ed.tool_under_cursor(), None);
+    }
+
+    #[test]
+    fn canvas_pixel_maps_screen_to_sprite_pixel() {
+        // Normal view: canvas origin (3, 20), zoom 8.
+        // Screen (3 + 8*2 + 1, 20 + 8*3 + 1) = (20, 45) -> sprite pixel (2, 3).
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        let hover = Mouse {
+            x: 3 + 8 * 2 + 1,
+            y: 20 + 8 * 3 + 1,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        assert_eq!(ed.canvas_pixel_under_cursor(), Some((2, 3)));
+    }
+
+    #[test]
+    fn canvas_hover_outlines_the_snapped_pixel_block() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        // Hover sprite pixel (2, 3): canvas origin (3, 20), zoom 8 -> block
+        // top-left (3 + 2*8, 20 + 3*8) = (19, 44).
+        let hover = Mouse {
+            x: 3 + 8 * 2 + 1,
+            y: 20 + 8 * 3 + 1,
+            ..Default::default()
+        };
+        ed.tick(&hover, &mut a);
+        let mut fb = Framebuffer::new();
+        ed.draw(&mut fb, &a);
+        // The snapped block's top-left corner is on the white outline; the pixel
+        // just left of it (the neighbouring block) is not — the marker sticks to
+        // one block and never bleeds into the adjacent one.
+        assert_eq!(fb.pget(19, 44), col::WHITE);
+        assert_ne!(fb.pget(18, 44), col::WHITE);
+    }
+
+    #[test]
+    fn no_canvas_hover_when_over_the_palette() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        // Over the palette, not the canvas: no pixel-block marker is produced.
+        let on_palette = Mouse {
+            x: PAL.0 + 1,
+            y: PAL.1 + 1,
+            ..Default::default()
+        };
+        ed.tick(&on_palette, &mut a);
+        assert_eq!(ed.canvas_pixel_under_cursor(), None);
     }
 }
