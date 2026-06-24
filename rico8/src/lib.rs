@@ -331,17 +331,27 @@ impl Context {
     }
 
     /// A random float in `[0, max)`.
-    pub fn rnd(&mut self, max: f32) -> f32 {
+    pub fn random(&mut self, max: f32) -> f32 {
         unsafe { ffi::rnd() * max }
     }
 
+    /// Alias for [`Context::random`].
+    pub fn rnd(&mut self, max: f32) -> f32 {
+        self.random(max)
+    }
+
     /// A random integer in `[0, max)` (0 when `max <= 0`).
-    pub fn rndi(&mut self, max: i32) -> i32 {
+    pub fn random_int(&mut self, max: i32) -> i32 {
         if max <= 0 {
             0
         } else {
-            (self.rnd(max as f32) as i32).min(max - 1)
+            (self.random(max as f32) as i32).min(max - 1)
         }
+    }
+
+    /// Alias for [`Context::random_int`].
+    pub fn rndi(&mut self, max: i32) -> i32 {
+        self.random_int(max)
     }
 
     /// Seed the random sequence for deterministic runs.
