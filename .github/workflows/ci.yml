@@ -83,3 +83,26 @@ jobs:
 
       - run: cargo test --workspace
       - run: cargo test -p rico8-player --no-default-features --features kms
+
+  doc:
+    runs-on: ubuntu-latest
+    # Fail on any rustdoc warning (e.g. a broken intra-doc link) so the SDK and
+    # runtime documentation stays clean.
+    env:
+      RUSTDOCFLAGS: -D warnings
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      # rico8-runtime's default `audio` feature links ALSA via cpal, so its docs
+      # need the headers just like the clippy and test jobs.
+      - name: Install ALSA headers
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libasound2-dev
+
+      # --no-deps keeps the gate on our own docs: a noisy dependency must not
+      # trip -D warnings.
+      - run: cargo doc --no-deps --all-features -p rico8
+      - run: cargo doc --no-deps --all-features -p rico8-runtime
