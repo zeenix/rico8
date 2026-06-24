@@ -72,7 +72,7 @@ fn floor_i32(v: f32) -> i32 {
 ///
 /// Hold the full-precision position for game logic, advance it each frame with
 /// [`move_by`](Body::move_by), and draw at [`draw_x`](Body::draw_x) /
-/// [`draw_y`](Body::draw_y). See the [module docs](self) for the why.
+/// [`draw_y`](Body::draw_y).
 ///
 /// The drawn pixel never differs from `floor(`[`x`](Body::x)`)` /
 /// `floor(`[`y`](Body::y)`)` by more than one pixel, and that difference does
