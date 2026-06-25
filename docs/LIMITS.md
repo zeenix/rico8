@@ -32,12 +32,12 @@ stops the cart immediately and shows a "ran out of memory" error screen. The
 player can then return to the console and you can inspect the output.
 
 The shadow-stack reserve is owned by the cart itself: each cart's
-`.cargo/config.toml` carries a `stack-size=49152` rustflag that sets it to
-48 KiB by default. You can tune it up or down by editing that line. The
+`.cargo/config.toml` carries a `stack-size=32768` rustflag that sets it to
+32 KiB by default. You can tune it up or down by editing that line. The
 console builds straight and honors whatever value is set; a value large enough
 to push the cart's initial memory to 2 pages (128 KiB, no headroom) is
 reported as a warning, and anything over the cap is an error. With the
-default 48 KiB reserve, roughly 79 KiB of heap headroom remains for carts
+default 32 KiB reserve, roughly 95 KiB of heap headroom remains for carts
 that opt into `std` and a heap allocator. Simple `no_std` carts use a small
 fraction of this; even a heap-using cart typically stays well inside the budget.
 
