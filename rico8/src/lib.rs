@@ -57,6 +57,7 @@ static RICO8_ALLOC: memstat::TrackingAlloc = memstat::TrackingAlloc;
 
 use crate::flags::bitflag_enum;
 pub use crate::flags::{BitFlag, BitFlags, UnknownBits};
+use core::ops::{Bound, RangeBounds};
 pub use glue::__internal;
 pub use motion::Body;
 pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
@@ -330,28 +331,40 @@ impl Context {
         unsafe { ffi::time() }
     }
 
-    /// A random float in `[0, max)`.
-    pub fn random(&mut self, max: f32) -> f32 {
-        unsafe { ffi::rnd() * max }
+    /// A uniformly random `f32` from `range`.
+    ///
+    /// Accepts any range syntax — exclusive (`a..b`), inclusive (`a..=b`), or open on
+    /// either end. An open lower bound is `f32::MIN`, an open upper bound is `f32::MAX`;
+    /// bounds may be negative. A reversed or empty range yields its lower bound.
+    pub fn random<R>(&mut self, range: R) -> f32
+    where
+        R: RangeBounds<f32>,
+    {
+        let (lo, hi) = f32_bounds(range);
+        sample_f32(lo, hi, unsafe { ffi::rnd() })
     }
 
-    /// Alias for [`Context::random`].
+    /// Scalar shorthand for `random(0.0..max)`.
     pub fn rnd(&mut self, max: f32) -> f32 {
-        self.random(max)
+        self.random(0.0..max)
     }
 
-    /// A random integer in `[0, max)` (0 when `max <= 0`).
-    pub fn random_int(&mut self, max: i32) -> i32 {
-        if max <= 0 {
-            0
-        } else {
-            (self.random(max as f32) as i32).min(max - 1)
-        }
+    /// A uniformly random `i32` from `range`.
+    ///
+    /// Accepts any range syntax — exclusive (`a..b`), inclusive (`a..=b`), or open on
+    /// either end. An open lower bound is `i32::MIN`, an open upper bound is `i32::MAX`;
+    /// bounds may be negative. A reversed or empty range yields its lower bound.
+    pub fn random_integer<R>(&mut self, range: R) -> i32
+    where
+        R: RangeBounds<i32>,
+    {
+        let (lo, count) = i32_bounds(range);
+        sample_i32(lo, count, unsafe { ffi::rnd() })
     }
 
-    /// Alias for [`Context::random_int`].
+    /// Scalar shorthand for `random_integer(0..max)`.
     pub fn rndi(&mut self, max: i32) -> i32 {
-        self.random_int(max)
+        self.random_integer(0..max)
     }
 
     /// Seed the random sequence for deterministic runs.
@@ -821,6 +834,66 @@ macro_rules! logf {
     }};
 }
 
+/// The `(lo, hi)` of a float range; an open lower end is `f32::MIN`, an open upper
+/// end is `f32::MAX`.
+fn f32_bounds<R>(range: R) -> (f32, f32)
+where
+    R: RangeBounds<f32>,
+{
+    let lo = match range.start_bound() {
+        Bound::Included(&v) | Bound::Excluded(&v) => v,
+        Bound::Unbounded => f32::MIN,
+    };
+    let hi = match range.end_bound() {
+        Bound::Included(&v) | Bound::Excluded(&v) => v,
+        Bound::Unbounded => f32::MAX,
+    };
+    (lo, hi)
+}
+
+/// The `(lo, count)` of an integer range — the lower bound and the number of distinct
+/// values, in `i64` so the full `i32` span doesn't overflow. An open lower end is
+/// `i32::MIN`, an open upper end is `i32::MAX` (inclusive). `count <= 0` is a reversed
+/// or empty range.
+fn i32_bounds<R>(range: R) -> (i64, i64)
+where
+    R: RangeBounds<i32>,
+{
+    let lo = match range.start_bound() {
+        Bound::Included(&v) => v as i64,
+        Bound::Excluded(&v) => v as i64 + 1,
+        Bound::Unbounded => i32::MIN as i64,
+    };
+    let hi = match range.end_bound() {
+        Bound::Included(&v) => v as i64,
+        Bound::Excluded(&v) => v as i64 - 1,
+        Bound::Unbounded => i32::MAX as i64,
+    };
+    (lo, hi - lo + 1)
+}
+
+/// Map a raw `[0, 1)` draw onto `[lo, hi)`. A reversed or empty span yields `lo`.
+/// Computed in `f64` so a span wider than `f32::MAX` (an open-ended range) stays finite.
+fn sample_f32(lo: f32, hi: f32, raw: f32) -> f32 {
+    let width = hi as f64 - lo as f64;
+    if width <= 0.0 {
+        lo
+    } else {
+        (lo as f64 + raw as f64 * width) as f32
+    }
+}
+
+/// Map a raw `[0, 1)` draw onto `count` integers starting at `lo`. `count <= 0` (a
+/// reversed or empty range) yields `lo`. Arithmetic is `i64` so the full `i32` span
+/// (count up to 2^32) doesn't overflow.
+fn sample_i32(lo: i64, count: i64, raw: f32) -> i32 {
+    if count <= 0 {
+        return lo as i32;
+    }
+    let idx = ((raw as f64 * count as f64) as i64).min(count - 1);
+    (lo + idx) as i32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -956,6 +1029,85 @@ mod tests {
         // Native stubs read 0.
         assert_eq!(ctx.sprite_pixel(0, 0), Color::from_index(0));
         assert_eq!(ctx.sprite_pixel(0, 0), ctx.sget(0, 0));
+    }
+
+    #[test]
+    fn f32_bounds_fills_open_ends_with_extremes() {
+        assert_eq!(f32_bounds(2.0..5.0), (2.0, 5.0));
+        assert_eq!(f32_bounds(2.0..=5.0), (2.0, 5.0));
+        assert_eq!(f32_bounds(-5.0..-1.0), (-5.0, -1.0));
+        assert_eq!(f32_bounds(..44.0), (f32::MIN, 44.0));
+        assert_eq!(f32_bounds(0.0..), (0.0, f32::MAX));
+        assert_eq!(f32_bounds(..), (f32::MIN, f32::MAX));
+    }
+
+    #[test]
+    fn i32_bounds_counts_and_fills_open_ends() {
+        assert_eq!(i32_bounds(0..10), (0, 10));
+        assert_eq!(i32_bounds(1..=6), (1, 6));
+        assert_eq!(i32_bounds(-10..0), (-10, 10));
+        assert_eq!(i32_bounds(-5..=5), (-5, 11));
+        // Open ends use i32::MIN / i32::MAX (upper inclusive).
+        assert_eq!(i32_bounds(5..), (5, i32::MAX as i64 - 5 + 1));
+        assert_eq!(i32_bounds(..10), (i32::MIN as i64, 10 - i32::MIN as i64));
+        assert_eq!(
+            i32_bounds(..),
+            (i32::MIN as i64, i32::MAX as i64 - i32::MIN as i64 + 1)
+        );
+        // Reversed -> non-positive count (built at runtime to avoid
+        // clippy::reversed_empty_ranges); equal-bound empty is fine as a literal.
+        let (a, b): (i32, i32) = (5, 2);
+        assert_eq!(i32_bounds(a..b), (5, -3));
+        assert_eq!(i32_bounds(5..5), (5, 0));
+    }
+
+    #[test]
+    fn sample_f32_maps_guards_and_stays_finite() {
+        assert_eq!(sample_f32(0.0, 10.0, 0.0), 0.0);
+        assert!((sample_f32(0.0, 10.0, 0.5) - 5.0).abs() < 1e-5);
+        assert_eq!(sample_f32(-5.0, 5.0, 0.0), -5.0);
+        assert!(sample_f32(-5.0, 5.0, 0.5).abs() < 1e-5);
+        // Reversed / empty -> lo.
+        assert_eq!(sample_f32(5.0, 2.0, 0.5), 5.0);
+        assert_eq!(sample_f32(3.0, 3.0, 0.5), 3.0);
+        // Full f32 span stays finite (f64 intermediate); midpoint ~ 0.
+        let mid = sample_f32(f32::MIN, f32::MAX, 0.5);
+        assert!(mid.is_finite());
+        assert!(mid.abs() < 1e30);
+    }
+
+    #[test]
+    fn sample_i32_maps_clamps_and_guards() {
+        assert_eq!(sample_i32(0, 10, 0.0), 0);
+        assert_eq!(sample_i32(0, 10, 0.999_999), 9);
+        assert_eq!(sample_i32(0, 10, 0.55), 5);
+        // Inclusive top reachable: lo=1, count=6 -> 6.
+        assert_eq!(sample_i32(1, 6, 0.999_999), 6);
+        // Negative bounds.
+        assert_eq!(sample_i32(-10, 10, 0.999_999), -1);
+        // Reversed / empty -> lo.
+        assert_eq!(sample_i32(5, -3, 0.5), 5);
+        assert_eq!(sample_i32(5, 0, 0.5), 5);
+        // Full i32 span (count = 2^32) doesn't overflow.
+        let full = i32::MAX as i64 - i32::MIN as i64 + 1;
+        assert_eq!(sample_i32(i32::MIN as i64, full, 0.0), i32::MIN);
+        assert_eq!(sample_i32(i32::MIN as i64, full, 0.5), 0);
+    }
+
+    #[test]
+    fn context_random_methods_forward() {
+        let mut ctx = Context { _private: () };
+        // Native ffi::rnd() stub returns 0.0, so each call yields the lower bound.
+        assert_eq!(ctx.random(2.0..5.0), 2.0);
+        assert_eq!(ctx.random(2.0..=5.0), 2.0);
+        assert_eq!(ctx.random(0.0..), 0.0);
+        assert_eq!(ctx.random(..44.0), f32::MIN);
+        assert_eq!(ctx.random_integer(3..9), 3);
+        assert_eq!(ctx.random_integer(3..=9), 3);
+        assert_eq!(ctx.random_integer(5..), 5);
+        assert_eq!(ctx.random_integer(..10), i32::MIN);
+        assert_eq!(ctx.rnd(5.0), 0.0);
+        assert_eq!(ctx.rndi(10), 0);
     }
 
     #[test]
