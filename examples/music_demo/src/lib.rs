@@ -4,6 +4,8 @@
 
 use rico8::*;
 
+game!(MusicDemo { music: None, t: 0 });
+
 struct MusicDemo {
     music: Option<PlayingMusic>,
     t: u32,
@@ -45,5 +47,3 @@ impl Game for MusicDemo {
         }
     }
 }
-
-rico8::game!(MusicDemo { music: None, t: 0 });

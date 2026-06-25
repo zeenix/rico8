@@ -4,6 +4,14 @@
 
 use rico8::*;
 
+game!(SpriteMove {
+    x: 60.0,
+    y: 64.0,
+    flip: false,
+    walking: false,
+    frame: 0,
+});
+
 struct SpriteMove {
     x: f32,
     y: f32,
@@ -50,11 +58,3 @@ impl Game for SpriteMove {
         gfx.sprite_ext(SpriteId(frame), self.x, self.y, 1.0, 1.0, self.flip, false);
     }
 }
-
-rico8::game!(SpriteMove {
-    x: 60.0,
-    y: 64.0,
-    flip: false,
-    walking: false,
-    frame: 0,
-});

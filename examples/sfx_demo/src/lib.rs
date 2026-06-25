@@ -4,6 +4,8 @@
 
 use rico8::*;
 
+game!(SfxDemo { last: None, t: 0 });
+
 struct SfxDemo {
     last: Option<u8>,
     t: u32,
@@ -40,5 +42,3 @@ impl Game for SfxDemo {
         gfx.print("Press arrow keys", 32.0, 116.0, Color::LIGHT_GREY);
     }
 }
-
-rico8::game!(SfxDemo { last: None, t: 0 });

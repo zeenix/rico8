@@ -16,6 +16,13 @@
 //! count — so the cap trips at a predictable level.
 use rico8::*;
 
+game!(Stress {
+    heap: Vec::new(),
+    stack_n: 0,
+    cpu_n: 0,
+    checksum: 0
+});
+
 /// Bytes per heap block.
 const HEAP_BLOCK: usize = 4096;
 /// Bytes of shadow stack burned per recursion level.
@@ -66,7 +73,7 @@ impl Game for Stress {
         // Draw in the vertical middle so the F1 stats overlay (top corners)
         // never covers the readouts.
         gfx.print("Stress  F1 = stats", 2.0, 50.0, Color::WHITE);
-        rico8::printf!(
+        printf!(
             gfx,
             2.0,
             62.0,
@@ -74,7 +81,7 @@ impl Game for Stress {
             "Heap blk  (U/D): {}",
             self.heap.len()
         );
-        rico8::printf!(
+        printf!(
             gfx,
             2.0,
             70.0,
@@ -82,7 +89,7 @@ impl Game for Stress {
             "Stack frm (O/X): {}",
             self.stack_n
         );
-        rico8::printf!(
+        printf!(
             gfx,
             2.0,
             78.0,
@@ -108,10 +115,3 @@ fn burn_stack(depth: u32) -> u32 {
         here.wrapping_add(burn_stack(depth - 1))
     }
 }
-
-rico8::game!(Stress {
-    heap: Vec::new(),
-    stack_n: 0,
-    cpu_n: 0,
-    checksum: 0
-});

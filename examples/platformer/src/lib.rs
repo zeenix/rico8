@@ -10,6 +10,16 @@
 
 use rico8::*;
 
+game!(Platformer {
+    body: Body::new(16.0, 80.0),
+    vx: 0.0,
+    vy: 0.0,
+    grounded: false,
+    flip: false,
+    coins: 0,
+    frame: 0,
+});
+
 struct Platformer {
     body: Body,
     vx: f32,
@@ -112,16 +122,6 @@ impl Game for Platformer {
             false,
         );
         gfx.camera(0.0, 0.0);
-        rico8::printf!(gfx, 2.0, 2.0, Color::YELLOW, "Coins {}", self.coins);
+        printf!(gfx, 2.0, 2.0, Color::YELLOW, "Coins {}", self.coins);
     }
 }
-
-rico8::game!(Platformer {
-    body: Body::new(16.0, 80.0),
-    vx: 0.0,
-    vy: 0.0,
-    grounded: false,
-    flip: false,
-    coins: 0,
-    frame: 0,
-});
