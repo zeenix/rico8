@@ -35,6 +35,23 @@ const MAX_PAYLOAD: usize = 64 * 1024 * 1024;
 /// and fuel limits. Keeps carts small and shareable and rations dependency
 /// bloat. Enforced on both save and load.
 pub const MAX_WASM_SIZE: usize = 131_072;
+/// One wasm linear-memory page: 64 KiB.
+pub const WASM_PAGE_SIZE: usize = 65_536;
+/// Hard cap on a cart's initial linear memory: 128 K, enforced at load (see
+/// `vm.rs`). Numerically equals `MAX_WASM_SIZE` but is a distinct limit.
+pub const MEMORY_CAP: usize = 131_072;
+
+/// The initial linear memory a cart commits at instantiation, in bytes,
+/// read from the wasm's exported `memory` minimum. `None` when the wasm
+/// cannot be parsed or declares no exported `memory`.
+pub fn initial_memory_bytes(wasm: &[u8]) -> Option<usize> {
+    let engine = wasmi::Engine::default();
+    let module = wasmi::Module::new(&engine, wasm).ok()?;
+    match module.get_export("memory")? {
+        wasmi::ExternType::Memory(mt) => Some(mt.minimum() as usize * WASM_PAGE_SIZE),
+        _ => None,
+    }
+}
 
 /// Everything inside a cartridge.
 #[derive(Serialize, Deserialize)]
@@ -407,6 +424,41 @@ pub fn default_label() -> Vec<u8> {
 mod tests {
     use super::*;
     use crate::assets::Note;
+
+    #[test]
+    fn initial_memory_one_page() {
+        let wasm = wat::parse_str("(module (memory (export \"memory\") 1))").unwrap();
+        assert_eq!(initial_memory_bytes(&wasm), Some(65_536));
+    }
+
+    #[test]
+    fn initial_memory_two_pages() {
+        let wasm = wat::parse_str("(module (memory (export \"memory\") 2))").unwrap();
+        assert_eq!(initial_memory_bytes(&wasm), Some(131_072));
+    }
+
+    #[test]
+    fn initial_memory_three_pages() {
+        let wasm = wat::parse_str("(module (memory (export \"memory\") 3))").unwrap();
+        assert_eq!(initial_memory_bytes(&wasm), Some(196_608));
+    }
+
+    #[test]
+    fn initial_memory_no_memory_is_none() {
+        let wasm = wat::parse_str("(module)").unwrap();
+        assert_eq!(initial_memory_bytes(&wasm), None);
+    }
+
+    #[test]
+    fn initial_memory_non_memory_export_is_none() {
+        let wasm = wat::parse_str("(module (func (export \"f\")))").unwrap();
+        assert_eq!(initial_memory_bytes(&wasm), None);
+    }
+
+    #[test]
+    fn initial_memory_invalid_bytes_is_none() {
+        assert_eq!(initial_memory_bytes(&[0, 1, 2, 3]), None);
+    }
 
     fn test_cart() -> Cart {
         let mut assets = Assets::default();

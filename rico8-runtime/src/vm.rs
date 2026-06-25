@@ -34,9 +34,10 @@ const FUEL_PER_CALL: u64 = 131_072;
 
 /// Hard cap on a cart's total linear memory: 128 K, the same number as the
 /// fuel and cart-size limits. Covers static data, the shadow stack and the
-/// heap together (wasm cannot separate them). Carts build with a 32 KiB stack
-/// reserve, leaving up to ~96 KiB for static data and heap above it.
-const MAX_MEMORY: usize = 131_072;
+/// heap together (wasm cannot separate them). Carts default to a 48 KiB stack
+/// reserve (set per-cart in `.cargo/config.toml`), leaving up to ~80 KiB for
+/// static data and heap above it; carts may tune it.
+const MAX_MEMORY: usize = crate::cart::MEMORY_CAP;
 
 /// Everything the host exposes to a running cart.
 pub struct HostState {
