@@ -42,11 +42,7 @@ jobs:
         run: ./.github/build-handheld.sh dist/handheld
 
       - name: Add the example carts to the bundle
-        run: |
-          for manifest in examples/*/Cargo.toml; do
-            ex=$(basename "$(dirname "$manifest")")
-            ./target/release/rico8 export "examples/$ex" "dist/handheld/rico8/carts/$ex.png"
-          done
+        run: ./.github/build-example-carts.sh dist/handheld/rico8/carts
 
       - uses: actions/upload-artifact@v4
         with:
