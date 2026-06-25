@@ -120,11 +120,13 @@ panic = "abort"
             // is what carts compile to anyway. The console still passes
             // `--target wasm32-unknown-unknown` explicitly, which matches.
             //
-            // The rustflags shrink LLVM's 1 MiB shadow-stack reserve to 48 KiB
-            // so the cart's initial linear memory fits the 128 K runtime cap.
-            // Target-scoped so host tooling is unaffected. The console injects
-            // the same flag via RUSTFLAGS when it builds; this keeps plain
-            // `cargo build` consistent.
+            // The rustflags set the shadow-stack reserve to 48 KiB (49152
+            // bytes), the cart's own default. This is tunable: edit
+            // stack-size here to give the cart more or less stack. Target-
+            // scoped so host tooling is unaffected. The console builds
+            // straight and honors whatever value is set here; a value large
+            // enough to push the cart's initial memory over the 128 K cap is
+            // reported as an error at build time.
             "[build]\n\
              target = \"wasm32-unknown-unknown\"\n\
              \n\

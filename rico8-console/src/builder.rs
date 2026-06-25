@@ -48,27 +48,22 @@ pub fn spawn_build(project_dir: &Path) -> BuildJob {
 
 /// Run the build synchronously (used by headless `rico8 build`).
 pub fn run_build(dir: &Path, started: Instant) -> BuildResult {
-    // Shrink the shadow-stack reserve (see project template) so the cart fits
-    // the 128 K memory cap. Appended after any inherited RUSTFLAGS so ours win.
-    let rustflags = match std::env::var("RUSTFLAGS") {
-        Ok(existing) if !existing.is_empty() => {
-            format!("{existing} -C link-arg=-z -C link-arg=stack-size=49152")
-        }
-        _ => "-C link-arg=-z -C link-arg=stack-size=49152".to_string(),
-    };
     let output = Command::new("cargo")
         .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
         .current_dir(dir)
         .env("CARGO_TERM_COLOR", "never")
-        .env("RUSTFLAGS", rustflags)
         .output();
     match output {
-        Ok(out) if out.status.success() => BuildResult {
-            success: true,
-            errors: Vec::new(),
-            warnings: wasm_size_warnings(dir),
-            duration: started.elapsed(),
-        },
+        Ok(out) if out.status.success() => {
+            let (errors, warnings) = post_build_diagnostics(dir);
+            let success = errors.is_empty();
+            BuildResult {
+                success,
+                errors,
+                warnings,
+                duration: started.elapsed(),
+            }
+        }
         Ok(out) => BuildResult {
             success: false,
             errors: extract_errors(&String::from_utf8_lossy(&out.stderr)),
@@ -108,6 +103,63 @@ fn extract_errors(stderr: &str) -> Vec<String> {
         out.push(format!("... and {extra} more lines"));
     }
     out
+}
+
+/// Gather all post-build diagnostics: memory-budget errors/warnings and the
+/// file-size warning. Returns `(errors, warnings)`. On any read or parse
+/// failure, the check is silently skipped — same defensive style as the rest
+/// of the build pipeline.
+fn post_build_diagnostics(dir: &Path) -> (Vec<String>, Vec<String>) {
+    let Ok(project) = Project::load(dir) else {
+        return (Vec::new(), Vec::new());
+    };
+    let Ok(wasm) = std::fs::read(project.wasm_path()) else {
+        return (Vec::new(), Vec::new());
+    };
+
+    let mut errors = Vec::new();
+    let mut warnings = Vec::new();
+
+    // Memory-budget check: the cart must start within the 128 K linear-memory cap.
+    if let Some(initial_bytes) = cart::initial_memory_bytes(&wasm) {
+        let (mem_errors, mem_warnings) = memory_diagnostics(initial_bytes);
+        errors.extend(mem_errors);
+        warnings.extend(mem_warnings);
+    }
+
+    // File-size check: warn now rather than at pack time. The hard gate is at
+    // export, so this stays a warning.
+    warnings.extend(wasm_size_warnings(dir));
+
+    (errors, warnings)
+}
+
+/// Memory-budget diagnostics for a freshly built cart, from its initial linear
+/// memory in bytes. Returns `(errors, warnings)`.
+/// - over the 128K cap (>= 3 pages): error — the cart won't load.
+/// - exactly the cap (2 pages, > 64K): warning — no heap headroom.
+/// - 1 page (<= 64K): nothing.
+fn memory_diagnostics(initial_bytes: usize) -> (Vec<String>, Vec<String>) {
+    let kib = initial_bytes / 1024;
+    if initial_bytes > cart::MEMORY_CAP {
+        (
+            vec![format!(
+                "error: cart needs {kib}K of RAM at startup; over the 128K cap — it won't \
+                 load. Reduce static data or the stack reserve (stack-size in \
+                 .cargo/config.toml)."
+            )],
+            Vec::new(),
+        )
+    } else if initial_bytes > cart::WASM_PAGE_SIZE {
+        (
+            Vec::new(),
+            vec![format!(
+                "warning: cart starts at {kib}K of RAM (both 64K pages) — no heap headroom left."
+            )],
+        )
+    } else {
+        (Vec::new(), Vec::new())
+    }
 }
 
 /// Warn when a freshly built cart exceeds the 128 K export size limit. The
@@ -209,6 +261,37 @@ mod tests {
             warnings[0].contains("128K"),
             "warning should mention 128K: {}",
             warnings[0]
+        );
+    }
+
+    #[test]
+    fn memory_diagnostics_ok_for_one_page() {
+        let (errors, warnings) = memory_diagnostics(65_536);
+        assert_eq!(errors.len(), 0, "expected no errors for 1-page cart");
+        assert_eq!(warnings.len(), 0, "expected no warnings for 1-page cart");
+    }
+
+    #[test]
+    fn memory_diagnostics_warns_at_two_pages() {
+        let (errors, warnings) = memory_diagnostics(131_072);
+        assert_eq!(errors.len(), 0, "expected no errors at the cap");
+        assert_eq!(warnings.len(), 1, "expected one warning at 2 pages");
+        assert!(
+            warnings[0].contains("128K") || warnings[0].contains("128"),
+            "warning should mention the size: {}",
+            warnings[0]
+        );
+    }
+
+    #[test]
+    fn memory_diagnostics_errors_over_two_pages() {
+        let (errors, warnings) = memory_diagnostics(196_608);
+        assert_eq!(errors.len(), 1, "expected one error over the cap");
+        assert_eq!(warnings.len(), 0, "expected no warnings when over the cap");
+        assert!(
+            errors[0].contains("192K") || errors[0].contains("192"),
+            "error should mention the size: {}",
+            errors[0]
         );
     }
 

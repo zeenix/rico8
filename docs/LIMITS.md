@@ -31,11 +31,15 @@ A running cart may use at most 128 KiB of total RAM. Overrunning that budget
 stops the cart immediately and shows a "ran out of memory" error screen. The
 player can then return to the console and you can inspect the output.
 
-Of those 128 KiB, 48 KiB is reserved for LLVM's shadow stack (set via
-`-z stack-size=49152` in the build flags). That leaves roughly 79 KiB of heap
-headroom for carts that opt into `std` and a heap allocator. Simple `no_std`
-carts use a small fraction of this; even a heap-using cart typically stays well
-inside the budget.
+The shadow-stack reserve is owned by the cart itself: each cart's
+`.cargo/config.toml` carries a `stack-size=49152` rustflag that sets it to
+48 KiB by default. You can tune it up or down by editing that line. The
+console builds straight and honors whatever value is set; a value large enough
+to push the cart's initial memory to 2 pages (128 KiB, no headroom) is
+reported as a warning, and anything over the cap is an error. With the
+default 48 KiB reserve, roughly 79 KiB of heap headroom remains for carts
+that opt into `std` and a heap allocator. Simple `no_std` carts use a small
+fraction of this; even a heap-using cart typically stays well inside the budget.
 
 ## Per-frame work — 128 K
 
