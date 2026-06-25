@@ -5,6 +5,12 @@
 
 use rico8::*;
 
+game!(MapDemo {
+    cam_x: 0.0,
+    cam_y: 0.0,
+    solid_only: false,
+});
+
 struct MapDemo {
     cam_x: f32,
     cam_y: f32,
@@ -49,9 +55,3 @@ impl Game for MapDemo {
         }
     }
 }
-
-rico8::game!(MapDemo {
-    cam_x: 0.0,
-    cam_y: 0.0,
-    solid_only: false,
-});

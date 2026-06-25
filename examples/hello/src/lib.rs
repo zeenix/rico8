@@ -4,6 +4,8 @@
 
 use rico8::*;
 
+game!(Hello { x: 60.0, y: 64.0 });
+
 struct Hello {
     x: f32,
     y: f32,
@@ -31,5 +33,3 @@ impl Game for Hello {
         gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::WHITE);
     }
 }
-
-rico8::game!(Hello { x: 60.0, y: 64.0 });
