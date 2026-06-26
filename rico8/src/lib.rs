@@ -824,19 +824,34 @@ impl Graphics {
     /// `(cel_x, cel_y)`, at screen position `(sx, sy)`. With an empty
     /// `layers` set every tile is drawn; otherwise only tiles whose sprite
     /// flags intersect `layers`.
+    ///
+    /// Returns `Err(ZeroSize)` if `cel_w` or `cel_h` is zero.
     #[allow(clippy::too_many_arguments)]
     pub fn map(
         &mut self,
         cel_x: i32,
         cel_y: i32,
-        sx: f32,
-        sy: f32,
-        cel_w: i32,
-        cel_h: i32,
+        sx: i32,
+        sy: i32,
+        cel_w: impl Dim,
+        cel_h: impl Dim,
         layers: impl Into<BitFlags<SpriteFlag>>,
-    ) {
+    ) -> Result<(), ZeroSize> {
+        let cel_w = cel_w.to_nonzero().ok_or(ZeroSize)?;
+        let cel_h = cel_h.to_nonzero().ok_or(ZeroSize)?;
         let layers = layers.into().bits() as u32;
-        unsafe { ffi::map(cel_x, cel_y, sx, sy, cel_w, cel_h, layers) }
+        unsafe {
+            ffi::map(
+                cel_x,
+                cel_y,
+                sx,
+                sy,
+                cel_w.get() as i32,
+                cel_h.get() as i32,
+                layers,
+            )
+        };
+        Ok(())
     }
 }
 
@@ -1096,17 +1111,11 @@ mod tests {
     #[test]
     fn map_accepts_flag_set_forms() {
         let mut gfx = Graphics { _private: () };
-        gfx.map(0, 0, 0.0, 0.0, 16, 16, BitFlags::empty());
-        gfx.map(0, 0, 0.0, 0.0, 16, 16, SpriteFlag::Flag0);
-        gfx.map(
-            0,
-            0,
-            0.0,
-            0.0,
-            16,
-            16,
-            SpriteFlag::Flag0 | SpriteFlag::Flag3,
-        );
+        gfx.map(0, 0, 0, 0, 16, 16, BitFlags::empty()).unwrap();
+        gfx.map(0, 0, 0, 0, 16, 16, SpriteFlag::Flag0).unwrap();
+        gfx.map(0, 0, 0, 0, 16, 16, SpriteFlag::Flag0 | SpriteFlag::Flag3)
+            .unwrap();
+        assert_eq!(gfx.map(0, 0, 0, 0, 0, 16, BitFlags::empty()), Err(ZeroSize));
     }
 
     #[test]

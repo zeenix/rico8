@@ -31,7 +31,7 @@ extern "C" {
     pub fn buttons_down() -> u32;
     pub fn buttons_pressed() -> u32;
     pub fn sprite(n: u32, x: i32, y: i32, w: i32, h: i32, flip_x: i32, flip_y: i32);
-    pub fn map(cel_x: i32, cel_y: i32, sx: f32, sy: f32, cel_w: i32, cel_h: i32, layers: u32);
+    pub fn map(cel_x: i32, cel_y: i32, sx: i32, sy: i32, cel_w: i32, cel_h: i32, layers: u32);
     pub fn map_tile(x: i32, y: i32) -> i32;
     pub fn set_map_tile(x: i32, y: i32, v: u32);
     pub fn sprite_flags(n: u32) -> i32;
@@ -109,8 +109,8 @@ mod stubs {
     pub unsafe fn map(
         _cel_x: i32,
         _cel_y: i32,
-        _sx: f32,
-        _sy: f32,
+        _sx: i32,
+        _sy: i32,
         _cel_w: i32,
         _cel_h: i32,
         _layers: u32,
