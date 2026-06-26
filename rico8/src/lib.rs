@@ -765,22 +765,41 @@ impl Graphics {
     }
 
     /// Draw a sheet rectangle `(sx,sy,sw,sh)` stretched into a screen rectangle
-    /// `(dx,dy,dw,dh)`. Honors transparency and the draw palette.
+    /// `(dx,dy,dw,dh)`. Honors transparency and the draw palette. Errors if any
+    /// size is zero.
     #[allow(clippy::too_many_arguments)]
     pub fn sprite_stretch(
         &mut self,
         sx: i32,
         sy: i32,
-        sw: i32,
-        sh: i32,
-        dx: f32,
-        dy: f32,
-        dw: f32,
-        dh: f32,
+        sw: impl Dim,
+        sh: impl Dim,
+        dx: i32,
+        dy: i32,
+        dw: impl Dim,
+        dh: impl Dim,
         flip_x: bool,
         flip_y: bool,
-    ) {
-        unsafe { ffi::sprite_stretch(sx, sy, sw, sh, dx, dy, dw, dh, flip_x as i32, flip_y as i32) }
+    ) -> Result<(), ZeroSize> {
+        let sw = sw.to_nonzero().ok_or(ZeroSize)?;
+        let sh = sh.to_nonzero().ok_or(ZeroSize)?;
+        let dw = dw.to_nonzero().ok_or(ZeroSize)?;
+        let dh = dh.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::sprite_stretch(
+                sx,
+                sy,
+                sw.get() as i32,
+                sh.get() as i32,
+                dx,
+                dy,
+                dw.get() as i32,
+                dh.get() as i32,
+                flip_x as i32,
+                flip_y as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Alias for [`Graphics::sprite_stretch`].
@@ -789,15 +808,15 @@ impl Graphics {
         &mut self,
         sx: i32,
         sy: i32,
-        sw: i32,
-        sh: i32,
-        dx: f32,
-        dy: f32,
-        dw: f32,
-        dh: f32,
+        sw: impl Dim,
+        sh: impl Dim,
+        dx: i32,
+        dy: i32,
+        dw: impl Dim,
+        dh: impl Dim,
         flip_x: bool,
         flip_y: bool,
-    ) {
+    ) -> Result<(), ZeroSize> {
         self.sprite_stretch(sx, sy, sw, sh, dx, dy, dw, dh, flip_x, flip_y)
     }
 
@@ -1241,8 +1260,13 @@ mod tests {
         gfx.remap_display_color(Color::RED, Color::BLUE);
         gfx.pal_display(Color::RED, Color::BLUE);
         gfx.reset_palette();
-        gfx.sprite_stretch(0, 0, 8, 8, 0.0, 0.0, 16.0, 16.0, false, false);
-        gfx.sspr(0, 0, 8, 8, 0.0, 0.0, 16.0, 16.0, true, true);
+        gfx.sprite_stretch(0, 0, 8, 8, 0, 0, 16, 16, false, false)
+            .unwrap();
+        gfx.sspr(0, 0, 8, 8, 0, 0, 16, 16, true, true).unwrap();
+        assert_eq!(
+            gfx.sspr(0, 0, 8, 8, 0, 0, 0, 16, false, false),
+            Err(ZeroSize)
+        );
         gfx.ellipse(0, 0, 8, 6, Color::WHITE).unwrap();
         gfx.oval(0, 0, 8, 6, Color::WHITE).unwrap();
         gfx.ellipse_fill(0, 0, 8, 6, Color::WHITE).unwrap();
