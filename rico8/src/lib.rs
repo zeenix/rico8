@@ -597,10 +597,10 @@ impl Graphics {
         unsafe { ffi::set_fill_pattern(0, 0, 0) }
     }
 
-    /// Print text with the built-in 4x6 font. Returns the x position after
-    /// the last glyph. For `format!`-style arguments, see
+    /// Print text with the built-in 4x6 font. Returns the x position (as `i32`)
+    /// after the last glyph. For `format!`-style arguments, see
     /// [`printf!`](crate::printf).
-    pub fn print(&mut self, text: &str, x: f32, y: f32, color: Color) -> f32 {
+    pub fn print(&mut self, text: &str, x: i32, y: i32, color: Color) -> i32 {
         unsafe { ffi::print(text.as_ptr(), text.len() as u32, x, y, color.0 as i32) }
     }
 
@@ -625,9 +625,9 @@ impl Graphics {
     }
 
     /// Print at the cursor in the pen color, advancing the cursor one line.
-    /// Returns the x position after the last glyph. The cursor advances by a
-    /// single line regardless of any newlines embedded in `text`.
-    pub fn print_pen(&mut self, text: &str) -> f32 {
+    /// Returns the x position (as `i32`) after the last glyph. The cursor
+    /// advances by a single line regardless of any newlines embedded in `text`.
+    pub fn print_pen(&mut self, text: &str) -> i32 {
         unsafe { ffi::print_pen(text.as_ptr(), text.len() as u32) }
     }
 
@@ -780,7 +780,8 @@ macro_rules! game {
 }
 
 /// Print formatted text to the screen — like [`Graphics::print`], but with
-/// `format!`-style arguments. Returns the x position after the last glyph.
+/// `format!`-style arguments. Returns the cursor x (as `i32`) after the last
+/// glyph.
 ///
 /// The text is formatted into a fixed stack buffer: no allocator, no
 /// dependencies. The default buffer holds one screen line (32 characters); a
@@ -790,9 +791,9 @@ macro_rules! game {
 /// use rico8::*;
 ///
 /// fn draw(&self, gfx: &mut Graphics) {
-///     rico8::printf!(gfx, 2.0, 2.0, Color::YELLOW, "coins {}", self.coins);
+///     rico8::printf!(gfx, 2, 2, Color::YELLOW, "coins {}", self.coins);
 ///     // A longer line needs a bigger buffer:
-///     rico8::printf!(256; gfx, 0.0, 8.0, Color::WHITE, "pos {} {}", self.x, self.y);
+///     rico8::printf!(256; gfx, 0, 8, Color::WHITE, "pos {} {}", self.x, self.y);
 /// }
 /// ```
 #[macro_export]
@@ -1003,14 +1004,14 @@ mod tests {
     #[test]
     fn printf_formats_and_returns_cursor() {
         let mut gfx = Graphics { _private: () };
-        // The native ffi::print stub returns 0.0; this exercises macro
-        // expansion and the f32 return type. String content is covered by the
+        // The native ffi::print stub returns 0; this exercises macro
+        // expansion and the i32 return type. String content is covered by the
         // fmt::tests, since the stub does not capture the text.
-        let cursor: f32 = printf!(gfx, 0.0, 0.0, Color::WHITE, "n={}", 3);
-        assert_eq!(cursor, 0.0);
+        let cursor: i32 = printf!(gfx, 0, 0, Color::WHITE, "n={}", 3);
+        assert_eq!(cursor, 0);
         // Capacity-override arm, multi-arg, and a no-arg literal all expand.
-        let _: f32 = printf!(64; gfx, 0.0, 0.0, Color::WHITE, "{}-{}", 1, 2);
-        let _: f32 = printf!(gfx, 0.0, 0.0, Color::WHITE, "literal");
+        let _: i32 = printf!(64; gfx, 0, 0, Color::WHITE, "{}-{}", 1, 2);
+        let _: i32 = printf!(gfx, 0, 0, Color::WHITE, "literal");
     }
 
     #[test]
@@ -1148,7 +1149,7 @@ mod tests {
         gfx.color(Color::YELLOW);
         gfx.set_cursor(4, 4);
         gfx.cursor(4, 4);
-        let cursor: f32 = gfx.print_pen("hi");
-        assert_eq!(cursor, 0.0, "native print_pen stub returns 0.0");
+        let cursor: i32 = gfx.print_pen("hi");
+        assert_eq!(cursor, 0, "native print_pen stub returns 0");
     }
 }

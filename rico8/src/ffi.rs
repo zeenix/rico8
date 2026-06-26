@@ -25,7 +25,7 @@ extern "C" {
     pub fn rect_fill(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
     pub fn circle(x: f32, y: f32, r: f32, color: i32);
     pub fn circle_fill(x: f32, y: f32, r: f32, color: i32);
-    pub fn print(ptr: *const u8, len: u32, x: f32, y: f32, color: i32) -> f32;
+    pub fn print(ptr: *const u8, len: u32, x: i32, y: i32, color: i32) -> i32;
     pub fn is_button_down(b: u32) -> i32;
     pub fn is_button_pressed(b: u32) -> i32;
     pub fn buttons_down() -> u32;
@@ -66,7 +66,7 @@ extern "C" {
     pub fn set_fill_pattern(pattern: i32, secondary: i32, transparent: i32);
     pub fn set_pen_color(color: i32);
     pub fn set_cursor(x: i32, y: i32);
-    pub fn print_pen(ptr: *const u8, len: u32) -> f32;
+    pub fn print_pen(ptr: *const u8, len: u32) -> i32;
     pub fn cpu_update() -> f32;
     pub fn cpu_draw() -> f32;
     pub fn fps() -> f32;
@@ -90,8 +90,8 @@ mod stubs {
     pub unsafe fn rect_fill(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
     pub unsafe fn circle(_x: f32, _y: f32, _r: f32, _color: i32) {}
     pub unsafe fn circle_fill(_x: f32, _y: f32, _r: f32, _color: i32) {}
-    pub unsafe fn print(_ptr: *const u8, _len: u32, _x: f32, _y: f32, _color: i32) -> f32 {
-        0.0
+    pub unsafe fn print(_ptr: *const u8, _len: u32, _x: i32, _y: i32, _color: i32) -> i32 {
+        0
     }
     pub unsafe fn is_button_down(_b: u32) -> i32 {
         0
@@ -166,8 +166,8 @@ mod stubs {
     pub unsafe fn set_fill_pattern(_pattern: i32, _secondary: i32, _transparent: i32) {}
     pub unsafe fn set_pen_color(_color: i32) {}
     pub unsafe fn set_cursor(_x: i32, _y: i32) {}
-    pub unsafe fn print_pen(_ptr: *const u8, _len: u32) -> f32 {
-        0.0
+    pub unsafe fn print_pen(_ptr: *const u8, _len: u32) -> i32 {
+        0
     }
     pub unsafe fn cpu_update() -> f32 {
         0.0
