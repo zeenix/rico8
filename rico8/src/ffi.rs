@@ -21,8 +21,8 @@ extern "C" {
     pub fn set_pixel(x: i32, y: i32, color: i32);
     pub fn pixel(x: i32, y: i32) -> i32;
     pub fn line(x0: i32, y0: i32, x1: i32, y1: i32, color: i32);
-    pub fn rect(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
-    pub fn rect_fill(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
+    pub fn rect(x0: i32, y0: i32, x1: i32, y1: i32, color: i32);
+    pub fn rect_fill(x0: i32, y0: i32, x1: i32, y1: i32, color: i32);
     pub fn circle(x: i32, y: i32, r: i32, color: i32);
     pub fn circle_fill(x: i32, y: i32, r: i32, color: i32);
     pub fn print(ptr: *const u8, len: u32, x: i32, y: i32, color: i32) -> i32;
@@ -61,8 +61,8 @@ extern "C" {
         flip_x: i32,
         flip_y: i32,
     );
-    pub fn ellipse(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
-    pub fn ellipse_fill(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
+    pub fn ellipse(x0: i32, y0: i32, x1: i32, y1: i32, color: i32);
+    pub fn ellipse_fill(x0: i32, y0: i32, x1: i32, y1: i32, color: i32);
     pub fn set_fill_pattern(pattern: i32, secondary: i32, transparent: i32);
     pub fn set_pen_color(color: i32);
     pub fn set_cursor(x: i32, y: i32);
@@ -86,8 +86,8 @@ mod stubs {
         0
     }
     pub unsafe fn line(_x0: i32, _y0: i32, _x1: i32, _y1: i32, _color: i32) {}
-    pub unsafe fn rect(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
-    pub unsafe fn rect_fill(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
+    pub unsafe fn rect(_x0: i32, _y0: i32, _x1: i32, _y1: i32, _color: i32) {}
+    pub unsafe fn rect_fill(_x0: i32, _y0: i32, _x1: i32, _y1: i32, _color: i32) {}
     pub unsafe fn circle(_x: i32, _y: i32, _r: i32, _color: i32) {}
     pub unsafe fn circle_fill(_x: i32, _y: i32, _r: i32, _color: i32) {}
     pub unsafe fn print(_ptr: *const u8, _len: u32, _x: i32, _y: i32, _color: i32) -> i32 {
@@ -161,8 +161,8 @@ mod stubs {
         _flip_y: i32,
     ) {
     }
-    pub unsafe fn ellipse(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
-    pub unsafe fn ellipse_fill(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
+    pub unsafe fn ellipse(_x0: i32, _y0: i32, _x1: i32, _y1: i32, _color: i32) {}
+    pub unsafe fn ellipse_fill(_x0: i32, _y0: i32, _x1: i32, _y1: i32, _color: i32) {}
     pub unsafe fn set_fill_pattern(_pattern: i32, _secondary: i32, _transparent: i32) {}
     pub unsafe fn set_pen_color(_color: i32) {}
     pub unsafe fn set_cursor(_x: i32, _y: i32) {}

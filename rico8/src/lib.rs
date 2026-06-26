@@ -6,24 +6,24 @@
 //! use rico8::*;
 //!
 //! struct MyGame {
-//!     x: f32,
-//!     y: f32,
+//!     x: i32,
+//!     y: i32,
 //! }
 //!
 //! impl Game for MyGame {
 //!     fn update(&mut self, ctx: &mut Context) {
 //!         if ctx.is_button_down(Button::Right) {
-//!             self.x += 1.0;
+//!             self.x += 1;
 //!         }
 //!     }
 //!
 //!     fn draw(&self, gfx: &mut Graphics) {
 //!         gfx.clear(Color::BLACK);
-//!         gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::WHITE);
+//!         gfx.rect_fill(self.x, self.y, 8, 8, Color::WHITE).unwrap();
 //!     }
 //! }
 //!
-//! rico8::game!(MyGame { x: 64.0, y: 64.0 });
+//! rico8::game!(MyGame { x: 64, y: 64 });
 //! ```
 //!
 //! Carts are built for `wasm32-unknown-unknown` as a `cdylib` and run in
@@ -513,22 +513,63 @@ impl Graphics {
         unsafe { ffi::line(x0, y0, x1, y1, color.0 as i32) }
     }
 
-    /// Rectangle outline at `(x, y)` with size `w x h`.
-    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w > 0.0 && h > 0.0 {
-            unsafe { ffi::rect(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
-        }
+    /// Rectangle outline at `(x, y)` with size `w x h`. Errors on a zero/negative
+    /// size.
+    pub fn rect(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::rect(
+                x,
+                y,
+                x + w.get() as i32 - 1,
+                y + h.get() as i32 - 1,
+                color.0 as i32,
+            )
+        };
+        Ok(())
     }
 
-    /// Filled rectangle at `(x, y)` with size `w x h`.
-    pub fn rect_fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w > 0.0 && h > 0.0 {
-            unsafe { ffi::rect_fill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
-        }
+    /// Filled rectangle at `(x, y)` with size `w x h`. Errors on a zero/negative
+    /// size.
+    pub fn rect_fill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::rect_fill(
+                x,
+                y,
+                x + w.get() as i32 - 1,
+                y + h.get() as i32 - 1,
+                color.0 as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Alias for [`Graphics::rect_fill`].
-    pub fn rectfill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+    pub fn rectfill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
         self.rect_fill(x, y, w, h, color)
     }
 
@@ -552,27 +593,75 @@ impl Graphics {
         self.circle_fill(x, y, r, color)
     }
 
-    /// Ellipse outline inside the `(x, y, w, h)` box.
-    pub fn ellipse(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w > 0.0 && h > 0.0 {
-            unsafe { ffi::ellipse(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
-        }
+    /// Ellipse outline inside the `(x, y, w, h)` box. Errors on a zero/negative
+    /// size.
+    pub fn ellipse(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::ellipse(
+                x,
+                y,
+                x + w.get() as i32 - 1,
+                y + h.get() as i32 - 1,
+                color.0 as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Alias for [`Graphics::ellipse`].
-    pub fn oval(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+    pub fn oval(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
         self.ellipse(x, y, w, h, color)
     }
 
-    /// Filled ellipse inside the `(x, y, w, h)` box.
-    pub fn ellipse_fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w > 0.0 && h > 0.0 {
-            unsafe { ffi::ellipse_fill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
-        }
+    /// Filled ellipse inside the `(x, y, w, h)` box. Errors on a zero/negative
+    /// size.
+    pub fn ellipse_fill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::ellipse_fill(
+                x,
+                y,
+                x + w.get() as i32 - 1,
+                y + h.get() as i32 - 1,
+                color.0 as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Alias for [`Graphics::ellipse_fill`].
-    pub fn ovalfill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+    pub fn ovalfill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
         self.ellipse_fill(x, y, w, h, color)
     }
 
@@ -994,8 +1083,8 @@ mod tests {
         gfx.circ(0, 0, 4, Color::RED);
         gfx.circle_fill(0, 0, 4, Color::RED);
         gfx.circfill(0, 0, 4, Color::RED);
-        gfx.rect_fill(0.0, 0.0, 4.0, 4.0, Color::RED);
-        gfx.rectfill(0.0, 0.0, 4.0, 4.0, Color::RED);
+        gfx.rect_fill(0, 0, 4, 4, Color::RED).unwrap();
+        gfx.rectfill(0, 0, 4, 4, Color::RED).unwrap();
         gfx.sprite(SpriteId(0), 0.0, 0.0);
         gfx.spr(SpriteId(0), 0.0, 0.0);
         gfx.sprite_ext(SpriteId(0), 0.0, 0.0, 1.0, 1.0, false, false);
@@ -1137,10 +1226,10 @@ mod tests {
         gfx.reset_palette();
         gfx.sprite_stretch(0, 0, 8, 8, 0.0, 0.0, 16.0, 16.0, false, false);
         gfx.sspr(0, 0, 8, 8, 0.0, 0.0, 16.0, 16.0, true, true);
-        gfx.ellipse(0.0, 0.0, 8.0, 6.0, Color::WHITE);
-        gfx.oval(0.0, 0.0, 8.0, 6.0, Color::WHITE);
-        gfx.ellipse_fill(0.0, 0.0, 8.0, 6.0, Color::WHITE);
-        gfx.ovalfill(0.0, 0.0, 8.0, 6.0, Color::WHITE);
+        gfx.ellipse(0, 0, 8, 6, Color::WHITE).unwrap();
+        gfx.oval(0, 0, 8, 6, Color::WHITE).unwrap();
+        gfx.ellipse_fill(0, 0, 8, 6, Color::WHITE).unwrap();
+        gfx.ovalfill(0, 0, 8, 6, Color::WHITE).unwrap();
         gfx.set_fill_pattern(0b1010, Color::RED);
         gfx.fillp(0b1010);
         gfx.set_fill_pattern_transparent(0b1010);
@@ -1151,5 +1240,21 @@ mod tests {
         gfx.cursor(4, 4);
         let cursor: i32 = gfx.print_pen("hi");
         assert_eq!(cursor, 0, "native print_pen stub returns 0");
+    }
+
+    #[test]
+    fn fallible_rect_and_ellipse() {
+        let mut gfx = Graphics { _private: () };
+        // Positive sizes succeed.
+        assert_eq!(gfx.rect(0, 0, 4, 4, Color::RED), Ok(()));
+        assert_eq!(gfx.rect_fill(0, 0, 4, 4, Color::RED), Ok(()));
+        assert_eq!(gfx.ellipse(0, 0, 8, 6, Color::WHITE), Ok(()));
+        assert_eq!(gfx.ellipse_fill(0, 0, 8, 6, Color::WHITE), Ok(()));
+        // Zero or negative sizes are a ZeroSize error (nothing drawn).
+        assert_eq!(gfx.rect_fill(0, 0, 0, 4, Color::RED), Err(ZeroSize));
+        assert_eq!(gfx.rect(0, 0, 4, -1, Color::RED), Err(ZeroSize));
+        // A computed i32 size (the case core's TryInto can't take) compiles.
+        let w = 10 - 4;
+        assert_eq!(gfx.rect(0, 0, w, 4, Color::RED), Ok(()));
     }
 }
