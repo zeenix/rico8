@@ -532,23 +532,23 @@ impl Graphics {
         self.rect_fill(x, y, w, h, color)
     }
 
-    /// Circle outline.
-    pub fn circle(&mut self, x: f32, y: f32, r: f32, color: Color) {
-        unsafe { ffi::circle(x, y, r, color.0 as i32) }
+    /// Circle outline. `r = 0` draws a single pixel.
+    pub fn circle(&mut self, x: i32, y: i32, r: u32, color: Color) {
+        unsafe { ffi::circle(x, y, r as i32, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::circle`].
-    pub fn circ(&mut self, x: f32, y: f32, r: f32, color: Color) {
+    pub fn circ(&mut self, x: i32, y: i32, r: u32, color: Color) {
         self.circle(x, y, r, color)
     }
 
-    /// Filled circle.
-    pub fn circle_fill(&mut self, x: f32, y: f32, r: f32, color: Color) {
-        unsafe { ffi::circle_fill(x, y, r, color.0 as i32) }
+    /// Filled circle. `r = 0` draws a single pixel.
+    pub fn circle_fill(&mut self, x: i32, y: i32, r: u32, color: Color) {
+        unsafe { ffi::circle_fill(x, y, r as i32, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::circle_fill`].
-    pub fn circfill(&mut self, x: f32, y: f32, r: f32, color: Color) {
+    pub fn circfill(&mut self, x: i32, y: i32, r: u32, color: Color) {
         self.circle_fill(x, y, r, color)
     }
 
@@ -990,10 +990,10 @@ mod tests {
         // Drawing aliases forward to primaries (no-op under native stubs).
         gfx.set_pixel(0, 0, Color::RED);
         gfx.pset(0, 0, Color::RED);
-        gfx.circle(0.0, 0.0, 4.0, Color::RED);
-        gfx.circ(0.0, 0.0, 4.0, Color::RED);
-        gfx.circle_fill(0.0, 0.0, 4.0, Color::RED);
-        gfx.circfill(0.0, 0.0, 4.0, Color::RED);
+        gfx.circle(0, 0, 4, Color::RED);
+        gfx.circ(0, 0, 4, Color::RED);
+        gfx.circle_fill(0, 0, 4, Color::RED);
+        gfx.circfill(0, 0, 4, Color::RED);
         gfx.rect_fill(0.0, 0.0, 4.0, 4.0, Color::RED);
         gfx.rectfill(0.0, 0.0, 4.0, 4.0, Color::RED);
         gfx.sprite(SpriteId(0), 0.0, 0.0);
