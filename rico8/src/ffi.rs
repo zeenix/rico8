@@ -7,21 +7,20 @@
 //! is public only so the ABI is inspectable and documented in one place
 //! (see docs/ABI.md).
 //!
-//! Screen-space positions and sizes are `f32`: the host floors each to a
-//! pixel at draw time, so carts can carry sub-pixel positions (smooth
-//! motion, no shimmer) without rounding themselves. Discrete things —
-//! sprite/tile indices, cell counts, flags, colors, buttons — stay
-//! integers.
+//! Screen-space positions are `i32` pixels and sizes are `i32` (the SDK
+//! validates sizes to non-zero before calling here). Discrete things — sprite
+//! and tile indices, colors, flags, buttons — stay integers too. Returns that
+//! are genuinely fractional (`time`, `rnd`, the CPU/fps gauges) stay `f32`.
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "rico8")]
 extern "C" {
     pub fn clear(color: i32);
-    pub fn camera(x: f32, y: f32);
+    pub fn camera(x: i32, y: i32);
     pub fn clip(x: f32, y: f32, w: f32, h: f32);
-    pub fn set_pixel(x: f32, y: f32, color: i32);
-    pub fn pixel(x: f32, y: f32) -> i32;
-    pub fn line(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
+    pub fn set_pixel(x: i32, y: i32, color: i32);
+    pub fn pixel(x: i32, y: i32) -> i32;
+    pub fn line(x0: i32, y0: i32, x1: i32, y1: i32, color: i32);
     pub fn rect(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
     pub fn rect_fill(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
     pub fn circle(x: f32, y: f32, r: f32, color: i32);
@@ -66,7 +65,7 @@ extern "C" {
     pub fn ellipse_fill(x0: f32, y0: f32, x1: f32, y1: f32, color: i32);
     pub fn set_fill_pattern(pattern: i32, secondary: i32, transparent: i32);
     pub fn set_pen_color(color: i32);
-    pub fn set_cursor(x: f32, y: f32);
+    pub fn set_cursor(x: i32, y: i32);
     pub fn print_pen(ptr: *const u8, len: u32) -> f32;
     pub fn cpu_update() -> f32;
     pub fn cpu_draw() -> f32;
@@ -80,13 +79,13 @@ mod stubs {
     #![allow(clippy::missing_safety_doc)]
 
     pub unsafe fn clear(_color: i32) {}
-    pub unsafe fn camera(_x: f32, _y: f32) {}
+    pub unsafe fn camera(_x: i32, _y: i32) {}
     pub unsafe fn clip(_x: f32, _y: f32, _w: f32, _h: f32) {}
-    pub unsafe fn set_pixel(_x: f32, _y: f32, _color: i32) {}
-    pub unsafe fn pixel(_x: f32, _y: f32) -> i32 {
+    pub unsafe fn set_pixel(_x: i32, _y: i32, _color: i32) {}
+    pub unsafe fn pixel(_x: i32, _y: i32) -> i32 {
         0
     }
-    pub unsafe fn line(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
+    pub unsafe fn line(_x0: i32, _y0: i32, _x1: i32, _y1: i32, _color: i32) {}
     pub unsafe fn rect(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
     pub unsafe fn rect_fill(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
     pub unsafe fn circle(_x: f32, _y: f32, _r: f32, _color: i32) {}
@@ -166,7 +165,7 @@ mod stubs {
     pub unsafe fn ellipse_fill(_x0: f32, _y0: f32, _x1: f32, _y1: f32, _color: i32) {}
     pub unsafe fn set_fill_pattern(_pattern: i32, _secondary: i32, _transparent: i32) {}
     pub unsafe fn set_pen_color(_color: i32) {}
-    pub unsafe fn set_cursor(_x: f32, _y: f32) {}
+    pub unsafe fn set_cursor(_x: i32, _y: i32) {}
     pub unsafe fn print_pen(_ptr: *const u8, _len: u32) -> f32 {
         0.0
     }

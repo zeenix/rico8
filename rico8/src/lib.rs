@@ -433,8 +433,8 @@ impl Graphics {
         self.clear(color)
     }
 
-    /// Offset all subsequent draws by `(-x, -y)`. Floored to a whole pixel.
-    pub fn camera(&mut self, x: f32, y: f32) {
+    /// Offset all subsequent draws by `(-x, -y)`.
+    pub fn camera(&mut self, x: i32, y: i32) {
         unsafe { ffi::camera(x, y) }
     }
 
@@ -488,28 +488,28 @@ impl Graphics {
         unsafe { ffi::reset_palette() }
     }
 
-    /// Set one pixel. The position is floored to a pixel.
-    pub fn set_pixel(&mut self, x: f32, y: f32, color: Color) {
+    /// Set one pixel.
+    pub fn set_pixel(&mut self, x: i32, y: i32, color: Color) {
         unsafe { ffi::set_pixel(x, y, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::set_pixel`].
-    pub fn pset(&mut self, x: f32, y: f32, color: Color) {
+    pub fn pset(&mut self, x: i32, y: i32, color: Color) {
         self.set_pixel(x, y, color)
     }
 
     /// Read one pixel (screen space; out of bounds reads 0).
-    pub fn pixel(&self, x: f32, y: f32) -> Color {
+    pub fn pixel(&self, x: i32, y: i32) -> Color {
         Color::from_index(unsafe { ffi::pixel(x, y) } as u8)
     }
 
     /// Alias for [`Graphics::pixel`].
-    pub fn pget(&self, x: f32, y: f32) -> Color {
+    pub fn pget(&self, x: i32, y: i32) -> Color {
         self.pixel(x, y)
     }
 
     /// Line between two points, inclusive.
-    pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, color: Color) {
+    pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Color) {
         unsafe { ffi::line(x0, y0, x1, y1, color.0 as i32) }
     }
 
@@ -615,12 +615,12 @@ impl Graphics {
     }
 
     /// Set the persistent text cursor used by [`Graphics::print_pen`].
-    pub fn set_cursor(&mut self, x: f32, y: f32) {
+    pub fn set_cursor(&mut self, x: i32, y: i32) {
         unsafe { ffi::set_cursor(x, y) }
     }
 
     /// Alias for [`Graphics::set_cursor`].
-    pub fn cursor(&mut self, x: f32, y: f32) {
+    pub fn cursor(&mut self, x: i32, y: i32) {
         self.set_cursor(x, y)
     }
 
@@ -985,10 +985,10 @@ mod tests {
     #[test]
     fn graphics_aliases_match_primaries() {
         let mut gfx = Graphics { _private: () };
-        assert_eq!(gfx.pixel(1.0, 1.0), gfx.pget(1.0, 1.0));
+        assert_eq!(gfx.pixel(1, 1), gfx.pget(1, 1));
         // Drawing aliases forward to primaries (no-op under native stubs).
-        gfx.set_pixel(0.0, 0.0, Color::RED);
-        gfx.pset(0.0, 0.0, Color::RED);
+        gfx.set_pixel(0, 0, Color::RED);
+        gfx.pset(0, 0, Color::RED);
         gfx.circle(0.0, 0.0, 4.0, Color::RED);
         gfx.circ(0.0, 0.0, 4.0, Color::RED);
         gfx.circle_fill(0.0, 0.0, 4.0, Color::RED);
@@ -1146,8 +1146,8 @@ mod tests {
         gfx.clear_fill_pattern();
         gfx.set_pen_color(Color::YELLOW);
         gfx.color(Color::YELLOW);
-        gfx.set_cursor(4.0, 4.0);
-        gfx.cursor(4.0, 4.0);
+        gfx.set_cursor(4, 4);
+        gfx.cursor(4, 4);
         let cursor: f32 = gfx.print_pen("hi");
         assert_eq!(cursor, 0.0, "native print_pen stub returns 0.0");
     }
