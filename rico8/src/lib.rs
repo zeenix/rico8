@@ -65,8 +65,8 @@ pub use motion::Body;
 pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
 
 /// The screen is 128x128 pixels.
-pub const SCREEN_W: i32 = 128;
-pub const SCREEN_H: i32 = 128;
+pub const SCREEN_WIDTH: u32 = 128;
+pub const SCREEN_HEIGHT: u32 = 128;
 /// Default logical frames per second.
 pub const FPS: u32 = 60;
 
@@ -445,7 +445,7 @@ impl Graphics {
 
     /// Remove the clip rectangle.
     pub fn clip_reset(&mut self) {
-        unsafe { ffi::clip(0.0, 0.0, SCREEN_W as f32, SCREEN_H as f32) }
+        unsafe { ffi::clip(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32) }
     }
 
     /// Make a palette color transparent (or opaque) for sprite draws.

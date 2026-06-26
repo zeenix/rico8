@@ -6,9 +6,9 @@
 
 /// Default buffer capacity: one full screen line.
 ///
-/// The screen is [`SCREEN_W`](crate::SCREEN_W) pixels wide and the built-in
+/// The screen is [`SCREEN_WIDTH`](crate::SCREEN_WIDTH) pixels wide and the built-in
 /// font advances four pixels per glyph, so 32 characters fill a line.
-pub const LINE_CAP: usize = (crate::SCREEN_W / 4) as usize;
+pub const LINE_CAP: usize = (crate::SCREEN_WIDTH / 4) as usize;
 
 /// A fixed-capacity, allocation-free sink for formatted text.
 ///
@@ -113,7 +113,7 @@ mod tests {
 
     #[test]
     fn line_cap_is_one_screen_line() {
-        assert_eq!(LINE_CAP, (crate::SCREEN_W / 4) as usize);
+        assert_eq!(LINE_CAP, (crate::SCREEN_WIDTH / 4) as usize);
         assert_eq!(LINE_CAP, 32);
     }
 }
