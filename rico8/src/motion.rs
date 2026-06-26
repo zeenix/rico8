@@ -41,7 +41,7 @@
 //!     fn draw(&self, gfx: &mut Graphics) {
 //!         gfx.clear(Color::BLACK);
 //!         // draw_x/draw_y are the coherent pixel; collision uses x()/y().
-//!         gfx.sprite(SpriteId(1), self.body.draw_x() as i32, self.body.draw_y() as i32);
+//!         gfx.sprite(SpriteId(1), self.body.draw_x(), self.body.draw_y());
 //!     }
 //! }
 //! ```
@@ -159,20 +159,19 @@ impl Body {
         (self.x, self.y)
     }
 
-    /// The coherent x pixel to draw at (a whole number, as an `f32` so it drops
-    /// straight into the drawing calls).
-    pub fn draw_x(&self) -> f32 {
-        self.rx as f32
+    /// The coherent x pixel to draw at.
+    pub fn draw_x(&self) -> i32 {
+        self.rx
     }
 
     /// The coherent y pixel to draw at.
-    pub fn draw_y(&self) -> f32 {
-        self.ry as f32
+    pub fn draw_y(&self) -> i32 {
+        self.ry
     }
 
     /// The coherent render position `(draw_x, draw_y)`.
-    pub fn draw_pos(&self) -> (f32, f32) {
-        (self.rx as f32, self.ry as f32)
+    pub fn draw_pos(&self) -> (i32, i32) {
+        (self.rx, self.ry)
     }
 
     /// Teleport to a position, re-snapping the render pixel (no coherent step —
@@ -211,7 +210,7 @@ mod tests {
         let mut b = Body::new(x0, y0);
         let mut path = Vec::with_capacity(n);
         for _ in 0..n {
-            path.push((b.draw_x() as i32, b.draw_y() as i32));
+            path.push((b.draw_x(), b.draw_y()));
             b.move_by(vx, vy);
         }
         path
@@ -296,8 +295,8 @@ mod tests {
             let mut b = Body::new(3.3, 7.6);
             for _ in 0..50_000 {
                 b.move_by(vx, vy);
-                let ex = (b.draw_x() as i32 - floor_i32(b.x())).abs();
-                let ey = (b.draw_y() as i32 - floor_i32(b.y())).abs();
+                let ex = (b.draw_x() - floor_i32(b.x())).abs();
+                let ey = (b.draw_y() - floor_i32(b.y())).abs();
                 assert!(ex <= 1 && ey <= 1, "drift {ex},{ey} at {deg}°");
             }
         }
@@ -317,8 +316,8 @@ mod tests {
             let mut b = Body::new(10.0, 10.5);
             for _ in 0..300 {
                 b.move_by(vx, vy);
-                assert_eq!(b.draw_x() as i32, floor_i32(b.x()));
-                assert_eq!(b.draw_y() as i32, floor_i32(b.y()));
+                assert_eq!(b.draw_x(), floor_i32(b.x()));
+                assert_eq!(b.draw_y(), floor_i32(b.y()));
             }
         }
     }
@@ -328,11 +327,11 @@ mod tests {
         // Right, then Right+Up, then Up — like a player working the d-pad. No
         // segment, and no transition, may introduce a lone minor step.
         let mut b = Body::new(20.0, 20.3);
-        let mut path = vec![(b.draw_x() as i32, b.draw_y() as i32)];
+        let mut path = vec![(b.draw_x(), b.draw_y())];
         for (vx, vy, frames) in [(0.7, 0.0, 10), (0.7, -0.7, 16), (0.0, -0.7, 10)] {
             for _ in 0..frames {
                 b.move_by(vx, vy);
-                path.push((b.draw_x() as i32, b.draw_y() as i32));
+                path.push((b.draw_x(), b.draw_y()));
             }
         }
         let s = classify(&path);
@@ -356,12 +355,12 @@ mod tests {
         b.move_by(0.5, 0.5);
         b.set_pos(40.9, 12.2);
         assert_eq!(b.pos(), (40.9, 12.2));
-        assert_eq!(b.draw_pos(), (40.0, 12.0));
+        assert_eq!(b.draw_pos(), (40, 12));
     }
 
     #[test]
     fn negative_positions_floor_correctly() {
         let b = Body::new(-0.5, -2.0);
-        assert_eq!(b.draw_pos(), (-1.0, -2.0));
+        assert_eq!(b.draw_pos(), (-1, -2));
     }
 }
