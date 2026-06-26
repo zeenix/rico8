@@ -263,7 +263,7 @@ mod tests {
     const MOVER: &str = r#"
         (module
           (import "rico8" "clear" (func $cls (param i32)))
-          (import "rico8" "set_pixel" (func $pset (param f32 f32 i32)))
+          (import "rico8" "set_pixel" (func $pset (param i32 i32 i32)))
           (import "rico8" "is_button_down" (func $btn (param i32) (result i32)))
           (global $x (mut i32) (i32.const 10))
           (func (export "rico8_init"))
@@ -272,7 +272,7 @@ mod tests {
               (then (global.set $x (i32.add (global.get $x) (i32.const 1))))))
           (func (export "rico8_draw")
             (call $cls (i32.const 1))
-            (call $pset (f32.convert_i32_s (global.get $x)) (f32.const 7) (i32.const 8)))
+            (call $pset (global.get $x) (i32.const 7) (i32.const 8)))
         )
     "#;
 

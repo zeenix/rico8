@@ -462,9 +462,9 @@ impl Framebuffer {
         end
     }
 
-    /// Draw sprite `n` (and `w x h` neighbors) from a sheet. Color 0 is
-    /// transparent, matching the classic default. `w`/`h` are in sprite units
-    /// and may be fractional: `w = 0.5` draws a 4-pixel-wide slice.
+    /// Draw sprite `n` (and the `w x h`-pixel block to its right and below)
+    /// from a sheet. Color 0 is transparent, matching the classic default.
+    /// `w`/`h` are pixel extents: `w = 4` draws a 4-pixel-wide slice.
     #[allow(clippy::too_many_arguments)]
     pub fn spr(
         &mut self,
@@ -472,15 +472,14 @@ impl Framebuffer {
         n: u32,
         x: i32,
         y: i32,
-        w: f32,
-        h: f32,
+        w: i32,
+        h: i32,
         flip_x: bool,
         flip_y: bool,
     ) {
-        // Fractional sprite counts draw a partial block: floor to whole
-        // pixels, so the last cell can be clipped mid-sprite.
-        let pw = (w.max(0.0) * SPRITE_SIZE as f32) as i32;
-        let ph = (h.max(0.0) * SPRITE_SIZE as f32) as i32;
+        // `w`/`h` are pixel extents; a partial last cell is clipped mid-sprite.
+        let pw = w.max(0);
+        let ph = h.max(0);
 
         // Clip the destination rectangle to the clip rect once, up front, then
         // walk only the visible sub-rectangle. This skips the per-pixel clip
@@ -583,8 +582,8 @@ impl Framebuffer {
                     tile as u32,
                     sx + tx * SPRITE_SIZE as i32,
                     sy + ty * SPRITE_SIZE as i32,
-                    1.0,
-                    1.0,
+                    SPRITE_SIZE as i32,
+                    SPRITE_SIZE as i32,
                     false,
                     false,
                 );
@@ -659,7 +658,7 @@ mod tests {
     }
 
     #[test]
-    fn fractional_sprite_draws_a_partial_slice() {
+    fn partial_pixel_sprite_draws_a_partial_slice() {
         let mut fb = Framebuffer::new();
         let mut sheet = SpriteSheet::default();
         // Fill sprite 0 (the top-left 8x8 cell) solid.
@@ -668,8 +667,8 @@ mod tests {
                 sheet.set(x, y, 7);
             }
         }
-        // Half width draws only the left four columns.
-        fb.spr(&sheet, 0, 0, 0, 0.5, 1.0, false, false);
+        // A 4px width draws only the left four columns.
+        fb.spr(&sheet, 0, 0, 0, 4, 8, false, false);
         assert_eq!(fb.pget(3, 4), 7, "left half is drawn");
         assert_eq!(fb.pget(4, 4), 0, "right half is untouched");
         assert_eq!(fb.pget(7, 7), 0, "bottom-right corner is untouched");
@@ -688,7 +687,7 @@ mod tests {
         sheet.set(0, 7, 11); // bottom-left  -> dest (7,0)
         sheet.set(7, 7, 12); // bottom-right -> dest (0,0)
         fb.clip(0, 0, 4, 4);
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, true, true);
+        fb.spr(&sheet, 0, 0, 0, 8, 8, true, true);
         assert_eq!(
             fb.pget(0, 0),
             12,
@@ -713,7 +712,7 @@ mod tests {
         }
         sheet.set(2, 3, 9); // the source pixel that lands on dest (0,0)
         fb.camera(2, 3);
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0, 0, 8, 8, false, false);
         assert_eq!(
             fb.pget(0, 0),
             9,
@@ -726,8 +725,8 @@ mod tests {
     }
 
     #[test]
-    fn spr_fractional_width_meets_clip_edge() {
-        // A half-width sprite (4px) further trimmed by a 2px-wide clip: only the
+    fn spr_partial_pixel_width_meets_clip_edge() {
+        // A 4px-wide sprite slice further trimmed by a 2px-wide clip: only the
         // first two destination columns survive.
         let mut fb = Framebuffer::new();
         let mut sheet = SpriteSheet::default();
@@ -737,10 +736,10 @@ mod tests {
             }
         }
         fb.clip(0, 0, 2, 128);
-        fb.spr(&sheet, 0, 0, 0, 0.5, 1.0, false, false);
-        assert_eq!(fb.pget(1, 3), 7, "inside the clip and the fractional width");
+        fb.spr(&sheet, 0, 0, 0, 4, 8, false, false);
+        assert_eq!(fb.pget(1, 3), 7, "inside the clip and the partial width");
         assert_eq!(fb.pget(2, 3), 0, "clipped away at x=2");
-        assert_eq!(fb.pget(4, 3), 0, "beyond the 4px fractional width anyway");
+        assert_eq!(fb.pget(4, 3), 0, "beyond the 4px width anyway");
     }
 
     #[test]
@@ -753,16 +752,16 @@ mod tests {
             }
         }
         // Default: nonzero colors draw.
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0, 0, 8, 8, false, false);
         assert_eq!(fb.pget(1, 1), 8);
         // Make red transparent: redrawing over green leaves green showing.
         fb.cls(3);
         fb.set_transparent_color(8, true);
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0, 0, 8, 8, false, false);
         assert_eq!(fb.pget(1, 1), 3, "red made transparent");
         // reset_transparency restores the default; red draws again.
         fb.reset_transparency();
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0, 0, 8, 8, false, false);
         assert_eq!(fb.pget(1, 1), 8);
     }
 
@@ -772,7 +771,7 @@ mod tests {
         let sheet = SpriteSheet::default(); // all color 0
         fb.cls(7);
         fb.set_transparent_color(0, false);
-        fb.spr(&sheet, 0, 0, 0, 1.0, 1.0, false, false);
+        fb.spr(&sheet, 0, 0, 0, 8, 8, false, false);
         assert_eq!(fb.pget(3, 3), 0, "color 0 now drawn over white");
     }
 

@@ -34,7 +34,7 @@ impl BuildJob {
     }
 }
 
-/// Kick off a release wasm build of the project directory.
+/// Kick off a release wasm build of the project directory in a background thread.
 pub fn spawn_build(project_dir: &Path) -> BuildJob {
     let dir = project_dir.to_path_buf();
     let (tx, rx) = channel();
@@ -46,10 +46,12 @@ pub fn spawn_build(project_dir: &Path) -> BuildJob {
     BuildJob { rx }
 }
 
-/// Run the build synchronously (used by headless `rico8 build`).
+/// Run a release wasm build of the project directory synchronously.
+/// Used by the headless `rico8 build`/`export` subcommands.
 pub fn run_build(dir: &Path, started: Instant) -> BuildResult {
-    let output = Command::new("cargo")
-        .args(["build", "--release", "--target", "wasm32-unknown-unknown"])
+    let mut cmd = Command::new("cargo");
+    cmd.args(["build", "--release", "--target", "wasm32-unknown-unknown"]);
+    let output = cmd
         .current_dir(dir)
         .env("CARGO_TERM_COLOR", "never")
         .output();

@@ -1904,6 +1904,22 @@ mod tests {
         Shell::new(AudioHandle::dummy(), sdk)
     }
 
+    /// Rewrite a freshly-scaffolded project's `rico8` git dep to a path dep on the
+    /// in-tree SDK, so test builds match this host's ABI and stay offline.
+    fn point_cart_at_local_sdk(project_dir: &Path) {
+        let sdk = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../rico8")
+            .canonicalize()
+            .unwrap();
+        let manifest_path = project_dir.join("Cargo.toml");
+        let manifest = std::fs::read_to_string(&manifest_path).unwrap();
+        let manifest = manifest.replace(
+            "git = \"https://github.com/zeenix/rico8\"",
+            &format!("path = {:?}", sdk.display().to_string()),
+        );
+        std::fs::write(&manifest_path, manifest).unwrap();
+    }
+
     #[test]
     fn window_title_reflects_loaded_cart() {
         let dir = std::env::temp_dir().join(format!("rico8_title_{}", std::process::id()));
@@ -1929,6 +1945,7 @@ mod tests {
         let mut shell = test_shell();
         let project_dir = dir.join("game");
         Project::create(&project_dir, "game").unwrap();
+        point_cart_at_local_sdk(&project_dir);
 
         shell
             .cmd_load(&[project_dir.to_str().unwrap()])
@@ -2121,6 +2138,8 @@ mod tests {
         let mut shell = test_shell();
         let project_dir = dir.join("game");
         Project::create(&project_dir, "game").unwrap();
+        point_cart_at_local_sdk(&project_dir);
+
         shell
             .cmd_load(&[project_dir.to_str().unwrap()])
             .expect("load");
