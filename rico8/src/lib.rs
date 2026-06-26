@@ -438,14 +438,18 @@ impl Graphics {
         unsafe { ffi::camera(x, y) }
     }
 
-    /// Restrict drawing to a rectangle in screen space.
-    pub fn clip(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        unsafe { ffi::clip(x, y, w, h) }
+    /// Restrict drawing to a rectangle in screen space. Errors on a zero/negative
+    /// size.
+    pub fn clip(&mut self, x: i32, y: i32, w: impl Dim, h: impl Dim) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe { ffi::clip(x, y, w.get() as i32, h.get() as i32) };
+        Ok(())
     }
 
     /// Remove the clip rectangle.
     pub fn clip_reset(&mut self) {
-        unsafe { ffi::clip(0.0, 0.0, SCREEN_WIDTH as f32, SCREEN_HEIGHT as f32) }
+        unsafe { ffi::clip(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32) }
     }
 
     /// Make a palette color transparent (or opaque) for sprite draws.
@@ -1256,5 +1260,13 @@ mod tests {
         // A computed i32 size (the case core's TryInto can't take) compiles.
         let w = 10 - 4;
         assert_eq!(gfx.rect(0, 0, w, 4, Color::RED), Ok(()));
+    }
+
+    #[test]
+    fn clip_is_fallible_and_reset_is_not() {
+        let mut gfx = Graphics { _private: () };
+        assert_eq!(gfx.clip(0, 0, 64, 64), Ok(()));
+        assert_eq!(gfx.clip(0, 0, 0, 64), Err(ZeroSize));
+        gfx.clip_reset(); // Infallible.
     }
 }

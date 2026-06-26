@@ -17,7 +17,7 @@
 extern "C" {
     pub fn clear(color: i32);
     pub fn camera(x: i32, y: i32);
-    pub fn clip(x: f32, y: f32, w: f32, h: f32);
+    pub fn clip(x: i32, y: i32, w: i32, h: i32);
     pub fn set_pixel(x: i32, y: i32, color: i32);
     pub fn pixel(x: i32, y: i32) -> i32;
     pub fn line(x0: i32, y0: i32, x1: i32, y1: i32, color: i32);
@@ -80,7 +80,7 @@ mod stubs {
 
     pub unsafe fn clear(_color: i32) {}
     pub unsafe fn camera(_x: i32, _y: i32) {}
-    pub unsafe fn clip(_x: f32, _y: f32, _w: f32, _h: f32) {}
+    pub unsafe fn clip(_x: i32, _y: i32, _w: i32, _h: i32) {}
     pub unsafe fn set_pixel(_x: i32, _y: i32, _color: i32) {}
     pub unsafe fn pixel(_x: i32, _y: i32) -> i32 {
         0
