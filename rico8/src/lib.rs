@@ -37,6 +37,7 @@
 //! and [`logf!`](crate::logf) macros.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+mod dim;
 pub mod ffi;
 mod flags;
 mod fmt;
@@ -58,6 +59,7 @@ static RICO8_ALLOC: memstat::TrackingAlloc = memstat::TrackingAlloc;
 use crate::flags::bitflag_enum;
 pub use crate::flags::{BitFlag, BitFlags, UnknownBits};
 use core::ops::{Bound, RangeBounds};
+pub use dim::{Dim, ZeroSize};
 pub use glue::__internal;
 pub use motion::Body;
 pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
