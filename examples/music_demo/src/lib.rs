@@ -26,11 +26,11 @@ impl Game for MusicDemo {
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::BLACK);
-        gfx.print("Music demo", 44.0, 8.0, Color::WHITE);
-        gfx.print("Z: play  X: stop", 32.0, 116.0, Color::LIGHT_GREY);
+        gfx.print("Music demo", 44, 8, Color::WHITE);
+        gfx.print("Z: play  X: stop", 32, 116, Color::LIGHT_GREY);
         let playing = self.music.is_some();
         // Dancing bars while playing, flat while stopped.
-        for i in 0..16 {
+        for i in 0..16_i32 {
             let phase = (self.t as f32 / 4.0 + i as f32) % 8.0;
             let h = if playing {
                 let d = phase - 4.0;
@@ -40,10 +40,10 @@ impl Game for MusicDemo {
                 4
             };
             let c = Color::from_index(8 + (i % 8) as u8);
-            gfx.rect_fill((8 + i * 7) as f32, (96 - h) as f32, 5.0, h as f32, c);
+            gfx.rect_fill(8 + i * 7, 96 - h, 5, h, c).unwrap();
         }
         if playing {
-            gfx.print("Now playing: pattern 0", 20.0, 40.0, Color::GREEN);
+            gfx.print("Now playing: pattern 0", 20, 40, Color::GREEN);
         }
     }
 }
