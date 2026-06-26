@@ -725,29 +725,43 @@ impl Graphics {
     }
 
     /// Draw a sprite at `(x, y)`. Color 0 is transparent.
-    pub fn sprite(&mut self, sprite: SpriteId, x: f32, y: f32) {
-        unsafe { ffi::sprite(sprite.0 as u32, x, y, 1.0, 1.0, 0, 0) }
+    pub fn sprite(&mut self, sprite: SpriteId, x: i32, y: i32) {
+        // A whole 8x8 cell, in pixels.
+        unsafe { ffi::sprite(sprite.0 as u32, x, y, 8, 8, 0, 0) }
     }
 
     /// Alias for [`Graphics::sprite`].
-    pub fn spr(&mut self, sprite: SpriteId, x: f32, y: f32) {
+    pub fn spr(&mut self, sprite: SpriteId, x: i32, y: i32) {
         self.sprite(sprite, x, y)
     }
 
-    /// Draw a `w x h`-sprite block, optionally flipped. `w`/`h` are in sprite
-    /// units and may be fractional: `w = 0.5` draws a 4-pixel-wide slice.
+    /// Draw a `w x h`-pixel sprite block, optionally flipped. `w`/`h` are in pixels:
+    /// `8` is one cell, `4` a half-cell slice. Errors on a zero/negative size.
     #[allow(clippy::too_many_arguments)]
     pub fn sprite_ext(
         &mut self,
         sprite: SpriteId,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
         flip_x: bool,
         flip_y: bool,
-    ) {
-        unsafe { ffi::sprite(sprite.0 as u32, x, y, w, h, flip_x as i32, flip_y as i32) }
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::sprite(
+                sprite.0 as u32,
+                x,
+                y,
+                w.get() as i32,
+                h.get() as i32,
+                flip_x as i32,
+                flip_y as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Draw a sheet rectangle `(sx,sy,sw,sh)` stretched into a screen rectangle
@@ -1089,9 +1103,8 @@ mod tests {
         gfx.circfill(0, 0, 4, Color::RED);
         gfx.rect_fill(0, 0, 4, 4, Color::RED).unwrap();
         gfx.rectfill(0, 0, 4, 4, Color::RED).unwrap();
-        gfx.sprite(SpriteId(0), 0.0, 0.0);
-        gfx.spr(SpriteId(0), 0.0, 0.0);
-        gfx.sprite_ext(SpriteId(0), 0.0, 0.0, 1.0, 1.0, false, false);
+        gfx.sprite(SpriteId(0), 0, 0);
+        gfx.spr(SpriteId(0), 0, 0);
     }
 
     #[test]
@@ -1268,5 +1281,22 @@ mod tests {
         assert_eq!(gfx.clip(0, 0, 64, 64), Ok(()));
         assert_eq!(gfx.clip(0, 0, 0, 64), Err(ZeroSize));
         gfx.clip_reset(); // Infallible.
+    }
+
+    #[test]
+    fn sprite_and_sprite_ext() {
+        let mut gfx = Graphics { _private: () };
+        gfx.sprite(SpriteId(0), 0, 0);
+        gfx.spr(SpriteId(0), 0, 0);
+        // Pixel dimensions: a full cell is 8, a half-cell slice is 4.
+        assert_eq!(
+            gfx.sprite_ext(SpriteId(0), 0, 0, 8, 8, false, false),
+            Ok(())
+        );
+        assert_eq!(gfx.sprite_ext(SpriteId(0), 0, 0, 4, 8, true, false), Ok(()));
+        assert_eq!(
+            gfx.sprite_ext(SpriteId(0), 0, 0, 0, 8, false, false),
+            Err(ZeroSize)
+        );
     }
 }

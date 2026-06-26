@@ -41,7 +41,7 @@
 //!     fn draw(&self, gfx: &mut Graphics) {
 //!         gfx.clear(Color::BLACK);
 //!         // draw_x/draw_y are the coherent pixel; collision uses x()/y().
-//!         gfx.sprite(SpriteId(1), self.body.draw_x(), self.body.draw_y());
+//!         gfx.sprite(SpriteId(1), self.body.draw_x() as i32, self.body.draw_y() as i32);
 //!     }
 //! }
 //! ```
