@@ -106,7 +106,7 @@ impl FrameRate {
 
 /// A color in the fixed 16-color palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Color(pub u8);
+pub struct Color(u8);
 
 impl Color {
     pub const BLACK: Color = Color(0);
@@ -126,15 +126,23 @@ impl Color {
     pub const PINK: Color = Color(14);
     pub const PEACH: Color = Color(15);
 
-    /// Color from a palette index (wraps at 16).
-    pub const fn from_index(i: u8) -> Color {
-        Color(i & 0x0f)
+    /// A color from a palette index, or `None` if `i` is not in `0..16`.
+    pub const fn new(i: u8) -> Option<Color> {
+        if i < 16 {
+            Some(Color(i))
+        } else {
+            None
+        }
     }
-}
 
-impl From<u8> for Color {
-    fn from(i: u8) -> Self {
-        Color::from_index(i)
+    /// The palette index.
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+
+    /// Wrap a host nibble (already `0..16`) into a color. Internal only.
+    pub(crate) const fn from_index(i: u8) -> Color {
+        Color(i & 0x0f)
     }
 }
 
@@ -1092,6 +1100,17 @@ fn sample_i32(lo: i64, count: i64, raw: f32) -> i32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn color_new_validates_the_palette_range() {
+        assert_eq!(Color::new(0), Some(Color::BLACK));
+        assert_eq!(Color::new(15), Some(Color::PEACH));
+        assert_eq!(Color::new(8).map(Color::index), Some(8));
+        assert_eq!(Color::new(16), None);
+        // `new` is const, so out-of-range constants fail at compile time.
+        const ACCENT: Color = Color::new(8).unwrap();
+        assert_eq!(ACCENT, Color::RED);
+    }
 
     #[test]
     fn button_index_matches_abi_order() {
