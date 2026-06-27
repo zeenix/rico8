@@ -62,7 +62,7 @@ use core::ops::{Bound, RangeBounds};
 pub use dim::{Dim, ZeroSize};
 pub use glue::__internal;
 pub use motion::Body;
-pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
+pub use music::{Music, MusicBusy, PlayingMusic};
 
 /// The screen is 128x128 pixels.
 pub const SCREEN_WIDTH: u16 = 128;
@@ -198,6 +198,22 @@ bitflag_enum! {
         Flag6 = 1 << 6,
         Flag7 = 1 << 7,
     }
+}
+
+bitflag_enum! {
+    /// One of the four audio channels, shared by sfx and music. Reserve channels
+    /// for music with [`Music::reserve_channels`].
+    pub enum Channel {
+        Channel0 = 1 << 0,
+        Channel1 = 1 << 1,
+        Channel2 = 1 << 2,
+        Channel3 = 1 << 3,
+    }
+}
+
+/// The ABI channel index (`0..=3`) for a [`Channel`] flag.
+const fn channel_index(c: Channel) -> u32 {
+    (c as u8).trailing_zeros()
 }
 
 /// A sprite on the 16x16 sprite sheet (`0..=255`).
@@ -358,14 +374,14 @@ impl Context {
         unsafe { ffi::sfx(s.0 as i32, -1) }
     }
 
-    /// Play a sound effect on a specific channel (`0..4`).
-    pub fn sfx_on(&mut self, s: SfxId, channel: u8) {
-        unsafe { ffi::sfx(s.0 as i32, channel as i32) }
+    /// Play a sound effect on a specific channel.
+    pub fn sfx_on(&mut self, s: SfxId, channel: Channel) {
+        unsafe { ffi::sfx(s.0 as i32, channel_index(channel) as i32) }
     }
 
     /// Stop whatever is playing on a channel.
-    pub fn sfx_stop(&mut self, channel: u8) {
-        unsafe { ffi::sfx(-1, channel as i32) }
+    pub fn sfx_stop(&mut self, channel: Channel) {
+        unsafe { ffi::sfx(-1, channel_index(channel) as i32) }
     }
 
     /// Begin a music-playback request for pattern `m`.
@@ -1409,6 +1425,22 @@ mod tests {
             gfx.sprite_ext(SpriteId(0), 0, 0, 0, 8, false, false),
             Err(ZeroSize)
         );
+    }
+
+    #[test]
+    fn channel_index_matches_abi_order() {
+        assert_eq!(channel_index(Channel::Channel0), 0);
+        assert_eq!(channel_index(Channel::Channel1), 1);
+        assert_eq!(channel_index(Channel::Channel2), 2);
+        assert_eq!(channel_index(Channel::Channel3), 3);
+    }
+
+    #[test]
+    fn sfx_channel_methods_take_exactly_one_channel() {
+        let mut ctx = Context { _private: () };
+        ctx.sfx(SfxId::new(0).unwrap());
+        ctx.sfx_on(SfxId::new(1).unwrap(), Channel::Channel2);
+        ctx.sfx_stop(Channel::Channel2);
     }
 
     #[test]

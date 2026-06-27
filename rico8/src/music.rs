@@ -1,17 +1,6 @@
 //! The music playback API.
 
-use crate::{ffi, flags::bitflag_enum, BitFlags, MusicId};
-
-bitflag_enum! {
-    /// One of the four audio channels. Reserve channels for music with
-    /// [`Music::reserve_channels`].
-    pub enum MusicChannel {
-        Channel0 = 1 << 0,
-        Channel1 = 1 << 1,
-        Channel2 = 1 << 2,
-        Channel3 = 1 << 3,
-    }
-}
+use crate::{ffi, BitFlags, Channel, MusicId};
 
 /// A configured-but-not-yet-playing music request.
 ///
@@ -22,7 +11,7 @@ bitflag_enum! {
 pub struct Music {
     pattern: MusicId,
     fade_in_duration: u32,
-    channels: BitFlags<MusicChannel>,
+    channels: BitFlags<Channel>,
 }
 
 impl Music {
@@ -45,7 +34,7 @@ impl Music {
     /// avoid them while the music plays.
     ///
     /// [`Context::sfx`]: crate::Context::sfx
-    pub fn reserve_channels(mut self, channels: impl Into<BitFlags<MusicChannel>>) -> Self {
+    pub fn reserve_channels(mut self, channels: impl Into<BitFlags<Channel>>) -> Self {
         self.channels = channels.into();
         self
     }
@@ -132,11 +121,11 @@ mod tests {
 
     #[test]
     fn channel_bits_and_combine() {
-        assert_eq!(MusicChannel::Channel0 as u8, 0b0001);
-        assert_eq!(MusicChannel::Channel3 as u8, 0b1000);
-        let set = MusicChannel::Channel0 | MusicChannel::Channel2;
+        assert_eq!(Channel::Channel0 as u8, 0b0001);
+        assert_eq!(Channel::Channel3 as u8, 0b1000);
+        let set = Channel::Channel0 | Channel::Channel2;
         assert_eq!(set.bits(), 0b0101);
-        let one: BitFlags<MusicChannel> = MusicChannel::Channel1.into();
+        let one: BitFlags<Channel> = Channel::Channel1.into();
         assert_eq!(one.bits(), 0b0010);
     }
 
@@ -146,7 +135,7 @@ mod tests {
         // so a configured request plays and yields a storable handle.
         let m = Music::new(crate::MusicId::new(0).unwrap())
             .fade_in(500)
-            .reserve_channels(MusicChannel::Channel0 | MusicChannel::Channel1);
+            .reserve_channels(Channel::Channel0 | Channel::Channel1);
         let handle: Option<PlayingMusic> = m.play().ok();
         assert!(handle.is_some(), "stub start succeeds");
         // The handle can be armed for a fade-out and stopped.
