@@ -56,11 +56,11 @@ fn fabs(v: f32) -> f32 {
     }
 }
 
-/// `floor(v)` as an `i32`, matching what the console does at draw time, without
+/// `floor(v)` as an `i16`, matching what the console does at draw time, without
 /// the `std`-only `f32::floor`. Positions on a 128x128 screen are tiny, so the
 /// saturating float-to-int cast never bites.
-fn floor_i32(v: f32) -> i32 {
-    let t = v as i32;
+fn floor_i16(v: f32) -> i16 {
+    let t = v as i16;
     if (t as f32) > v {
         t - 1
     } else {
@@ -84,8 +84,8 @@ pub struct Body {
     x: f32,
     y: f32,
     /// Coherent render position — what to draw, floored and phase-aligned.
-    rx: i32,
-    ry: i32,
+    rx: i16,
+    ry: i16,
 }
 
 impl Body {
@@ -94,8 +94,8 @@ impl Body {
         Self {
             x,
             y,
-            rx: floor_i32(x),
-            ry: floor_i32(y),
+            rx: floor_i16(x),
+            ry: floor_i16(y),
         }
     }
 
@@ -107,8 +107,8 @@ impl Body {
     pub fn move_by(&mut self, dx: f32, dy: f32) {
         self.x += dx;
         self.y += dy;
-        let fx = floor_i32(self.x);
-        let fy = floor_i32(self.y);
+        let fx = floor_i16(self.x);
+        let fy = floor_i16(self.y);
 
         // Whole-pixel-or-faster motion on either axis can't produce the
         // sub-pixel phase zigzag (that axis steps every frame), and we want the
@@ -160,17 +160,17 @@ impl Body {
     }
 
     /// The coherent x pixel to draw at.
-    pub fn draw_x(&self) -> i32 {
+    pub fn draw_x(&self) -> i16 {
         self.rx
     }
 
     /// The coherent y pixel to draw at.
-    pub fn draw_y(&self) -> i32 {
+    pub fn draw_y(&self) -> i16 {
         self.ry
     }
 
     /// The coherent render position `(draw_x, draw_y)`.
-    pub fn draw_pos(&self) -> (i32, i32) {
+    pub fn draw_pos(&self) -> (i16, i16) {
         (self.rx, self.ry)
     }
 
@@ -179,8 +179,8 @@ impl Body {
     pub fn set_pos(&mut self, x: f32, y: f32) {
         self.x = x;
         self.y = y;
-        self.rx = floor_i32(x);
-        self.ry = floor_i32(y);
+        self.rx = floor_i16(x);
+        self.ry = floor_i16(y);
     }
 }
 
@@ -191,7 +191,7 @@ mod tests {
     /// Per-frame step classification of a render path, like the repro script:
     /// `D` both axes, `H` x only, `V` y only, `.` neither. A lone `V` wedged
     /// between `H`s (or vice versa) is the zigzag.
-    fn classify(path: &[(i32, i32)]) -> String {
+    fn classify(path: &[(i16, i16)]) -> String {
         path.windows(2)
             .map(|w| {
                 let (dx, dy) = (w[1].0 - w[0].0, w[1].1 - w[0].1);
@@ -206,7 +206,7 @@ mod tests {
     }
 
     /// Drive a `Body` at constant velocity and collect the render path.
-    fn body_path(x0: f32, y0: f32, vx: f32, vy: f32, n: usize) -> Vec<(i32, i32)> {
+    fn body_path(x0: f32, y0: f32, vx: f32, vy: f32, n: usize) -> Vec<(i16, i16)> {
         let mut b = Body::new(x0, y0);
         let mut path = Vec::with_capacity(n);
         for _ in 0..n {
@@ -217,11 +217,11 @@ mod tests {
     }
 
     /// The naive model: independent per-axis accumulation, floored at draw.
-    fn naive_path(x0: f32, y0: f32, vx: f32, vy: f32, n: usize) -> Vec<(i32, i32)> {
+    fn naive_path(x0: f32, y0: f32, vx: f32, vy: f32, n: usize) -> Vec<(i16, i16)> {
         let (mut x, mut y) = (x0, y0);
         let mut path = Vec::with_capacity(n);
         for _ in 0..n {
-            path.push((floor_i32(x), floor_i32(y)));
+            path.push((floor_i16(x), floor_i16(y)));
             x += vx;
             y += vy;
         }
@@ -231,7 +231,7 @@ mod tests {
     /// The defining "no zigzag" property: the minor (slower) axis never steps
     /// on a frame the major (faster) axis does not. Equal speed counts x as
     /// major, matching `Body`.
-    fn minor_never_steps_alone(path: &[(i32, i32)], vx: f32, vy: f32) -> bool {
+    fn minor_never_steps_alone(path: &[(i16, i16)], vx: f32, vy: f32) -> bool {
         let x_major = fabs(vx) >= fabs(vy);
         path.windows(2).all(|w| {
             let (dx, dy) = (w[1].0 - w[0].0, w[1].1 - w[0].1);
@@ -295,8 +295,8 @@ mod tests {
             let mut b = Body::new(3.3, 7.6);
             for _ in 0..50_000 {
                 b.move_by(vx, vy);
-                let ex = (b.draw_x() - floor_i32(b.x())).abs();
-                let ey = (b.draw_y() - floor_i32(b.y())).abs();
+                let ex = (b.draw_x() - floor_i16(b.x())).abs();
+                let ey = (b.draw_y() - floor_i16(b.y())).abs();
                 assert!(ex <= 1 && ey <= 1, "drift {ex},{ey} at {deg}°");
             }
         }
@@ -316,8 +316,8 @@ mod tests {
             let mut b = Body::new(10.0, 10.5);
             for _ in 0..300 {
                 b.move_by(vx, vy);
-                assert_eq!(b.draw_x(), floor_i32(b.x()));
-                assert_eq!(b.draw_y(), floor_i32(b.y()));
+                assert_eq!(b.draw_x(), floor_i16(b.x()));
+                assert_eq!(b.draw_y(), floor_i16(b.y()));
             }
         }
     }

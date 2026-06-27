@@ -7,10 +7,12 @@
 //! is public only so the ABI is inspectable and documented in one place
 //! (see docs/ABI.md).
 //!
-//! Screen-space positions are `i32` pixels and sizes are `i32` (the SDK
-//! validates sizes to non-zero before calling here). Discrete things — sprite
-//! and tile indices, colors, flags, buttons — stay integers too. Returns that
-//! are genuinely fractional (`time`, `rnd`, the CPU/fps gauges) stay `f32`.
+//! Positions and sizes cross this raw ABI as `i32` because wasm has no narrower
+//! integer type. The SDK's cart-facing API uses `i16` positions and `u16` sizes
+//! and widens them to `i32` here (validating sizes to non-zero first). Discrete
+//! things — sprite and tile indices, colors, flags, buttons — stay integers too.
+//! Returns that are genuinely fractional (`time`, `rnd`, the CPU/fps gauges)
+//! stay `f32`.
 
 #[cfg(target_arch = "wasm32")]
 #[link(wasm_import_module = "rico8")]
