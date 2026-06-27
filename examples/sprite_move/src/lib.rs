@@ -13,8 +13,8 @@ game!(SpriteMove {
 });
 
 struct SpriteMove {
-    x: i32,
-    y: i32,
+    x: i16,
+    y: i16,
     flip: bool,
     walking: bool,
     frame: u32,
@@ -41,8 +41,8 @@ impl Game for SpriteMove {
             self.y += 1;
             self.walking = true;
         }
-        self.x = self.x.clamp(0, SCREEN_WIDTH as i32 - 8);
-        self.y = self.y.clamp(0, SCREEN_HEIGHT as i32 - 8);
+        self.x = self.x.clamp(0, SCREEN_WIDTH as i16 - 8);
+        self.y = self.y.clamp(0, SCREEN_HEIGHT as i16 - 8);
         self.frame += 1;
     }
 

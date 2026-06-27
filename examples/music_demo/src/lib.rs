@@ -30,12 +30,12 @@ impl Game for MusicDemo {
         gfx.print("Z: play  X: stop", 32, 116, Color::LIGHT_GREY);
         let playing = self.music.is_some();
         // Dancing bars while playing, flat while stopped.
-        for i in 0..16_i32 {
+        for i in 0..16_i16 {
             let phase = (self.t as f32 / 4.0 + i as f32) % 8.0;
             let h = if playing {
                 let d = phase - 4.0;
                 let d = if d < 0.0 { -d } else { d };
-                8 + (d * 8.0) as i32
+                8 + (d * 8.0) as i16
             } else {
                 4
             };

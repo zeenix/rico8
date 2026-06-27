@@ -36,12 +36,12 @@ const SOLID: SpriteFlag = SpriteFlag::Flag0;
 const RUN: f32 = 0.7;
 
 impl Platformer {
-    fn solid_at(&self, ctx: &Context, px: i32, py: i32) -> bool {
+    fn solid_at(&self, ctx: &Context, px: i16, py: i16) -> bool {
         let tile = ctx.map_tile(px / 8, py / 8);
         ctx.has_sprite_flag(tile, SOLID)
     }
 
-    fn collide(&self, ctx: &Context, x: i32, y: i32) -> bool {
+    fn collide(&self, ctx: &Context, x: i16, y: i16) -> bool {
         // Check the four corners of the 8x8 hitbox (in pixels).
         self.solid_at(ctx, x, y)
             || self.solid_at(ctx, x + 7, y)
@@ -77,11 +77,11 @@ impl Game for Platformer {
         // stay >= 0, so the truncating cast floors.
         let (x, y) = (self.body.x(), self.body.y());
         let mut dx = self.vx;
-        if self.collide(ctx, (x + dx) as i32, y as i32) {
+        if self.collide(ctx, (x + dx) as i16, y as i16) {
             dx = 0.0;
         }
         let mut dy = self.vy;
-        if self.collide(ctx, (x + dx) as i32, (y + dy) as i32) {
+        if self.collide(ctx, (x + dx) as i16, (y + dy) as i16) {
             self.grounded = self.vy > 0.0;
             self.vy = 0.0;
             dy = 0.0;
@@ -91,8 +91,8 @@ impl Game for Platformer {
         self.body.move_by(dx, dy);
 
         // Coins (tile 3): sample the hitbox center.
-        let cx = (self.body.x() as i32 + 4) / 8;
-        let cy = (self.body.y() as i32 + 4) / 8;
+        let cx = (self.body.x() as i16 + 4) / 8;
+        let cy = (self.body.y() as i16 + 4) / 8;
         if ctx.map_tile(cx, cy) == SpriteId(3) {
             ctx.set_map_tile(cx, cy, SpriteId(0));
             self.coins += 1;
@@ -103,8 +103,8 @@ impl Game for Platformer {
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::DARK_BLUE);
         // Camera follows the player across the 32-tile-wide level.
-        let cam = (self.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i32) as f32);
-        gfx.camera(cam as i32, 0);
+        let cam = (self.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
+        gfx.camera(cam as i16, 0);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
         let frame = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
             2
