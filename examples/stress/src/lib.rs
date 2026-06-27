@@ -72,27 +72,27 @@ impl Game for Stress {
         gfx.clear(Color::BLACK);
         // Draw in the vertical middle so the F1 stats overlay (top corners)
         // never covers the readouts.
-        gfx.print("Stress  F1 = stats", 2.0, 50.0, Color::WHITE);
+        gfx.print("Stress  F1 = stats", 2, 50, Color::WHITE);
         printf!(
             gfx,
-            2.0,
-            62.0,
+            2,
+            62,
             Color::GREEN,
             "Heap blk  (U/D): {}",
             self.heap.len()
         );
         printf!(
             gfx,
-            2.0,
-            70.0,
+            2,
+            70,
             Color::from_index(12),
             "Stack frm (O/X): {}",
             self.stack_n
         );
         printf!(
             gfx,
-            2.0,
-            78.0,
+            2,
+            78,
             Color::from_index(9),
             "CPU lvl   (R/L): {}",
             self.cpu_n

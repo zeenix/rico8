@@ -6,24 +6,24 @@
 //! use rico8::*;
 //!
 //! struct MyGame {
-//!     x: f32,
-//!     y: f32,
+//!     x: i32,
+//!     y: i32,
 //! }
 //!
 //! impl Game for MyGame {
 //!     fn update(&mut self, ctx: &mut Context) {
 //!         if ctx.is_button_down(Button::Right) {
-//!             self.x += 1.0;
+//!             self.x += 1;
 //!         }
 //!     }
 //!
 //!     fn draw(&self, gfx: &mut Graphics) {
 //!         gfx.clear(Color::BLACK);
-//!         gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::WHITE);
+//!         gfx.rect_fill(self.x, self.y, 8, 8, Color::WHITE).unwrap();
 //!     }
 //! }
 //!
-//! rico8::game!(MyGame { x: 64.0, y: 64.0 });
+//! rico8::game!(MyGame { x: 64, y: 64 });
 //! ```
 //!
 //! Carts are built for `wasm32-unknown-unknown` as a `cdylib` and run in
@@ -37,6 +37,7 @@
 //! and [`logf!`](crate::logf) macros.
 #![cfg_attr(not(feature = "std"), no_std)]
 
+mod dim;
 pub mod ffi;
 mod flags;
 mod fmt;
@@ -58,13 +59,14 @@ static RICO8_ALLOC: memstat::TrackingAlloc = memstat::TrackingAlloc;
 use crate::flags::bitflag_enum;
 pub use crate::flags::{BitFlag, BitFlags, UnknownBits};
 use core::ops::{Bound, RangeBounds};
+pub use dim::{Dim, ZeroSize};
 pub use glue::__internal;
 pub use motion::Body;
 pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
 
 /// The screen is 128x128 pixels.
-pub const SCREEN_W: i32 = 128;
-pub const SCREEN_H: i32 = 128;
+pub const SCREEN_WIDTH: u32 = 128;
+pub const SCREEN_HEIGHT: u32 = 128;
 /// Default logical frames per second.
 pub const FPS: u32 = 60;
 
@@ -431,19 +433,23 @@ impl Graphics {
         self.clear(color)
     }
 
-    /// Offset all subsequent draws by `(-x, -y)`. Floored to a whole pixel.
-    pub fn camera(&mut self, x: f32, y: f32) {
+    /// Offset all subsequent draws by `(-x, -y)`.
+    pub fn camera(&mut self, x: i32, y: i32) {
         unsafe { ffi::camera(x, y) }
     }
 
-    /// Restrict drawing to a rectangle in screen space.
-    pub fn clip(&mut self, x: f32, y: f32, w: f32, h: f32) {
-        unsafe { ffi::clip(x, y, w, h) }
+    /// Restrict drawing to a rectangle in screen space. Errors on a zero/negative
+    /// size.
+    pub fn clip(&mut self, x: i32, y: i32, w: impl Dim, h: impl Dim) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe { ffi::clip(x, y, w.get() as i32, h.get() as i32) };
+        Ok(())
     }
 
     /// Remove the clip rectangle.
     pub fn clip_reset(&mut self) {
-        unsafe { ffi::clip(0.0, 0.0, SCREEN_W as f32, SCREEN_H as f32) }
+        unsafe { ffi::clip(0, 0, SCREEN_WIDTH as i32, SCREEN_HEIGHT as i32) }
     }
 
     /// Make a palette color transparent (or opaque) for sprite draws.
@@ -486,91 +492,180 @@ impl Graphics {
         unsafe { ffi::reset_palette() }
     }
 
-    /// Set one pixel. The position is floored to a pixel.
-    pub fn set_pixel(&mut self, x: f32, y: f32, color: Color) {
+    /// Set one pixel.
+    pub fn set_pixel(&mut self, x: i32, y: i32, color: Color) {
         unsafe { ffi::set_pixel(x, y, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::set_pixel`].
-    pub fn pset(&mut self, x: f32, y: f32, color: Color) {
+    pub fn pset(&mut self, x: i32, y: i32, color: Color) {
         self.set_pixel(x, y, color)
     }
 
     /// Read one pixel (screen space; out of bounds reads 0).
-    pub fn pixel(&self, x: f32, y: f32) -> Color {
+    pub fn pixel(&self, x: i32, y: i32) -> Color {
         Color::from_index(unsafe { ffi::pixel(x, y) } as u8)
     }
 
     /// Alias for [`Graphics::pixel`].
-    pub fn pget(&self, x: f32, y: f32) -> Color {
+    pub fn pget(&self, x: i32, y: i32) -> Color {
         self.pixel(x, y)
     }
 
     /// Line between two points, inclusive.
-    pub fn line(&mut self, x0: f32, y0: f32, x1: f32, y1: f32, color: Color) {
+    pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Color) {
         unsafe { ffi::line(x0, y0, x1, y1, color.0 as i32) }
     }
 
-    /// Rectangle outline at `(x, y)` with size `w x h`.
-    pub fn rect(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w > 0.0 && h > 0.0 {
-            unsafe { ffi::rect(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
-        }
+    /// Rectangle outline at `(x, y)` with size `w x h`. Errors on a zero/negative
+    /// size.
+    pub fn rect(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::rect(
+                x,
+                y,
+                x + w.get() as i32 - 1,
+                y + h.get() as i32 - 1,
+                color.0 as i32,
+            )
+        };
+        Ok(())
     }
 
-    /// Filled rectangle at `(x, y)` with size `w x h`.
-    pub fn rect_fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w > 0.0 && h > 0.0 {
-            unsafe { ffi::rect_fill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
-        }
+    /// Filled rectangle at `(x, y)` with size `w x h`. Errors on a zero/negative
+    /// size.
+    pub fn rect_fill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::rect_fill(
+                x,
+                y,
+                x + w.get() as i32 - 1,
+                y + h.get() as i32 - 1,
+                color.0 as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Alias for [`Graphics::rect_fill`].
-    pub fn rectfill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+    pub fn rectfill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
         self.rect_fill(x, y, w, h, color)
     }
 
-    /// Circle outline.
-    pub fn circle(&mut self, x: f32, y: f32, r: f32, color: Color) {
-        unsafe { ffi::circle(x, y, r, color.0 as i32) }
+    /// Circle outline. `r = 0` draws a single pixel.
+    pub fn circle(&mut self, x: i32, y: i32, r: u32, color: Color) {
+        unsafe { ffi::circle(x, y, r as i32, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::circle`].
-    pub fn circ(&mut self, x: f32, y: f32, r: f32, color: Color) {
+    pub fn circ(&mut self, x: i32, y: i32, r: u32, color: Color) {
         self.circle(x, y, r, color)
     }
 
-    /// Filled circle.
-    pub fn circle_fill(&mut self, x: f32, y: f32, r: f32, color: Color) {
-        unsafe { ffi::circle_fill(x, y, r, color.0 as i32) }
+    /// Filled circle. `r = 0` draws a single pixel.
+    pub fn circle_fill(&mut self, x: i32, y: i32, r: u32, color: Color) {
+        unsafe { ffi::circle_fill(x, y, r as i32, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::circle_fill`].
-    pub fn circfill(&mut self, x: f32, y: f32, r: f32, color: Color) {
+    pub fn circfill(&mut self, x: i32, y: i32, r: u32, color: Color) {
         self.circle_fill(x, y, r, color)
     }
 
-    /// Ellipse outline inside the `(x, y, w, h)` box.
-    pub fn ellipse(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w > 0.0 && h > 0.0 {
-            unsafe { ffi::ellipse(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
-        }
+    /// Ellipse outline inside the `(x, y, w, h)` box. Errors on a zero/negative
+    /// size.
+    pub fn ellipse(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::ellipse(
+                x,
+                y,
+                x + w.get() as i32 - 1,
+                y + h.get() as i32 - 1,
+                color.0 as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Alias for [`Graphics::ellipse`].
-    pub fn oval(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+    pub fn oval(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
         self.ellipse(x, y, w, h, color)
     }
 
-    /// Filled ellipse inside the `(x, y, w, h)` box.
-    pub fn ellipse_fill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
-        if w > 0.0 && h > 0.0 {
-            unsafe { ffi::ellipse_fill(x, y, x + w - 1.0, y + h - 1.0, color.0 as i32) }
-        }
+    /// Filled ellipse inside the `(x, y, w, h)` box. Errors on a zero/negative
+    /// size.
+    pub fn ellipse_fill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::ellipse_fill(
+                x,
+                y,
+                x + w.get() as i32 - 1,
+                y + h.get() as i32 - 1,
+                color.0 as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Alias for [`Graphics::ellipse_fill`].
-    pub fn ovalfill(&mut self, x: f32, y: f32, w: f32, h: f32, color: Color) {
+    pub fn ovalfill(
+        &mut self,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
+        color: Color,
+    ) -> Result<(), ZeroSize> {
         self.ellipse_fill(x, y, w, h, color)
     }
 
@@ -595,10 +690,10 @@ impl Graphics {
         unsafe { ffi::set_fill_pattern(0, 0, 0) }
     }
 
-    /// Print text with the built-in 4x6 font. Returns the x position after
-    /// the last glyph. For `format!`-style arguments, see
+    /// Print text with the built-in 4x6 font. Returns the x position (as `i32`)
+    /// after the last glyph. For `format!`-style arguments, see
     /// [`printf!`](crate::printf).
-    pub fn print(&mut self, text: &str, x: f32, y: f32, color: Color) -> f32 {
+    pub fn print(&mut self, text: &str, x: i32, y: i32, color: Color) -> i32 {
         unsafe { ffi::print(text.as_ptr(), text.len() as u32, x, y, color.0 as i32) }
     }
 
@@ -613,65 +708,98 @@ impl Graphics {
     }
 
     /// Set the persistent text cursor used by [`Graphics::print_pen`].
-    pub fn set_cursor(&mut self, x: f32, y: f32) {
+    pub fn set_cursor(&mut self, x: i32, y: i32) {
         unsafe { ffi::set_cursor(x, y) }
     }
 
     /// Alias for [`Graphics::set_cursor`].
-    pub fn cursor(&mut self, x: f32, y: f32) {
+    pub fn cursor(&mut self, x: i32, y: i32) {
         self.set_cursor(x, y)
     }
 
     /// Print at the cursor in the pen color, advancing the cursor one line.
-    /// Returns the x position after the last glyph. The cursor advances by a
-    /// single line regardless of any newlines embedded in `text`.
-    pub fn print_pen(&mut self, text: &str) -> f32 {
+    /// Returns the x position (as `i32`) after the last glyph. The cursor
+    /// advances by a single line regardless of any newlines embedded in `text`.
+    pub fn print_pen(&mut self, text: &str) -> i32 {
         unsafe { ffi::print_pen(text.as_ptr(), text.len() as u32) }
     }
 
     /// Draw a sprite at `(x, y)`. Color 0 is transparent.
-    pub fn sprite(&mut self, sprite: SpriteId, x: f32, y: f32) {
-        unsafe { ffi::sprite(sprite.0 as u32, x, y, 1.0, 1.0, 0, 0) }
+    pub fn sprite(&mut self, sprite: SpriteId, x: i32, y: i32) {
+        // A whole 8x8 cell, in pixels.
+        unsafe { ffi::sprite(sprite.0 as u32, x, y, 8, 8, 0, 0) }
     }
 
     /// Alias for [`Graphics::sprite`].
-    pub fn spr(&mut self, sprite: SpriteId, x: f32, y: f32) {
+    pub fn spr(&mut self, sprite: SpriteId, x: i32, y: i32) {
         self.sprite(sprite, x, y)
     }
 
-    /// Draw a `w x h`-sprite block, optionally flipped. `w`/`h` are in sprite
-    /// units and may be fractional: `w = 0.5` draws a 4-pixel-wide slice.
+    /// Draw a `w x h`-pixel sprite block, optionally flipped. `w`/`h` are in pixels:
+    /// `8` is one cell, `4` a half-cell slice. Errors on a zero/negative size.
     #[allow(clippy::too_many_arguments)]
     pub fn sprite_ext(
         &mut self,
         sprite: SpriteId,
-        x: f32,
-        y: f32,
-        w: f32,
-        h: f32,
+        x: i32,
+        y: i32,
+        w: impl Dim,
+        h: impl Dim,
         flip_x: bool,
         flip_y: bool,
-    ) {
-        unsafe { ffi::sprite(sprite.0 as u32, x, y, w, h, flip_x as i32, flip_y as i32) }
+    ) -> Result<(), ZeroSize> {
+        let w = w.to_nonzero().ok_or(ZeroSize)?;
+        let h = h.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::sprite(
+                sprite.0 as u32,
+                x,
+                y,
+                w.get() as i32,
+                h.get() as i32,
+                flip_x as i32,
+                flip_y as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Draw a sheet rectangle `(sx,sy,sw,sh)` stretched into a screen rectangle
-    /// `(dx,dy,dw,dh)`. Honors transparency and the draw palette.
+    /// `(dx,dy,dw,dh)`. Honors transparency and the draw palette. Errors if any
+    /// size is zero.
     #[allow(clippy::too_many_arguments)]
     pub fn sprite_stretch(
         &mut self,
         sx: i32,
         sy: i32,
-        sw: i32,
-        sh: i32,
-        dx: f32,
-        dy: f32,
-        dw: f32,
-        dh: f32,
+        sw: impl Dim,
+        sh: impl Dim,
+        dx: i32,
+        dy: i32,
+        dw: impl Dim,
+        dh: impl Dim,
         flip_x: bool,
         flip_y: bool,
-    ) {
-        unsafe { ffi::sprite_stretch(sx, sy, sw, sh, dx, dy, dw, dh, flip_x as i32, flip_y as i32) }
+    ) -> Result<(), ZeroSize> {
+        let sw = sw.to_nonzero().ok_or(ZeroSize)?;
+        let sh = sh.to_nonzero().ok_or(ZeroSize)?;
+        let dw = dw.to_nonzero().ok_or(ZeroSize)?;
+        let dh = dh.to_nonzero().ok_or(ZeroSize)?;
+        unsafe {
+            ffi::sprite_stretch(
+                sx,
+                sy,
+                sw.get() as i32,
+                sh.get() as i32,
+                dx,
+                dy,
+                dw.get() as i32,
+                dh.get() as i32,
+                flip_x as i32,
+                flip_y as i32,
+            )
+        };
+        Ok(())
     }
 
     /// Alias for [`Graphics::sprite_stretch`].
@@ -680,15 +808,15 @@ impl Graphics {
         &mut self,
         sx: i32,
         sy: i32,
-        sw: i32,
-        sh: i32,
-        dx: f32,
-        dy: f32,
-        dw: f32,
-        dh: f32,
+        sw: impl Dim,
+        sh: impl Dim,
+        dx: i32,
+        dy: i32,
+        dw: impl Dim,
+        dh: impl Dim,
         flip_x: bool,
         flip_y: bool,
-    ) {
+    ) -> Result<(), ZeroSize> {
         self.sprite_stretch(sx, sy, sw, sh, dx, dy, dw, dh, flip_x, flip_y)
     }
 
@@ -696,19 +824,34 @@ impl Graphics {
     /// `(cel_x, cel_y)`, at screen position `(sx, sy)`. With an empty
     /// `layers` set every tile is drawn; otherwise only tiles whose sprite
     /// flags intersect `layers`.
+    ///
+    /// Returns `Err(ZeroSize)` if `cel_w` or `cel_h` is zero.
     #[allow(clippy::too_many_arguments)]
     pub fn map(
         &mut self,
         cel_x: i32,
         cel_y: i32,
-        sx: f32,
-        sy: f32,
-        cel_w: i32,
-        cel_h: i32,
+        sx: i32,
+        sy: i32,
+        cel_w: impl Dim,
+        cel_h: impl Dim,
         layers: impl Into<BitFlags<SpriteFlag>>,
-    ) {
+    ) -> Result<(), ZeroSize> {
+        let cel_w = cel_w.to_nonzero().ok_or(ZeroSize)?;
+        let cel_h = cel_h.to_nonzero().ok_or(ZeroSize)?;
         let layers = layers.into().bits() as u32;
-        unsafe { ffi::map(cel_x, cel_y, sx, sy, cel_w, cel_h, layers) }
+        unsafe {
+            ffi::map(
+                cel_x,
+                cel_y,
+                sx,
+                sy,
+                cel_w.get() as i32,
+                cel_h.get() as i32,
+                layers,
+            )
+        };
+        Ok(())
     }
 }
 
@@ -778,7 +921,8 @@ macro_rules! game {
 }
 
 /// Print formatted text to the screen — like [`Graphics::print`], but with
-/// `format!`-style arguments. Returns the x position after the last glyph.
+/// `format!`-style arguments. Returns the cursor x (as `i32`) after the last
+/// glyph.
 ///
 /// The text is formatted into a fixed stack buffer: no allocator, no
 /// dependencies. The default buffer holds one screen line (32 characters); a
@@ -788,9 +932,9 @@ macro_rules! game {
 /// use rico8::*;
 ///
 /// fn draw(&self, gfx: &mut Graphics) {
-///     rico8::printf!(gfx, 2.0, 2.0, Color::YELLOW, "coins {}", self.coins);
+///     rico8::printf!(gfx, 2, 2, Color::YELLOW, "coins {}", self.coins);
 ///     // A longer line needs a bigger buffer:
-///     rico8::printf!(256; gfx, 0.0, 8.0, Color::WHITE, "pos {} {}", self.x, self.y);
+///     rico8::printf!(256; gfx, 0, 8, Color::WHITE, "pos {} {}", self.x, self.y);
 /// }
 /// ```
 #[macro_export]
@@ -967,48 +1111,41 @@ mod tests {
     #[test]
     fn map_accepts_flag_set_forms() {
         let mut gfx = Graphics { _private: () };
-        gfx.map(0, 0, 0.0, 0.0, 16, 16, BitFlags::empty());
-        gfx.map(0, 0, 0.0, 0.0, 16, 16, SpriteFlag::Flag0);
-        gfx.map(
-            0,
-            0,
-            0.0,
-            0.0,
-            16,
-            16,
-            SpriteFlag::Flag0 | SpriteFlag::Flag3,
-        );
+        gfx.map(0, 0, 0, 0, 16, 16, BitFlags::empty()).unwrap();
+        gfx.map(0, 0, 0, 0, 16, 16, SpriteFlag::Flag0).unwrap();
+        gfx.map(0, 0, 0, 0, 16, 16, SpriteFlag::Flag0 | SpriteFlag::Flag3)
+            .unwrap();
+        assert_eq!(gfx.map(0, 0, 0, 0, 0, 16, BitFlags::empty()), Err(ZeroSize));
     }
 
     #[test]
     fn graphics_aliases_match_primaries() {
         let mut gfx = Graphics { _private: () };
-        assert_eq!(gfx.pixel(1.0, 1.0), gfx.pget(1.0, 1.0));
+        assert_eq!(gfx.pixel(1, 1), gfx.pget(1, 1));
         // Drawing aliases forward to primaries (no-op under native stubs).
-        gfx.set_pixel(0.0, 0.0, Color::RED);
-        gfx.pset(0.0, 0.0, Color::RED);
-        gfx.circle(0.0, 0.0, 4.0, Color::RED);
-        gfx.circ(0.0, 0.0, 4.0, Color::RED);
-        gfx.circle_fill(0.0, 0.0, 4.0, Color::RED);
-        gfx.circfill(0.0, 0.0, 4.0, Color::RED);
-        gfx.rect_fill(0.0, 0.0, 4.0, 4.0, Color::RED);
-        gfx.rectfill(0.0, 0.0, 4.0, 4.0, Color::RED);
-        gfx.sprite(SpriteId(0), 0.0, 0.0);
-        gfx.spr(SpriteId(0), 0.0, 0.0);
-        gfx.sprite_ext(SpriteId(0), 0.0, 0.0, 1.0, 1.0, false, false);
+        gfx.set_pixel(0, 0, Color::RED);
+        gfx.pset(0, 0, Color::RED);
+        gfx.circle(0, 0, 4, Color::RED);
+        gfx.circ(0, 0, 4, Color::RED);
+        gfx.circle_fill(0, 0, 4, Color::RED);
+        gfx.circfill(0, 0, 4, Color::RED);
+        gfx.rect_fill(0, 0, 4, 4, Color::RED).unwrap();
+        gfx.rectfill(0, 0, 4, 4, Color::RED).unwrap();
+        gfx.sprite(SpriteId(0), 0, 0);
+        gfx.spr(SpriteId(0), 0, 0);
     }
 
     #[test]
     fn printf_formats_and_returns_cursor() {
         let mut gfx = Graphics { _private: () };
-        // The native ffi::print stub returns 0.0; this exercises macro
-        // expansion and the f32 return type. String content is covered by the
+        // The native ffi::print stub returns 0; this exercises macro
+        // expansion and the i32 return type. String content is covered by the
         // fmt::tests, since the stub does not capture the text.
-        let cursor: f32 = printf!(gfx, 0.0, 0.0, Color::WHITE, "n={}", 3);
-        assert_eq!(cursor, 0.0);
+        let cursor: i32 = printf!(gfx, 0, 0, Color::WHITE, "n={}", 3);
+        assert_eq!(cursor, 0);
         // Capacity-override arm, multi-arg, and a no-arg literal all expand.
-        let _: f32 = printf!(64; gfx, 0.0, 0.0, Color::WHITE, "{}-{}", 1, 2);
-        let _: f32 = printf!(gfx, 0.0, 0.0, Color::WHITE, "literal");
+        let _: i32 = printf!(64; gfx, 0, 0, Color::WHITE, "{}-{}", 1, 2);
+        let _: i32 = printf!(gfx, 0, 0, Color::WHITE, "literal");
     }
 
     #[test]
@@ -1132,21 +1269,67 @@ mod tests {
         gfx.remap_display_color(Color::RED, Color::BLUE);
         gfx.pal_display(Color::RED, Color::BLUE);
         gfx.reset_palette();
-        gfx.sprite_stretch(0, 0, 8, 8, 0.0, 0.0, 16.0, 16.0, false, false);
-        gfx.sspr(0, 0, 8, 8, 0.0, 0.0, 16.0, 16.0, true, true);
-        gfx.ellipse(0.0, 0.0, 8.0, 6.0, Color::WHITE);
-        gfx.oval(0.0, 0.0, 8.0, 6.0, Color::WHITE);
-        gfx.ellipse_fill(0.0, 0.0, 8.0, 6.0, Color::WHITE);
-        gfx.ovalfill(0.0, 0.0, 8.0, 6.0, Color::WHITE);
+        gfx.sprite_stretch(0, 0, 8, 8, 0, 0, 16, 16, false, false)
+            .unwrap();
+        gfx.sspr(0, 0, 8, 8, 0, 0, 16, 16, true, true).unwrap();
+        assert_eq!(
+            gfx.sspr(0, 0, 8, 8, 0, 0, 0, 16, false, false),
+            Err(ZeroSize)
+        );
+        gfx.ellipse(0, 0, 8, 6, Color::WHITE).unwrap();
+        gfx.oval(0, 0, 8, 6, Color::WHITE).unwrap();
+        gfx.ellipse_fill(0, 0, 8, 6, Color::WHITE).unwrap();
+        gfx.ovalfill(0, 0, 8, 6, Color::WHITE).unwrap();
         gfx.set_fill_pattern(0b1010, Color::RED);
         gfx.fillp(0b1010);
         gfx.set_fill_pattern_transparent(0b1010);
         gfx.clear_fill_pattern();
         gfx.set_pen_color(Color::YELLOW);
         gfx.color(Color::YELLOW);
-        gfx.set_cursor(4.0, 4.0);
-        gfx.cursor(4.0, 4.0);
-        let cursor: f32 = gfx.print_pen("hi");
-        assert_eq!(cursor, 0.0, "native print_pen stub returns 0.0");
+        gfx.set_cursor(4, 4);
+        gfx.cursor(4, 4);
+        let cursor: i32 = gfx.print_pen("hi");
+        assert_eq!(cursor, 0, "native print_pen stub returns 0");
+    }
+
+    #[test]
+    fn fallible_rect_and_ellipse() {
+        let mut gfx = Graphics { _private: () };
+        // Positive sizes succeed.
+        assert_eq!(gfx.rect(0, 0, 4, 4, Color::RED), Ok(()));
+        assert_eq!(gfx.rect_fill(0, 0, 4, 4, Color::RED), Ok(()));
+        assert_eq!(gfx.ellipse(0, 0, 8, 6, Color::WHITE), Ok(()));
+        assert_eq!(gfx.ellipse_fill(0, 0, 8, 6, Color::WHITE), Ok(()));
+        // Zero or negative sizes are a ZeroSize error (nothing drawn).
+        assert_eq!(gfx.rect_fill(0, 0, 0, 4, Color::RED), Err(ZeroSize));
+        assert_eq!(gfx.rect(0, 0, 4, -1, Color::RED), Err(ZeroSize));
+        // A computed i32 size (the case core's TryInto can't take) compiles.
+        let w = 10 - 4;
+        assert_eq!(gfx.rect(0, 0, w, 4, Color::RED), Ok(()));
+    }
+
+    #[test]
+    fn clip_is_fallible_and_reset_is_not() {
+        let mut gfx = Graphics { _private: () };
+        assert_eq!(gfx.clip(0, 0, 64, 64), Ok(()));
+        assert_eq!(gfx.clip(0, 0, 0, 64), Err(ZeroSize));
+        gfx.clip_reset(); // Infallible.
+    }
+
+    #[test]
+    fn sprite_and_sprite_ext() {
+        let mut gfx = Graphics { _private: () };
+        gfx.sprite(SpriteId(0), 0, 0);
+        gfx.spr(SpriteId(0), 0, 0);
+        // Pixel dimensions: a full cell is 8, a half-cell slice is 4.
+        assert_eq!(
+            gfx.sprite_ext(SpriteId(0), 0, 0, 8, 8, false, false),
+            Ok(())
+        );
+        assert_eq!(gfx.sprite_ext(SpriteId(0), 0, 0, 4, 8, true, false), Ok(()));
+        assert_eq!(
+            gfx.sprite_ext(SpriteId(0), 0, 0, 0, 8, false, false),
+            Err(ZeroSize)
+        );
     }
 }

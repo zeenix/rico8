@@ -103,9 +103,9 @@ impl Game for Platformer {
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::DARK_BLUE);
         // Camera follows the player across the 32-tile-wide level.
-        let cam = (self.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_W) as f32);
-        gfx.camera(cam, 0.0);
-        gfx.map(0, 0, 0.0, 0.0, 32, 16, BitFlags::empty());
+        let cam = (self.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i32) as f32);
+        gfx.camera(cam as i32, 0);
+        gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
         let frame = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
             2
         } else {
@@ -116,12 +116,13 @@ impl Game for Platformer {
             SpriteId(frame),
             self.body.draw_x(),
             self.body.draw_y(),
-            1.0,
-            1.0,
+            8,
+            8,
             self.flip,
             false,
-        );
-        gfx.camera(0.0, 0.0);
-        printf!(gfx, 2.0, 2.0, Color::YELLOW, "Coins {}", self.coins);
+        )
+        .unwrap();
+        gfx.camera(0, 0);
+        printf!(gfx, 2, 2, Color::YELLOW, "Coins {}", self.coins);
     }
 }

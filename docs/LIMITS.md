@@ -134,9 +134,10 @@ let snapped = libm::floorf(x / 8.0) * 8.0;
 ```
 
 You often don't need it for drawing: positions and sizes cross the ABI as
-`f32` and the console floors them for you, and converting an `f32` pixel to
-an integer tile index is just `x as i32` (which truncates). Reach for `libm`
-when the *cart's own* math needs it.
+`i32` pixels, and converting a sub-pixel `f32` position to an integer for
+the ABI is just `x as i32` (truncation toward zero — it equals `floor` only
+for non-negative values, so floor negative positions yourself if they must
+step evenly). Reach for `libm` when the *cart's own* math needs it.
 
 [`libm`]: https://docs.rs/libm
 

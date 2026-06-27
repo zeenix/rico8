@@ -34,25 +34,25 @@ pub const TEMPLATE_CODE: &str = r#"#![no_std]
 
 use rico8::*;
 
-game!(MyGame { x: 60.0, y: 70.0 });
+game!(MyGame { x: 60, y: 70 });
 
 struct MyGame {
-    x: f32,
-    y: f32,
+    x: i32,
+    y: i32,
 }
 
 impl Game for MyGame {
     fn update(&mut self, ctx: &mut Context) {
-        if ctx.btn(Button::Left) { self.x -= 1.0; }
-        if ctx.btn(Button::Right) { self.x += 1.0; }
-        if ctx.btn(Button::Up) { self.y -= 1.0; }
-        if ctx.btn(Button::Down) { self.y += 1.0; }
+        if ctx.btn(Button::Left) { self.x -= 1; }
+        if ctx.btn(Button::Right) { self.x += 1; }
+        if ctx.btn(Button::Up) { self.y -= 1; }
+        if ctx.btn(Button::Down) { self.y += 1; }
     }
 
     fn draw(&self, gfx: &mut Graphics) {
         gfx.clear(Color::DARK_BLUE);
-        gfx.print("Hello, RICO-8!", 36.0, 48.0, Color::WHITE);
-        gfx.rect_fill(self.x, self.y, 8.0, 8.0, Color::PINK);
+        gfx.print("Hello, RICO-8!", 36, 48, Color::WHITE);
+        gfx.rect_fill(self.x, self.y, 8, 8, Color::PINK).unwrap();
     }
 }
 "#;
