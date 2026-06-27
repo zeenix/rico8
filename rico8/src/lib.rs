@@ -62,11 +62,22 @@ use core::ops::{Bound, RangeBounds};
 pub use dim::{Dim, ZeroSize};
 pub use glue::__internal;
 pub use motion::Body;
-pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
+pub use music::{Music, MusicBusy, PlayingMusic};
 
 /// The screen is 128x128 pixels.
 pub const SCREEN_WIDTH: u16 = 128;
 pub const SCREEN_HEIGHT: u16 = 128;
+/// The sprite sheet is 128x128 pixels.
+pub const SPRITE_SHEET_WIDTH: u16 = 128;
+pub const SPRITE_SHEET_HEIGHT: u16 = 128;
+/// The map is 128x64 tiles (each tile is one 8x8 sprite cell).
+pub const MAP_WIDTH_TILES: u16 = 128;
+pub const MAP_HEIGHT_TILES: u16 = 64;
+
+/// A point write addressed a coordinate off its surface; nothing was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutOfBounds;
+
 /// Default logical frames per second.
 pub const FPS: u32 = 60;
 
@@ -95,7 +106,7 @@ impl FrameRate {
 
 /// A color in the fixed 16-color palette.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Color(pub u8);
+pub struct Color(u8);
 
 impl Color {
     pub const BLACK: Color = Color(0);
@@ -115,15 +126,23 @@ impl Color {
     pub const PINK: Color = Color(14);
     pub const PEACH: Color = Color(15);
 
-    /// Color from a palette index (wraps at 16).
-    pub const fn from_index(i: u8) -> Color {
-        Color(i & 0x0f)
+    /// A color from a palette index, or `None` if `i` is not in `0..16`.
+    pub const fn new(i: u8) -> Option<Color> {
+        if i < 16 {
+            Some(Color(i))
+        } else {
+            None
+        }
     }
-}
 
-impl From<u8> for Color {
-    fn from(i: u8) -> Self {
-        Color::from_index(i)
+    /// The palette index.
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+
+    /// Wrap a host nibble (already `0..16`) into a color. Internal only.
+    pub(crate) const fn from_index(i: u8) -> Color {
+        Color(i & 0x0f)
     }
 }
 
@@ -181,17 +200,65 @@ bitflag_enum! {
     }
 }
 
+bitflag_enum! {
+    /// One of the four audio channels, shared by sfx and music. Reserve channels
+    /// for music with [`Music::reserve_channels`].
+    pub enum Channel {
+        Channel0 = 1 << 0,
+        Channel1 = 1 << 1,
+        Channel2 = 1 << 2,
+        Channel3 = 1 << 3,
+    }
+}
+
+/// The ABI channel index (`0..=3`) for a [`Channel`] flag.
+const fn channel_index(c: Channel) -> u32 {
+    (c as u8).trailing_zeros()
+}
+
 /// A sprite on the 16x16 sprite sheet (`0..=255`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SpriteId(pub u8);
 
 /// A sound effect slot (`0..=63`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SfxId(pub u8);
+pub struct SfxId(u8);
+
+impl SfxId {
+    /// A sound-effect slot, or `None` if `n` is not in `0..64`.
+    pub const fn new(n: u8) -> Option<SfxId> {
+        if n < 64 {
+            Some(SfxId(n))
+        } else {
+            None
+        }
+    }
+
+    /// The slot number.
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+}
 
 /// A music pattern (`0..=63`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MusicId(pub u8);
+pub struct MusicId(u8);
+
+impl MusicId {
+    /// A music pattern slot, or `None` if `n` is not in `0..64`.
+    pub const fn new(n: u8) -> Option<MusicId> {
+        if n < 64 {
+            Some(MusicId(n))
+        } else {
+            None
+        }
+    }
+
+    /// The pattern slot number.
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+}
 
 /// Game state and input, available during `update`.
 ///
@@ -234,44 +301,65 @@ impl Context {
             .expect("buttons_pressed returned an unknown button bit (rico8 host/SDK ABI mismatch)")
     }
 
-    /// The sprite number of a map tile (`SpriteId(0)` = empty).
-    pub fn map_tile(&self, x: i16, y: i16) -> SpriteId {
-        SpriteId(unsafe { ffi::map_tile(x as i32, y as i32) } as u8)
+    /// The sprite number of a map tile (`SpriteId(0)` = empty), or `None` if
+    /// `(x, y)` is off the 128x64 map. `x`/`y` are tile coordinates.
+    pub fn map_tile(&self, x: i16, y: i16) -> Option<SpriteId> {
+        if !in_bounds(x, y, MAP_WIDTH_TILES, MAP_HEIGHT_TILES) {
+            return None;
+        }
+        Some(SpriteId(unsafe { ffi::map_tile(x as i32, y as i32) } as u8))
     }
 
     /// Alias for [`Context::map_tile`].
-    pub fn mget(&self, x: i16, y: i16) -> SpriteId {
+    pub fn mget(&self, x: i16, y: i16) -> Option<SpriteId> {
         self.map_tile(x, y)
     }
 
-    /// Write a map tile. Changes live in console RAM and are discarded on
-    /// reload, like any self-respecting cartridge.
-    pub fn set_map_tile(&mut self, x: i16, y: i16, sprite: SpriteId) {
-        unsafe { ffi::set_map_tile(x as i32, y as i32, sprite.0 as u32) }
+    /// Write a map tile (`x`/`y` are tile coordinates). Changes live in console
+    /// RAM and are discarded on reload, like any self-respecting cartridge.
+    /// `Err(OutOfBounds)` if `(x, y)` is off the map.
+    pub fn set_map_tile(&mut self, x: i16, y: i16, sprite: SpriteId) -> Result<(), OutOfBounds> {
+        if !in_bounds(x, y, MAP_WIDTH_TILES, MAP_HEIGHT_TILES) {
+            return Err(OutOfBounds);
+        }
+        unsafe { ffi::set_map_tile(x as i32, y as i32, sprite.0 as u32) };
+        Ok(())
     }
 
     /// Alias for [`Context::set_map_tile`].
-    pub fn mset(&mut self, x: i16, y: i16, sprite: SpriteId) {
+    pub fn mset(&mut self, x: i16, y: i16, sprite: SpriteId) -> Result<(), OutOfBounds> {
         self.set_map_tile(x, y, sprite)
     }
 
-    /// Read a pixel from the sprite sheet (out of bounds reads color 0).
-    pub fn sprite_pixel(&self, x: i16, y: i16) -> Color {
-        Color::from_index(unsafe { ffi::sprite_pixel(x as i32, y as i32) } as u8)
+    /// Read a pixel from the sprite sheet, or `None` if `(x, y)` is off the
+    /// 128x128 sheet. `x`/`y` are sheet pixel coordinates.
+    pub fn sprite_pixel(&self, x: i16, y: i16) -> Option<Color> {
+        if !in_bounds(x, y, SPRITE_SHEET_WIDTH, SPRITE_SHEET_HEIGHT) {
+            return None;
+        }
+        Some(Color::from_index(
+            unsafe { ffi::sprite_pixel(x as i32, y as i32) } as u8,
+        ))
     }
 
     /// Alias for [`Context::sprite_pixel`].
-    pub fn sget(&self, x: i16, y: i16) -> Color {
+    pub fn sget(&self, x: i16, y: i16) -> Option<Color> {
         self.sprite_pixel(x, y)
     }
 
-    /// Write a pixel on the sprite sheet. RAM only, discarded on reload.
-    pub fn set_sprite_pixel(&mut self, x: i16, y: i16, color: Color) {
-        unsafe { ffi::set_sprite_pixel(x as i32, y as i32, color.0 as i32) }
+    /// Write a pixel on the sprite sheet (`x`/`y` are sheet pixel coordinates).
+    /// RAM only, discarded on reload. `Err(OutOfBounds)` if `(x, y)` is off the
+    /// sheet.
+    pub fn set_sprite_pixel(&mut self, x: i16, y: i16, color: Color) -> Result<(), OutOfBounds> {
+        if !in_bounds(x, y, SPRITE_SHEET_WIDTH, SPRITE_SHEET_HEIGHT) {
+            return Err(OutOfBounds);
+        }
+        unsafe { ffi::set_sprite_pixel(x as i32, y as i32, color.0 as i32) };
+        Ok(())
     }
 
     /// Alias for [`Context::set_sprite_pixel`].
-    pub fn sset(&mut self, x: i16, y: i16, color: Color) {
+    pub fn sset(&mut self, x: i16, y: i16, color: Color) -> Result<(), OutOfBounds> {
         self.set_sprite_pixel(x, y, color)
     }
 
@@ -307,14 +395,14 @@ impl Context {
         unsafe { ffi::sfx(s.0 as i32, -1) }
     }
 
-    /// Play a sound effect on a specific channel (`0..4`).
-    pub fn sfx_on(&mut self, s: SfxId, channel: u8) {
-        unsafe { ffi::sfx(s.0 as i32, channel as i32) }
+    /// Play a sound effect on a specific channel.
+    pub fn sfx_on(&mut self, s: SfxId, channel: Channel) {
+        unsafe { ffi::sfx(s.0 as i32, channel_index(channel) as i32) }
     }
 
     /// Stop whatever is playing on a channel.
-    pub fn sfx_stop(&mut self, channel: u8) {
-        unsafe { ffi::sfx(-1, channel as i32) }
+    pub fn sfx_stop(&mut self, channel: Channel) {
+        unsafe { ffi::sfx(-1, channel_index(channel) as i32) }
     }
 
     /// Begin a music-playback request for pattern `m`.
@@ -502,13 +590,19 @@ impl Graphics {
         self.set_pixel(x, y, color)
     }
 
-    /// Read one pixel (screen space; out of bounds reads 0).
-    pub fn pixel(&self, x: i16, y: i16) -> Color {
-        Color::from_index(unsafe { ffi::pixel(x as i32, y as i32) } as u8)
+    /// Read one pixel in raw screen space (camera-independent), or `None` if
+    /// `(x, y)` is off-screen.
+    pub fn pixel(&self, x: i16, y: i16) -> Option<Color> {
+        if !in_bounds(x, y, SCREEN_WIDTH, SCREEN_HEIGHT) {
+            return None;
+        }
+        Some(Color::from_index(
+            unsafe { ffi::pixel(x as i32, y as i32) } as u8
+        ))
     }
 
     /// Alias for [`Graphics::pixel`].
-    pub fn pget(&self, x: i16, y: i16) -> Color {
+    pub fn pget(&self, x: i16, y: i16) -> Option<Color> {
         self.pixel(x, y)
     }
 
@@ -986,6 +1080,11 @@ macro_rules! logf {
     }};
 }
 
+/// Whether `(x, y)` falls inside a `w x h` surface anchored at the origin.
+fn in_bounds(x: i16, y: i16, w: u16, h: u16) -> bool {
+    x >= 0 && y >= 0 && (x as u16) < w && (y as u16) < h
+}
+
 /// The `(lo, hi)` of a float range; an open lower end is `f32::MIN`, an open upper
 /// end is `f32::MAX`.
 fn f32_bounds<R>(range: R) -> (f32, f32)
@@ -1051,6 +1150,17 @@ mod tests {
     use super::*;
 
     #[test]
+    fn color_new_validates_the_palette_range() {
+        assert_eq!(Color::new(0), Some(Color::BLACK));
+        assert_eq!(Color::new(15), Some(Color::PEACH));
+        assert_eq!(Color::new(8).map(Color::index), Some(8));
+        assert_eq!(Color::new(16), None);
+        // `new` is const, so out-of-range constants fail at compile time.
+        const ACCENT: Color = Color::new(8).unwrap();
+        assert_eq!(ACCENT, Color::RED);
+    }
+
+    #[test]
     fn button_index_matches_abi_order() {
         assert_eq!(button_index(Button::Left), 0);
         assert_eq!(button_index(Button::Right), 1);
@@ -1086,8 +1196,25 @@ mod tests {
         assert!(ctx.sprite_flags(SpriteId(1)).is_empty());
         assert_eq!(ctx.sprite_flags(SpriteId(1)), ctx.fget(SpriteId(1)));
         assert!(!ctx.has_sprite_flag(SpriteId(1), SpriteFlag::Flag0));
-        assert_eq!(ctx.map_tile(0, 0), SpriteId(0));
+        assert_eq!(ctx.map_tile(0, 0), Some(SpriteId(0)));
         assert_eq!(ctx.map_tile(0, 0), ctx.mget(0, 0));
+        assert_eq!(ctx.map_tile(-1, 0), None);
+        assert_eq!(ctx.map_tile(0, MAP_HEIGHT_TILES as i16), None);
+    }
+
+    #[test]
+    fn set_map_tile_is_bounds_checked() {
+        let mut ctx = Context { _private: () };
+        assert_eq!(ctx.set_map_tile(0, 0, SpriteId(3)), Ok(()));
+        assert_eq!(ctx.mset(0, 0, SpriteId(3)), Ok(()));
+        assert_eq!(
+            ctx.set_map_tile(MAP_WIDTH_TILES as i16, 0, SpriteId(3)),
+            Err(OutOfBounds)
+        );
+        assert_eq!(
+            ctx.mset(0, MAP_HEIGHT_TILES as i16, SpriteId(3)),
+            Err(OutOfBounds)
+        );
     }
 
     #[test]
@@ -1124,6 +1251,18 @@ mod tests {
         gfx.map(0, 0, 0, 0, 16, 16, SpriteFlag::Flag0 | SpriteFlag::Flag3)
             .unwrap();
         assert_eq!(gfx.map(0, 0, 0, 0, 0, 16, BitFlags::empty()), Err(ZeroSize));
+    }
+
+    #[test]
+    fn screen_pixel_read_is_bounds_checked() {
+        let gfx = Graphics { _private: () };
+        // In raw screen space the native stub reads 0; in bounds is `Some`.
+        assert!(gfx.pixel(0, 0).is_some());
+        assert_eq!(gfx.pixel(1, 1), gfx.pget(1, 1));
+        // Off-screen reads are `None`.
+        assert_eq!(gfx.pixel(-1, 0), None);
+        assert_eq!(gfx.pixel(SCREEN_WIDTH as i16, 0), None);
+        assert_eq!(gfx.pixel(0, SCREEN_HEIGHT as i16), None);
     }
 
     #[test]
@@ -1169,11 +1308,20 @@ mod tests {
         let mut ctx = Context { _private: () };
         ctx.seed_rng(1);
         ctx.srand(1);
-        ctx.set_sprite_pixel(0, 0, Color::RED);
-        ctx.sset(0, 0, Color::RED);
-        // Native stubs read 0.
-        assert_eq!(ctx.sprite_pixel(0, 0), Color::from_index(0));
+        ctx.set_sprite_pixel(0, 0, Color::RED).unwrap();
+        ctx.sset(0, 0, Color::RED).unwrap();
+        // Native stubs read 0; in-bounds reads are `Some`.
+        assert_eq!(ctx.sprite_pixel(0, 0), Some(Color::from_index(0)));
         assert_eq!(ctx.sprite_pixel(0, 0), ctx.sget(0, 0));
+        // Off the 128x128 sheet: reads are `None`, writes are `Err`.
+        assert_eq!(ctx.sprite_pixel(-1, 0), None);
+        assert_eq!(ctx.sprite_pixel(SPRITE_SHEET_WIDTH as i16, 0), None);
+        assert_eq!(ctx.sprite_pixel(0, SPRITE_SHEET_HEIGHT as i16), None);
+        assert_eq!(
+            ctx.set_sprite_pixel(SPRITE_SHEET_WIDTH as i16, 0, Color::RED),
+            Err(OutOfBounds)
+        );
+        assert_eq!(ctx.set_sprite_pixel(5, 5, Color::RED), Ok(()));
     }
 
     #[test]
@@ -1325,6 +1473,14 @@ mod tests {
     }
 
     #[test]
+    fn surface_dimensions_and_out_of_bounds_exist() {
+        assert_eq!((SPRITE_SHEET_WIDTH, SPRITE_SHEET_HEIGHT), (128, 128));
+        assert_eq!((MAP_WIDTH_TILES, MAP_HEIGHT_TILES), (128, 64));
+        // The error type is comparable, so writes can be asserted later.
+        assert_eq!(OutOfBounds, OutOfBounds);
+    }
+
+    #[test]
     fn sprite_and_sprite_ext() {
         let mut gfx = Graphics { _private: () };
         gfx.sprite(SpriteId(0), 0, 0);
@@ -1339,5 +1495,33 @@ mod tests {
             gfx.sprite_ext(SpriteId(0), 0, 0, 0, 8, false, false),
             Err(ZeroSize)
         );
+    }
+
+    #[test]
+    fn channel_index_matches_abi_order() {
+        assert_eq!(channel_index(Channel::Channel0), 0);
+        assert_eq!(channel_index(Channel::Channel1), 1);
+        assert_eq!(channel_index(Channel::Channel2), 2);
+        assert_eq!(channel_index(Channel::Channel3), 3);
+    }
+
+    #[test]
+    fn sfx_channel_methods_take_exactly_one_channel() {
+        let mut ctx = Context { _private: () };
+        ctx.sfx(SfxId::new(0).unwrap());
+        ctx.sfx_on(SfxId::new(1).unwrap(), Channel::Channel2);
+        ctx.sfx_stop(Channel::Channel2);
+    }
+
+    #[test]
+    fn sfx_and_music_ids_validate_their_range() {
+        assert_eq!(SfxId::new(0).map(SfxId::index), Some(0));
+        assert_eq!(SfxId::new(63).map(SfxId::index), Some(63));
+        assert_eq!(SfxId::new(64), None);
+        assert_eq!(MusicId::new(63).map(MusicId::index), Some(63));
+        assert_eq!(MusicId::new(64), None);
+        // `new` is const, so out-of-range constants fail at compile time.
+        const JUMP: SfxId = SfxId::new(5).unwrap();
+        assert_eq!(JUMP.index(), 5);
     }
 }

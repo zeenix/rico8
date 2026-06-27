@@ -37,8 +37,8 @@ const RUN: f32 = 0.7;
 
 impl Platformer {
     fn solid_at(&self, ctx: &Context, px: i16, py: i16) -> bool {
-        let tile = ctx.map_tile(px / 8, py / 8);
-        ctx.has_sprite_flag(tile, SOLID)
+        ctx.map_tile(px / 8, py / 8)
+            .is_some_and(|tile| ctx.has_sprite_flag(tile, SOLID))
     }
 
     fn collide(&self, ctx: &Context, x: i16, y: i16) -> bool {
@@ -67,7 +67,7 @@ impl Game for Platformer {
         if self.grounded && (ctx.is_button_pressed(Button::O) || ctx.is_button_pressed(Button::Up))
         {
             self.vy = -3.25;
-            ctx.sfx(SfxId(0));
+            ctx.sfx(SfxId::new(0).unwrap());
         }
         self.vy = (self.vy + 0.25).min(4.0);
 
@@ -93,10 +93,10 @@ impl Game for Platformer {
         // Coins (tile 3): sample the hitbox center.
         let cx = (self.body.x() as i16 + 4) / 8;
         let cy = (self.body.y() as i16 + 4) / 8;
-        if ctx.map_tile(cx, cy) == SpriteId(3) {
-            ctx.set_map_tile(cx, cy, SpriteId(0));
+        if ctx.map_tile(cx, cy) == Some(SpriteId(3)) {
+            let _ = ctx.set_map_tile(cx, cy, SpriteId(0));
             self.coins += 1;
-            ctx.sfx(SfxId(1));
+            ctx.sfx(SfxId::new(1).unwrap());
         }
     }
 
