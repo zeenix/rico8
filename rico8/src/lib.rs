@@ -322,23 +322,35 @@ impl Context {
         self.set_map_tile(x, y, sprite)
     }
 
-    /// Read a pixel from the sprite sheet (out of bounds reads color 0).
-    pub fn sprite_pixel(&self, x: i16, y: i16) -> Color {
-        Color::from_index(unsafe { ffi::sprite_pixel(x as i32, y as i32) } as u8)
+    /// Read a pixel from the sprite sheet, or `None` if `(x, y)` is off the
+    /// 128x128 sheet. `x`/`y` are sheet pixel coordinates.
+    pub fn sprite_pixel(&self, x: i16, y: i16) -> Option<Color> {
+        if !in_bounds(x, y, SPRITE_SHEET_WIDTH, SPRITE_SHEET_HEIGHT) {
+            return None;
+        }
+        Some(Color::from_index(
+            unsafe { ffi::sprite_pixel(x as i32, y as i32) } as u8,
+        ))
     }
 
     /// Alias for [`Context::sprite_pixel`].
-    pub fn sget(&self, x: i16, y: i16) -> Color {
+    pub fn sget(&self, x: i16, y: i16) -> Option<Color> {
         self.sprite_pixel(x, y)
     }
 
-    /// Write a pixel on the sprite sheet. RAM only, discarded on reload.
-    pub fn set_sprite_pixel(&mut self, x: i16, y: i16, color: Color) {
-        unsafe { ffi::set_sprite_pixel(x as i32, y as i32, color.0 as i32) }
+    /// Write a pixel on the sprite sheet (`x`/`y` are sheet pixel coordinates).
+    /// RAM only, discarded on reload. `Err(OutOfBounds)` if `(x, y)` is off the
+    /// sheet.
+    pub fn set_sprite_pixel(&mut self, x: i16, y: i16, color: Color) -> Result<(), OutOfBounds> {
+        if !in_bounds(x, y, SPRITE_SHEET_WIDTH, SPRITE_SHEET_HEIGHT) {
+            return Err(OutOfBounds);
+        }
+        unsafe { ffi::set_sprite_pixel(x as i32, y as i32, color.0 as i32) };
+        Ok(())
     }
 
     /// Alias for [`Context::set_sprite_pixel`].
-    pub fn sset(&mut self, x: i16, y: i16, color: Color) {
+    pub fn sset(&mut self, x: i16, y: i16, color: Color) -> Result<(), OutOfBounds> {
         self.set_sprite_pixel(x, y, color)
     }
 
@@ -1053,6 +1065,11 @@ macro_rules! logf {
     }};
 }
 
+/// Whether `(x, y)` falls inside a `w x h` surface anchored at the origin.
+fn in_bounds(x: i16, y: i16, w: u16, h: u16) -> bool {
+    x >= 0 && y >= 0 && (x as u16) < w && (y as u16) < h
+}
+
 /// The `(lo, hi)` of a float range; an open lower end is `f32::MIN`, an open upper
 /// end is `f32::MAX`.
 fn f32_bounds<R>(range: R) -> (f32, f32)
@@ -1247,11 +1264,20 @@ mod tests {
         let mut ctx = Context { _private: () };
         ctx.seed_rng(1);
         ctx.srand(1);
-        ctx.set_sprite_pixel(0, 0, Color::RED);
-        ctx.sset(0, 0, Color::RED);
-        // Native stubs read 0.
-        assert_eq!(ctx.sprite_pixel(0, 0), Color::from_index(0));
+        ctx.set_sprite_pixel(0, 0, Color::RED).unwrap();
+        ctx.sset(0, 0, Color::RED).unwrap();
+        // Native stubs read 0; in-bounds reads are `Some`.
+        assert_eq!(ctx.sprite_pixel(0, 0), Some(Color::from_index(0)));
         assert_eq!(ctx.sprite_pixel(0, 0), ctx.sget(0, 0));
+        // Off the 128x128 sheet: reads are `None`, writes are `Err`.
+        assert_eq!(ctx.sprite_pixel(-1, 0), None);
+        assert_eq!(ctx.sprite_pixel(SPRITE_SHEET_WIDTH as i16, 0), None);
+        assert_eq!(ctx.sprite_pixel(0, SPRITE_SHEET_HEIGHT as i16), None);
+        assert_eq!(
+            ctx.set_sprite_pixel(SPRITE_SHEET_WIDTH as i16, 0, Color::RED),
+            Err(OutOfBounds)
+        );
+        assert_eq!(ctx.set_sprite_pixel(5, 5, Color::RED), Ok(()));
     }
 
     #[test]
