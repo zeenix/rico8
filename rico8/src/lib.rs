@@ -301,24 +301,33 @@ impl Context {
             .expect("buttons_pressed returned an unknown button bit (rico8 host/SDK ABI mismatch)")
     }
 
-    /// The sprite number of a map tile (`SpriteId(0)` = empty).
-    pub fn map_tile(&self, x: i16, y: i16) -> SpriteId {
-        SpriteId(unsafe { ffi::map_tile(x as i32, y as i32) } as u8)
+    /// The sprite number of a map tile (`SpriteId(0)` = empty), or `None` if
+    /// `(x, y)` is off the 128x64 map. `x`/`y` are tile coordinates.
+    pub fn map_tile(&self, x: i16, y: i16) -> Option<SpriteId> {
+        if !in_bounds(x, y, MAP_WIDTH_TILES, MAP_HEIGHT_TILES) {
+            return None;
+        }
+        Some(SpriteId(unsafe { ffi::map_tile(x as i32, y as i32) } as u8))
     }
 
     /// Alias for [`Context::map_tile`].
-    pub fn mget(&self, x: i16, y: i16) -> SpriteId {
+    pub fn mget(&self, x: i16, y: i16) -> Option<SpriteId> {
         self.map_tile(x, y)
     }
 
-    /// Write a map tile. Changes live in console RAM and are discarded on
-    /// reload, like any self-respecting cartridge.
-    pub fn set_map_tile(&mut self, x: i16, y: i16, sprite: SpriteId) {
-        unsafe { ffi::set_map_tile(x as i32, y as i32, sprite.0 as u32) }
+    /// Write a map tile (`x`/`y` are tile coordinates). Changes live in console
+    /// RAM and are discarded on reload, like any self-respecting cartridge.
+    /// `Err(OutOfBounds)` if `(x, y)` is off the map.
+    pub fn set_map_tile(&mut self, x: i16, y: i16, sprite: SpriteId) -> Result<(), OutOfBounds> {
+        if !in_bounds(x, y, MAP_WIDTH_TILES, MAP_HEIGHT_TILES) {
+            return Err(OutOfBounds);
+        }
+        unsafe { ffi::set_map_tile(x as i32, y as i32, sprite.0 as u32) };
+        Ok(())
     }
 
     /// Alias for [`Context::set_map_tile`].
-    pub fn mset(&mut self, x: i16, y: i16, sprite: SpriteId) {
+    pub fn mset(&mut self, x: i16, y: i16, sprite: SpriteId) -> Result<(), OutOfBounds> {
         self.set_map_tile(x, y, sprite)
     }
 
@@ -1181,8 +1190,25 @@ mod tests {
         assert!(ctx.sprite_flags(SpriteId(1)).is_empty());
         assert_eq!(ctx.sprite_flags(SpriteId(1)), ctx.fget(SpriteId(1)));
         assert!(!ctx.has_sprite_flag(SpriteId(1), SpriteFlag::Flag0));
-        assert_eq!(ctx.map_tile(0, 0), SpriteId(0));
+        assert_eq!(ctx.map_tile(0, 0), Some(SpriteId(0)));
         assert_eq!(ctx.map_tile(0, 0), ctx.mget(0, 0));
+        assert_eq!(ctx.map_tile(-1, 0), None);
+        assert_eq!(ctx.map_tile(0, MAP_HEIGHT_TILES as i16), None);
+    }
+
+    #[test]
+    fn set_map_tile_is_bounds_checked() {
+        let mut ctx = Context { _private: () };
+        assert_eq!(ctx.set_map_tile(0, 0, SpriteId(3)), Ok(()));
+        assert_eq!(ctx.mset(0, 0, SpriteId(3)), Ok(()));
+        assert_eq!(
+            ctx.set_map_tile(MAP_WIDTH_TILES as i16, 0, SpriteId(3)),
+            Err(OutOfBounds)
+        );
+        assert_eq!(
+            ctx.mset(0, MAP_HEIGHT_TILES as i16, SpriteId(3)),
+            Err(OutOfBounds)
+        );
     }
 
     #[test]
