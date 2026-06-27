@@ -7,12 +7,14 @@ filesystem, no network, no host memory access. Game code should use the
 `rico8` SDK crate, which wraps all of this safely — this document is for
 people working on the console itself, alternate SDKs, or curiosity.
 
-**Screen-space positions and sizes are `i32` pixels; everything discrete is an integer.**
-Coordinates (`x`/`y`), extents (`w`/`h`), the camera, and radius are `i32`. `sprite`'s
-`w`/`h` are pixel counts (`8` = one 8×8 cell). Indices and counts — sprite/tile numbers,
-map cel coordinates, flags, buttons, channels, colors — stay `i32`/`u32`. Colors are
-palette indices `0..16` (masked with `0x0f`). Genuinely fractional returns — `time`, `rnd`,
-`cpu_update`, `cpu_draw`, `fps` — stay `f32`.
+**At this raw ABI, screen-space positions and sizes cross as `i32` pixels; everything discrete
+is an integer.** WebAssembly function signatures only have `i32`/`i64`/`f32`/`f64`, so every
+coordinate (`x`/`y`), extent (`w`/`h`), the camera, and radius is widened to `i32` here; the
+SDK's cart-facing API exposes positions as `i16` and sizes as `u16` and widens them at this
+boundary. `sprite`'s `w`/`h` are pixel counts (`8` = one 8×8 cell). Indices and counts —
+sprite/tile numbers, map cel coordinates, flags, buttons, channels, colors — stay `i32`/`u32`.
+Colors are palette indices `0..16` (masked with `0x0f`). Genuinely fractional returns — `time`,
+`rnd`, `cpu_update`, `cpu_draw`, `fps` — stay `f32`.
 
 The SDK validates all size arguments to non-zero before calling the ABI; size-bearing draw
 methods return `Result<(), ZeroSize>` at the SDK level. Carts built against the old `f32`
@@ -21,7 +23,7 @@ coordinate ABI fail wasm instantiation against this host by design (import-signa
 Out-of-range coordinates are safe everywhere: draws clip, reads return 0.
 
 A sprite moving diagonally at less than a pixel per frame can shimmer: when
-`x` and `y` advance as sub-pixel floats and are independently converted to `i32`
+`x` and `y` advance as sub-pixel floats and are independently converted to `i16`
 before each call, the two axes tick on different frames — a zigzag rather than
 a clean staircase. Holding two buttons for a 45° heading triggers it whenever
 `x` and `y` start on different fractions. This is integer-grid geometry
@@ -31,10 +33,10 @@ exact sub-pixel position stays available for collision.
 
 [`Body`]: ../rico8/src/motion.rs
 
-(Why not narrower integer types for positions? WebAssembly function
-signatures only have `i32`/`i64`/`f32`/`f64` — there is no `i8`/`u8`/`i16`
-at the ABI boundary — and positions are deliberately unbounded so sprites can
-be drawn off-screen and scrolled in by the camera.)
+(The ABI boundary itself can't be narrower: WebAssembly function signatures only have
+`i32`/`i64`/`f32`/`f64` — there is no `i8`/`u8`/`i16`. The SDK still narrows its own API to
+`i16` positions and `u16` sizes, which is far wider than the 128×128 screen needs, so sprites
+can still be drawn off-screen and scrolled in by the camera.)
 
 ## Guest exports (required)
 
