@@ -67,6 +67,17 @@ pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
 /// The screen is 128x128 pixels.
 pub const SCREEN_WIDTH: u16 = 128;
 pub const SCREEN_HEIGHT: u16 = 128;
+/// The sprite sheet is 128x128 pixels.
+pub const SPRITE_SHEET_WIDTH: u16 = 128;
+pub const SPRITE_SHEET_HEIGHT: u16 = 128;
+/// The map is 128x64 tiles (each tile is one 8x8 sprite cell).
+pub const MAP_WIDTH_TILES: u16 = 128;
+pub const MAP_HEIGHT_TILES: u16 = 64;
+
+/// A point write addressed a coordinate off its surface; nothing was written.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct OutOfBounds;
+
 /// Default logical frames per second.
 pub const FPS: u32 = 60;
 
@@ -1322,6 +1333,14 @@ mod tests {
         assert_eq!(gfx.clip(0, 0, 64, 64), Ok(()));
         assert_eq!(gfx.clip(0, 0, 0, 64), Err(ZeroSize));
         gfx.clip_reset(); // Infallible.
+    }
+
+    #[test]
+    fn surface_dimensions_and_out_of_bounds_exist() {
+        assert_eq!((SPRITE_SHEET_WIDTH, SPRITE_SHEET_HEIGHT), (128, 128));
+        assert_eq!((MAP_WIDTH_TILES, MAP_HEIGHT_TILES), (128, 64));
+        // The error type is comparable, so writes can be asserted later.
+        assert_eq!(OutOfBounds, OutOfBounds);
     }
 
     #[test]
