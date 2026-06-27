@@ -15,7 +15,7 @@ impl Game for MusicDemo {
     fn update(&mut self, ctx: &mut Context) {
         self.t += 1;
         if ctx.is_button_pressed(Button::O) && self.music.is_none() {
-            self.music = ctx.music(MusicId(0)).fade_in(500).play().ok();
+            self.music = ctx.music(MusicId::new(0).unwrap()).fade_in(500).play().ok();
         }
         if ctx.is_button_pressed(Button::X) {
             if let Some(m) = self.music.take() {
@@ -39,7 +39,7 @@ impl Game for MusicDemo {
             } else {
                 4
             };
-            let c = Color::from_index(8 + (i % 8) as u8);
+            let c = Color::new(8 + (i % 8) as u8).unwrap();
             gfx.rect_fill(8 + i * 7, 96 - h, 5, h, c).unwrap();
         }
         if playing {

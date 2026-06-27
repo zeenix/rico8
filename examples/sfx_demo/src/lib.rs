@@ -23,7 +23,7 @@ impl Game for SfxDemo {
         self.t += 1;
         for (btn, sfx, _) in PADS {
             if ctx.is_button_pressed(btn) {
-                ctx.sfx(SfxId(sfx));
+                ctx.sfx(SfxId::new(sfx).unwrap());
                 self.last = Some(sfx);
             }
         }

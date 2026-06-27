@@ -81,22 +81,8 @@ impl Game for Stress {
             "Heap blk  (U/D): {}",
             self.heap.len()
         );
-        printf!(
-            gfx,
-            2,
-            70,
-            Color::from_index(12),
-            "Stack frm (O/X): {}",
-            self.stack_n
-        );
-        printf!(
-            gfx,
-            2,
-            78,
-            Color::from_index(9),
-            "CPU lvl   (R/L): {}",
-            self.cpu_n
-        );
+        printf!(gfx, 2, 70, Color::BLUE, "Stack frm (O/X): {}", self.stack_n);
+        printf!(gfx, 2, 78, Color::ORANGE, "CPU lvl   (R/L): {}", self.cpu_n);
     }
 }
 
