@@ -198,11 +198,43 @@ pub struct SpriteId(pub u8);
 
 /// A sound effect slot (`0..=63`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SfxId(pub u8);
+pub struct SfxId(u8);
+
+impl SfxId {
+    /// A sound-effect slot, or `None` if `n` is not in `0..64`.
+    pub const fn new(n: u8) -> Option<SfxId> {
+        if n < 64 {
+            Some(SfxId(n))
+        } else {
+            None
+        }
+    }
+
+    /// The slot number.
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+}
 
 /// A music pattern (`0..=63`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct MusicId(pub u8);
+pub struct MusicId(u8);
+
+impl MusicId {
+    /// A music pattern slot, or `None` if `n` is not in `0..64`.
+    pub const fn new(n: u8) -> Option<MusicId> {
+        if n < 64 {
+            Some(MusicId(n))
+        } else {
+            None
+        }
+    }
+
+    /// The pattern slot number.
+    pub const fn index(self) -> u8 {
+        self.0
+    }
+}
 
 /// Game state and input, available during `update`.
 ///
@@ -1358,5 +1390,17 @@ mod tests {
             gfx.sprite_ext(SpriteId(0), 0, 0, 0, 8, false, false),
             Err(ZeroSize)
         );
+    }
+
+    #[test]
+    fn sfx_and_music_ids_validate_their_range() {
+        assert_eq!(SfxId::new(0).map(SfxId::index), Some(0));
+        assert_eq!(SfxId::new(63).map(SfxId::index), Some(63));
+        assert_eq!(SfxId::new(64), None);
+        assert_eq!(MusicId::new(63).map(MusicId::index), Some(63));
+        assert_eq!(MusicId::new(64), None);
+        // `new` is const, so out-of-range constants fail at compile time.
+        const JUMP: SfxId = SfxId::new(5).unwrap();
+        assert_eq!(JUMP.index(), 5);
     }
 }

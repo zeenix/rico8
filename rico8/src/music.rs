@@ -144,7 +144,7 @@ mod tests {
     fn play_returns_a_handle_on_the_native_stub() {
         // On the host target `ffi::music` is a stub that returns a nonzero token,
         // so a configured request plays and yields a storable handle.
-        let m = Music::new(crate::MusicId(0))
+        let m = Music::new(crate::MusicId::new(0).unwrap())
             .fade_in(500)
             .reserve_channels(MusicChannel::Channel0 | MusicChannel::Channel1);
         let handle: Option<PlayingMusic> = m.play().ok();
@@ -167,7 +167,7 @@ mod tests {
         // Its `Display` explains the refusal.
         use core::fmt::Write as _;
         let mut buf = crate::fmt::FmtBuf::<64>::new();
-        write!(buf, "{}", MusicBusy(Music::new(MusicId(0)))).unwrap();
+        write!(buf, "{}", MusicBusy(Music::new(MusicId::new(0).unwrap()))).unwrap();
         assert_eq!(buf.as_str(), "a song is already playing");
     }
 }
