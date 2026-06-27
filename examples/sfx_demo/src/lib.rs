@@ -33,7 +33,7 @@ impl Game for SfxDemo {
         gfx.clear(Color::DARK_PURPLE);
         gfx.print("SFX soundboard", 36, 8, Color::WHITE);
         for (i, (_, sfx, name)) in PADS.iter().enumerate() {
-            let y = 32 + i as i32 * 20;
+            let y = 32 + i as i16 * 20;
             let hot = self.last == Some(*sfx);
             let bg = if hot { Color::PINK } else { Color::DARK_BLUE };
             gfx.rect_fill(24, y, 80, 14, bg).unwrap();

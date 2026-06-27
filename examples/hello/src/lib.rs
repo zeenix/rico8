@@ -7,8 +7,8 @@ use rico8::*;
 game!(Hello { x: 60, y: 64 });
 
 struct Hello {
-    x: i32,
-    y: i32,
+    x: i16,
+    y: i16,
 }
 
 impl Game for Hello {

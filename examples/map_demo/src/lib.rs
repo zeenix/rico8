@@ -12,8 +12,8 @@ game!(MapDemo {
 });
 
 struct MapDemo {
-    cam_x: i32,
-    cam_y: i32,
+    cam_x: i16,
+    cam_y: i16,
     solid_only: bool,
 }
 
@@ -31,8 +31,8 @@ impl Game for MapDemo {
         if ctx.is_button_down(Button::Down) {
             self.cam_y += 2;
         }
-        self.cam_x = self.cam_x.clamp(0, 32 * 8 - SCREEN_WIDTH as i32);
-        self.cam_y = self.cam_y.clamp(0, 16 * 8 - SCREEN_HEIGHT as i32 + 64);
+        self.cam_x = self.cam_x.clamp(0, 32 * 8 - SCREEN_WIDTH as i16);
+        self.cam_y = self.cam_y.clamp(0, 16 * 8 - SCREEN_HEIGHT as i16 + 64);
         if ctx.is_button_pressed(Button::X) {
             self.solid_only = !self.solid_only;
         }

@@ -6,8 +6,8 @@
 //! use rico8::*;
 //!
 //! struct MyGame {
-//!     x: i32,
-//!     y: i32,
+//!     x: i16,
+//!     y: i16,
 //! }
 //!
 //! impl Game for MyGame {
@@ -65,8 +65,8 @@ pub use motion::Body;
 pub use music::{Music, MusicBusy, MusicChannel, PlayingMusic};
 
 /// The screen is 128x128 pixels.
-pub const SCREEN_WIDTH: u32 = 128;
-pub const SCREEN_HEIGHT: u32 = 128;
+pub const SCREEN_WIDTH: u16 = 128;
+pub const SCREEN_HEIGHT: u16 = 128;
 /// Default logical frames per second.
 pub const FPS: u32 = 60;
 
@@ -235,43 +235,43 @@ impl Context {
     }
 
     /// The sprite number of a map tile (`SpriteId(0)` = empty).
-    pub fn map_tile(&self, x: i32, y: i32) -> SpriteId {
-        SpriteId(unsafe { ffi::map_tile(x, y) } as u8)
+    pub fn map_tile(&self, x: i16, y: i16) -> SpriteId {
+        SpriteId(unsafe { ffi::map_tile(x as i32, y as i32) } as u8)
     }
 
     /// Alias for [`Context::map_tile`].
-    pub fn mget(&self, x: i32, y: i32) -> SpriteId {
+    pub fn mget(&self, x: i16, y: i16) -> SpriteId {
         self.map_tile(x, y)
     }
 
     /// Write a map tile. Changes live in console RAM and are discarded on
     /// reload, like any self-respecting cartridge.
-    pub fn set_map_tile(&mut self, x: i32, y: i32, sprite: SpriteId) {
-        unsafe { ffi::set_map_tile(x, y, sprite.0 as u32) }
+    pub fn set_map_tile(&mut self, x: i16, y: i16, sprite: SpriteId) {
+        unsafe { ffi::set_map_tile(x as i32, y as i32, sprite.0 as u32) }
     }
 
     /// Alias for [`Context::set_map_tile`].
-    pub fn mset(&mut self, x: i32, y: i32, sprite: SpriteId) {
+    pub fn mset(&mut self, x: i16, y: i16, sprite: SpriteId) {
         self.set_map_tile(x, y, sprite)
     }
 
     /// Read a pixel from the sprite sheet (out of bounds reads color 0).
-    pub fn sprite_pixel(&self, x: i32, y: i32) -> Color {
-        Color::from_index(unsafe { ffi::sprite_pixel(x, y) } as u8)
+    pub fn sprite_pixel(&self, x: i16, y: i16) -> Color {
+        Color::from_index(unsafe { ffi::sprite_pixel(x as i32, y as i32) } as u8)
     }
 
     /// Alias for [`Context::sprite_pixel`].
-    pub fn sget(&self, x: i32, y: i32) -> Color {
+    pub fn sget(&self, x: i16, y: i16) -> Color {
         self.sprite_pixel(x, y)
     }
 
     /// Write a pixel on the sprite sheet. RAM only, discarded on reload.
-    pub fn set_sprite_pixel(&mut self, x: i32, y: i32, color: Color) {
-        unsafe { ffi::set_sprite_pixel(x, y, color.0 as i32) }
+    pub fn set_sprite_pixel(&mut self, x: i16, y: i16, color: Color) {
+        unsafe { ffi::set_sprite_pixel(x as i32, y as i32, color.0 as i32) }
     }
 
     /// Alias for [`Context::set_sprite_pixel`].
-    pub fn sset(&mut self, x: i32, y: i32, color: Color) {
+    pub fn sset(&mut self, x: i16, y: i16, color: Color) {
         self.set_sprite_pixel(x, y, color)
     }
 
@@ -434,16 +434,16 @@ impl Graphics {
     }
 
     /// Offset all subsequent draws by `(-x, -y)`.
-    pub fn camera(&mut self, x: i32, y: i32) {
-        unsafe { ffi::camera(x, y) }
+    pub fn camera(&mut self, x: i16, y: i16) {
+        unsafe { ffi::camera(x as i32, y as i32) }
     }
 
     /// Restrict drawing to a rectangle in screen space. Errors on a zero/negative
     /// size.
-    pub fn clip(&mut self, x: i32, y: i32, w: impl Dim, h: impl Dim) -> Result<(), ZeroSize> {
+    pub fn clip(&mut self, x: i16, y: i16, w: impl Dim, h: impl Dim) -> Result<(), ZeroSize> {
         let w = w.to_nonzero().ok_or(ZeroSize)?;
         let h = h.to_nonzero().ok_or(ZeroSize)?;
-        unsafe { ffi::clip(x, y, w.get() as i32, h.get() as i32) };
+        unsafe { ffi::clip(x as i32, y as i32, w.get() as i32, h.get() as i32) };
         Ok(())
     }
 
@@ -493,36 +493,36 @@ impl Graphics {
     }
 
     /// Set one pixel.
-    pub fn set_pixel(&mut self, x: i32, y: i32, color: Color) {
-        unsafe { ffi::set_pixel(x, y, color.0 as i32) }
+    pub fn set_pixel(&mut self, x: i16, y: i16, color: Color) {
+        unsafe { ffi::set_pixel(x as i32, y as i32, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::set_pixel`].
-    pub fn pset(&mut self, x: i32, y: i32, color: Color) {
+    pub fn pset(&mut self, x: i16, y: i16, color: Color) {
         self.set_pixel(x, y, color)
     }
 
     /// Read one pixel (screen space; out of bounds reads 0).
-    pub fn pixel(&self, x: i32, y: i32) -> Color {
-        Color::from_index(unsafe { ffi::pixel(x, y) } as u8)
+    pub fn pixel(&self, x: i16, y: i16) -> Color {
+        Color::from_index(unsafe { ffi::pixel(x as i32, y as i32) } as u8)
     }
 
     /// Alias for [`Graphics::pixel`].
-    pub fn pget(&self, x: i32, y: i32) -> Color {
+    pub fn pget(&self, x: i16, y: i16) -> Color {
         self.pixel(x, y)
     }
 
     /// Line between two points, inclusive.
-    pub fn line(&mut self, x0: i32, y0: i32, x1: i32, y1: i32, color: Color) {
-        unsafe { ffi::line(x0, y0, x1, y1, color.0 as i32) }
+    pub fn line(&mut self, x0: i16, y0: i16, x1: i16, y1: i16, color: Color) {
+        unsafe { ffi::line(x0 as i32, y0 as i32, x1 as i32, y1 as i32, color.0 as i32) }
     }
 
     /// Rectangle outline at `(x, y)` with size `w x h`. Errors on a zero/negative
     /// size.
     pub fn rect(
         &mut self,
-        x: i32,
-        y: i32,
+        x: i16,
+        y: i16,
         w: impl Dim,
         h: impl Dim,
         color: Color,
@@ -531,10 +531,10 @@ impl Graphics {
         let h = h.to_nonzero().ok_or(ZeroSize)?;
         unsafe {
             ffi::rect(
-                x,
-                y,
-                x + w.get() as i32 - 1,
-                y + h.get() as i32 - 1,
+                x as i32,
+                y as i32,
+                x as i32 + w.get() as i32 - 1,
+                y as i32 + h.get() as i32 - 1,
                 color.0 as i32,
             )
         };
@@ -545,8 +545,8 @@ impl Graphics {
     /// size.
     pub fn rect_fill(
         &mut self,
-        x: i32,
-        y: i32,
+        x: i16,
+        y: i16,
         w: impl Dim,
         h: impl Dim,
         color: Color,
@@ -555,10 +555,10 @@ impl Graphics {
         let h = h.to_nonzero().ok_or(ZeroSize)?;
         unsafe {
             ffi::rect_fill(
-                x,
-                y,
-                x + w.get() as i32 - 1,
-                y + h.get() as i32 - 1,
+                x as i32,
+                y as i32,
+                x as i32 + w.get() as i32 - 1,
+                y as i32 + h.get() as i32 - 1,
                 color.0 as i32,
             )
         };
@@ -568,8 +568,8 @@ impl Graphics {
     /// Alias for [`Graphics::rect_fill`].
     pub fn rectfill(
         &mut self,
-        x: i32,
-        y: i32,
+        x: i16,
+        y: i16,
         w: impl Dim,
         h: impl Dim,
         color: Color,
@@ -578,22 +578,22 @@ impl Graphics {
     }
 
     /// Circle outline. `r = 0` draws a single pixel.
-    pub fn circle(&mut self, x: i32, y: i32, r: u32, color: Color) {
-        unsafe { ffi::circle(x, y, r as i32, color.0 as i32) }
+    pub fn circle(&mut self, x: i16, y: i16, r: u16, color: Color) {
+        unsafe { ffi::circle(x as i32, y as i32, r as i32, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::circle`].
-    pub fn circ(&mut self, x: i32, y: i32, r: u32, color: Color) {
+    pub fn circ(&mut self, x: i16, y: i16, r: u16, color: Color) {
         self.circle(x, y, r, color)
     }
 
     /// Filled circle. `r = 0` draws a single pixel.
-    pub fn circle_fill(&mut self, x: i32, y: i32, r: u32, color: Color) {
-        unsafe { ffi::circle_fill(x, y, r as i32, color.0 as i32) }
+    pub fn circle_fill(&mut self, x: i16, y: i16, r: u16, color: Color) {
+        unsafe { ffi::circle_fill(x as i32, y as i32, r as i32, color.0 as i32) }
     }
 
     /// Alias for [`Graphics::circle_fill`].
-    pub fn circfill(&mut self, x: i32, y: i32, r: u32, color: Color) {
+    pub fn circfill(&mut self, x: i16, y: i16, r: u16, color: Color) {
         self.circle_fill(x, y, r, color)
     }
 
@@ -601,8 +601,8 @@ impl Graphics {
     /// size.
     pub fn ellipse(
         &mut self,
-        x: i32,
-        y: i32,
+        x: i16,
+        y: i16,
         w: impl Dim,
         h: impl Dim,
         color: Color,
@@ -611,10 +611,10 @@ impl Graphics {
         let h = h.to_nonzero().ok_or(ZeroSize)?;
         unsafe {
             ffi::ellipse(
-                x,
-                y,
-                x + w.get() as i32 - 1,
-                y + h.get() as i32 - 1,
+                x as i32,
+                y as i32,
+                x as i32 + w.get() as i32 - 1,
+                y as i32 + h.get() as i32 - 1,
                 color.0 as i32,
             )
         };
@@ -624,8 +624,8 @@ impl Graphics {
     /// Alias for [`Graphics::ellipse`].
     pub fn oval(
         &mut self,
-        x: i32,
-        y: i32,
+        x: i16,
+        y: i16,
         w: impl Dim,
         h: impl Dim,
         color: Color,
@@ -637,8 +637,8 @@ impl Graphics {
     /// size.
     pub fn ellipse_fill(
         &mut self,
-        x: i32,
-        y: i32,
+        x: i16,
+        y: i16,
         w: impl Dim,
         h: impl Dim,
         color: Color,
@@ -647,10 +647,10 @@ impl Graphics {
         let h = h.to_nonzero().ok_or(ZeroSize)?;
         unsafe {
             ffi::ellipse_fill(
-                x,
-                y,
-                x + w.get() as i32 - 1,
-                y + h.get() as i32 - 1,
+                x as i32,
+                y as i32,
+                x as i32 + w.get() as i32 - 1,
+                y as i32 + h.get() as i32 - 1,
                 color.0 as i32,
             )
         };
@@ -660,8 +660,8 @@ impl Graphics {
     /// Alias for [`Graphics::ellipse_fill`].
     pub fn ovalfill(
         &mut self,
-        x: i32,
-        y: i32,
+        x: i16,
+        y: i16,
         w: impl Dim,
         h: impl Dim,
         color: Color,
@@ -690,11 +690,19 @@ impl Graphics {
         unsafe { ffi::set_fill_pattern(0, 0, 0) }
     }
 
-    /// Print text with the built-in 4x6 font. Returns the x position (as `i32`)
+    /// Print text with the built-in 4x6 font. Returns the x position (as `i16`)
     /// after the last glyph. For `format!`-style arguments, see
     /// [`printf!`](crate::printf).
-    pub fn print(&mut self, text: &str, x: i32, y: i32, color: Color) -> i32 {
-        unsafe { ffi::print(text.as_ptr(), text.len() as u32, x, y, color.0 as i32) }
+    pub fn print(&mut self, text: &str, x: i16, y: i16, color: Color) -> i16 {
+        unsafe {
+            ffi::print(
+                text.as_ptr(),
+                text.len() as u32,
+                x as i32,
+                y as i32,
+                color.0 as i32,
+            ) as i16
+        }
     }
 
     /// Set the persistent pen color used by [`Graphics::print_pen`].
@@ -708,30 +716,30 @@ impl Graphics {
     }
 
     /// Set the persistent text cursor used by [`Graphics::print_pen`].
-    pub fn set_cursor(&mut self, x: i32, y: i32) {
-        unsafe { ffi::set_cursor(x, y) }
+    pub fn set_cursor(&mut self, x: i16, y: i16) {
+        unsafe { ffi::set_cursor(x as i32, y as i32) }
     }
 
     /// Alias for [`Graphics::set_cursor`].
-    pub fn cursor(&mut self, x: i32, y: i32) {
+    pub fn cursor(&mut self, x: i16, y: i16) {
         self.set_cursor(x, y)
     }
 
     /// Print at the cursor in the pen color, advancing the cursor one line.
-    /// Returns the x position (as `i32`) after the last glyph. The cursor
+    /// Returns the x position (as `i16`) after the last glyph. The cursor
     /// advances by a single line regardless of any newlines embedded in `text`.
-    pub fn print_pen(&mut self, text: &str) -> i32 {
-        unsafe { ffi::print_pen(text.as_ptr(), text.len() as u32) }
+    pub fn print_pen(&mut self, text: &str) -> i16 {
+        unsafe { ffi::print_pen(text.as_ptr(), text.len() as u32) as i16 }
     }
 
     /// Draw a sprite at `(x, y)`. Color 0 is transparent.
-    pub fn sprite(&mut self, sprite: SpriteId, x: i32, y: i32) {
+    pub fn sprite(&mut self, sprite: SpriteId, x: i16, y: i16) {
         // A whole 8x8 cell, in pixels.
-        unsafe { ffi::sprite(sprite.0 as u32, x, y, 8, 8, 0, 0) }
+        unsafe { ffi::sprite(sprite.0 as u32, x as i32, y as i32, 8, 8, 0, 0) }
     }
 
     /// Alias for [`Graphics::sprite`].
-    pub fn spr(&mut self, sprite: SpriteId, x: i32, y: i32) {
+    pub fn spr(&mut self, sprite: SpriteId, x: i16, y: i16) {
         self.sprite(sprite, x, y)
     }
 
@@ -741,8 +749,8 @@ impl Graphics {
     pub fn sprite_ext(
         &mut self,
         sprite: SpriteId,
-        x: i32,
-        y: i32,
+        x: i16,
+        y: i16,
         w: impl Dim,
         h: impl Dim,
         flip_x: bool,
@@ -753,8 +761,8 @@ impl Graphics {
         unsafe {
             ffi::sprite(
                 sprite.0 as u32,
-                x,
-                y,
+                x as i32,
+                y as i32,
                 w.get() as i32,
                 h.get() as i32,
                 flip_x as i32,
@@ -770,12 +778,12 @@ impl Graphics {
     #[allow(clippy::too_many_arguments)]
     pub fn sprite_stretch(
         &mut self,
-        sx: i32,
-        sy: i32,
+        sx: i16,
+        sy: i16,
         sw: impl Dim,
         sh: impl Dim,
-        dx: i32,
-        dy: i32,
+        dx: i16,
+        dy: i16,
         dw: impl Dim,
         dh: impl Dim,
         flip_x: bool,
@@ -787,12 +795,12 @@ impl Graphics {
         let dh = dh.to_nonzero().ok_or(ZeroSize)?;
         unsafe {
             ffi::sprite_stretch(
-                sx,
-                sy,
+                sx as i32,
+                sy as i32,
                 sw.get() as i32,
                 sh.get() as i32,
-                dx,
-                dy,
+                dx as i32,
+                dy as i32,
                 dw.get() as i32,
                 dh.get() as i32,
                 flip_x as i32,
@@ -806,12 +814,12 @@ impl Graphics {
     #[allow(clippy::too_many_arguments)]
     pub fn sspr(
         &mut self,
-        sx: i32,
-        sy: i32,
+        sx: i16,
+        sy: i16,
         sw: impl Dim,
         sh: impl Dim,
-        dx: i32,
-        dy: i32,
+        dx: i16,
+        dy: i16,
         dw: impl Dim,
         dh: impl Dim,
         flip_x: bool,
@@ -829,10 +837,10 @@ impl Graphics {
     #[allow(clippy::too_many_arguments)]
     pub fn map(
         &mut self,
-        cel_x: i32,
-        cel_y: i32,
-        sx: i32,
-        sy: i32,
+        cel_x: i16,
+        cel_y: i16,
+        sx: i16,
+        sy: i16,
         cel_w: impl Dim,
         cel_h: impl Dim,
         layers: impl Into<BitFlags<SpriteFlag>>,
@@ -842,10 +850,10 @@ impl Graphics {
         let layers = layers.into().bits() as u32;
         unsafe {
             ffi::map(
-                cel_x,
-                cel_y,
-                sx,
-                sy,
+                cel_x as i32,
+                cel_y as i32,
+                sx as i32,
+                sy as i32,
                 cel_w.get() as i32,
                 cel_h.get() as i32,
                 layers,
@@ -921,7 +929,7 @@ macro_rules! game {
 }
 
 /// Print formatted text to the screen — like [`Graphics::print`], but with
-/// `format!`-style arguments. Returns the cursor x (as `i32`) after the last
+/// `format!`-style arguments. Returns the cursor x (as `i16`) after the last
 /// glyph.
 ///
 /// The text is formatted into a fixed stack buffer: no allocator, no
@@ -1139,13 +1147,13 @@ mod tests {
     fn printf_formats_and_returns_cursor() {
         let mut gfx = Graphics { _private: () };
         // The native ffi::print stub returns 0; this exercises macro
-        // expansion and the i32 return type. String content is covered by the
+        // expansion and the i16 return type. String content is covered by the
         // fmt::tests, since the stub does not capture the text.
-        let cursor: i32 = printf!(gfx, 0, 0, Color::WHITE, "n={}", 3);
+        let cursor: i16 = printf!(gfx, 0, 0, Color::WHITE, "n={}", 3);
         assert_eq!(cursor, 0);
         // Capacity-override arm, multi-arg, and a no-arg literal all expand.
-        let _: i32 = printf!(64; gfx, 0, 0, Color::WHITE, "{}-{}", 1, 2);
-        let _: i32 = printf!(gfx, 0, 0, Color::WHITE, "literal");
+        let _: i16 = printf!(64; gfx, 0, 0, Color::WHITE, "{}-{}", 1, 2);
+        let _: i16 = printf!(gfx, 0, 0, Color::WHITE, "literal");
     }
 
     #[test]
@@ -1288,7 +1296,7 @@ mod tests {
         gfx.color(Color::YELLOW);
         gfx.set_cursor(4, 4);
         gfx.cursor(4, 4);
-        let cursor: i32 = gfx.print_pen("hi");
+        let cursor: i16 = gfx.print_pen("hi");
         assert_eq!(cursor, 0, "native print_pen stub returns 0");
     }
 

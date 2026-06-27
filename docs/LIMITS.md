@@ -80,8 +80,8 @@ panic = "abort"
 use rico8::*;
 
 struct MyGame {
-    x: i32,
-    y: i32,
+    x: i16,
+    y: i16,
 }
 
 impl Game for MyGame {
@@ -133,11 +133,11 @@ let r = libm::sqrtf(dx * dx + dy * dy);
 let snapped = libm::floorf(x / 8.0) * 8.0;
 ```
 
-You often don't need it for drawing: positions and sizes cross the ABI as
-`i32` pixels, and converting a sub-pixel `f32` position to an integer for
-the ABI is just `x as i32` (truncation toward zero — it equals `floor` only
-for non-negative values, so floor negative positions yourself if they must
-step evenly). Reach for `libm` when the *cart's own* math needs it.
+You often don't need it for drawing: the SDK's draw calls take `i16` positions and `u16` sizes,
+and converting a sub-pixel `f32` position to the integer the API wants is just `x as i16`
+(truncation toward zero — it equals `floor` only for non-negative values, so floor negative
+positions yourself if they must step evenly). Reach for `libm` when the *cart's own* math needs
+it.
 
 [`libm`]: https://docs.rs/libm
 
