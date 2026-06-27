@@ -590,13 +590,19 @@ impl Graphics {
         self.set_pixel(x, y, color)
     }
 
-    /// Read one pixel (screen space; out of bounds reads 0).
-    pub fn pixel(&self, x: i16, y: i16) -> Color {
-        Color::from_index(unsafe { ffi::pixel(x as i32, y as i32) } as u8)
+    /// Read one pixel in raw screen space (camera-independent), or `None` if
+    /// `(x, y)` is off-screen.
+    pub fn pixel(&self, x: i16, y: i16) -> Option<Color> {
+        if !in_bounds(x, y, SCREEN_WIDTH, SCREEN_HEIGHT) {
+            return None;
+        }
+        Some(Color::from_index(
+            unsafe { ffi::pixel(x as i32, y as i32) } as u8
+        ))
     }
 
     /// Alias for [`Graphics::pixel`].
-    pub fn pget(&self, x: i16, y: i16) -> Color {
+    pub fn pget(&self, x: i16, y: i16) -> Option<Color> {
         self.pixel(x, y)
     }
 
@@ -1245,6 +1251,18 @@ mod tests {
         gfx.map(0, 0, 0, 0, 16, 16, SpriteFlag::Flag0 | SpriteFlag::Flag3)
             .unwrap();
         assert_eq!(gfx.map(0, 0, 0, 0, 0, 16, BitFlags::empty()), Err(ZeroSize));
+    }
+
+    #[test]
+    fn screen_pixel_read_is_bounds_checked() {
+        let gfx = Graphics { _private: () };
+        // In raw screen space the native stub reads 0; in bounds is `Some`.
+        assert!(gfx.pixel(0, 0).is_some());
+        assert_eq!(gfx.pixel(1, 1), gfx.pget(1, 1));
+        // Off-screen reads are `None`.
+        assert_eq!(gfx.pixel(-1, 0), None);
+        assert_eq!(gfx.pixel(SCREEN_WIDTH as i16, 0), None);
+        assert_eq!(gfx.pixel(0, SCREEN_HEIGHT as i16), None);
     }
 
     #[test]
