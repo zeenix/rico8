@@ -8,6 +8,7 @@
 
 #![no_std]
 
+use heapless::Vec;
 use rico8::*;
 
 game!(Platformer {
@@ -16,8 +17,9 @@ game!(Platformer {
     vy: 0.0,
     grounded: false,
     flip: false,
-    coins: 0,
+    taken: Vec::new(),
     frame: 0,
+    mode: GameMode::Init,
 });
 
 struct Platformer {
@@ -26,14 +28,10 @@ struct Platformer {
     vy: f32,
     grounded: bool,
     flip: bool,
-    coins: u32,
+    taken: Vec<Taken, MAX_TAKEN>,
     frame: u32,
+    mode: GameMode,
 }
-
-const SOLID: SpriteFlag = SpriteFlag::Flag0;
-// Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
-// Body keeps coherent. At a whole pixel per frame there would be no zigzag.
-const RUN: f32 = 0.7;
 
 impl Platformer {
     fn solid_at(&self, ctx: &Context, px: i16, py: i16) -> bool {
@@ -48,11 +46,29 @@ impl Platformer {
             || self.solid_at(ctx, x, y + 7)
             || self.solid_at(ctx, x + 7, y + 7)
     }
-}
 
-impl Game for Platformer {
-    fn update(&mut self, ctx: &mut Context) {
-        self.frame += 1;
+    fn in_game_update(&mut self, ctx: &mut Context) {
+        let GameMode::InGame {
+            start_time,
+            time_left,
+        } = &mut self.mode
+        else {
+            unreachable!();
+        };
+
+        if *time_left == 0 {
+            self.mode = GameMode::Ended {
+                time: ctx.time(),
+                flash: false,
+                _music: None,
+                won: false,
+            };
+
+            return;
+        }
+        let elapsed = (ctx.time() - *start_time).max(0.0) as u8;
+        *time_left = GAME_TIMEOUT - elapsed;
+
         // Horizontal movement (pixels per frame).
         if ctx.is_button_down(Button::Left) {
             self.vx = -RUN;
@@ -67,7 +83,7 @@ impl Game for Platformer {
         if self.grounded && (ctx.is_button_pressed(Button::O) || ctx.is_button_pressed(Button::Up))
         {
             self.vy = -3.25;
-            ctx.sfx(SfxId::new(0).unwrap());
+            ctx.sfx(JUMP_SFX);
         }
         self.vy = (self.vy + 0.25).min(4.0);
 
@@ -90,30 +106,86 @@ impl Game for Platformer {
         }
         self.body.move_by(dx, dy);
 
-        // Coins (tile 3): sample the hitbox center.
+        // Coins (tile 3) & trophy: sample the hitbox center.
         let cx = (self.body.x() as i16 + 4) / 8;
         let cy = (self.body.y() as i16 + 4) / 8;
-        if ctx.map_tile(cx, cy) == Some(SpriteId(3)) {
-            let _ = ctx.set_map_tile(cx, cy, SpriteId(0));
-            self.coins += 1;
-            ctx.sfx(SfxId::new(1).unwrap());
+        match ctx.map_tile(cx, cy) {
+            Some(COIN_SPRITE) => {
+                ctx.set_map_tile(cx, cy, SpriteId(0)).unwrap();
+                self.taken.push(Taken::new_coin(cx, cy)).unwrap();
+                ctx.sfx(COIN_SFX);
+            }
+            Some(TROPHY_SPRITE) => {
+                ctx.set_map_tile(cx, cy, SpriteId(0)).unwrap();
+                self.taken.push(Taken::new_trophy(cx, cy)).unwrap();
+                // Another music can't be playing becase `PlayingMusic` instace has had to have been
+                // dropped when the game mode switch away from `Ended`.
+                let music = ctx.music(COMPLETION_MUSIC).play().unwrap();
+                self.mode = GameMode::Ended {
+                    time: ctx.time(),
+                    flash: false,
+                    _music: Some(music),
+                    won: true,
+                };
+            }
+            _ => (),
+        }
+    }
+
+    fn restart_game(&mut self, ctx: &mut Context) {
+        self.body = Body::new(16.0, 80.0);
+        self.vx = 0.0;
+        self.vy = 0.0;
+        self.grounded = false;
+        self.flip = false;
+        self.frame = 0;
+        self.mode.start(ctx);
+        // Put all the rewards back on the map.
+        for Taken { x, y, sprite, .. } in &self.taken {
+            ctx.set_map_tile(*x, *y, *sprite).unwrap();
+        }
+        self.taken.clear();
+    }
+}
+
+impl Game for Platformer {
+    fn update(&mut self, ctx: &mut Context) {
+        self.frame += 1;
+
+        match &mut self.mode {
+            mode @ GameMode::Init => mode.start(ctx),
+            GameMode::InGame { .. } => self.in_game_update(ctx),
+            GameMode::Ended { time, .. } if ctx.time() - *time > GAME_OVER_TIMEOUT => {
+                self.restart_game(ctx)
+            }
+            // Flash on every 16th frame.
+            GameMode::Ended { flash, .. } => *flash = self.frame.is_multiple_of(16),
         }
     }
 
     fn draw(&self, gfx: &mut Graphics) {
-        gfx.clear(Color::DARK_BLUE);
+        if matches!(self.mode, GameMode::Ended { flash: true, .. }) {
+            gfx.clear(Color::WHITE);
+        } else {
+            gfx.clear(Color::DARK_BLUE);
+        }
+
         // Camera follows the player across the 32-tile-wide level.
         let cam = (self.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
         gfx.camera(cam as i16, 0);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
-        let frame = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
-            2
+        let sprite = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
+            match self.mode {
+                GameMode::Ended { won, .. } if won => HERO_HAPPY_SPRITE,
+                GameMode::InGame { .. } | GameMode::Ended { .. } => HERO_LEGS_EXTEND_SPRITE,
+                GameMode::Init => unreachable!(),
+            }
         } else {
-            1
+            HERO_SPRITE
         };
         // The body's coherent pixel — a running jump climbs cleanly, no zigzag.
         gfx.sprite_ext(
-            SpriteId(frame),
+            sprite,
             self.body.draw_x(),
             self.body.draw_y(),
             8,
@@ -123,6 +195,102 @@ impl Game for Platformer {
         )
         .unwrap();
         gfx.camera(0, 0);
-        printf!(gfx, 2, 2, Color::YELLOW, "Coins {}", self.coins);
+        printf!(
+            gfx,
+            2,
+            2,
+            Color::YELLOW,
+            "Score {}",
+            self.taken.iter().fold(0, |acc, r| acc + r.points)
+        );
+
+        if let GameMode::InGame { time_left, .. } = self.mode {
+            let color = if time_left < 5 {
+                Color::RED
+            } else {
+                Color::YELLOW
+            };
+            printf!(
+                gfx,
+                (SCREEN_WIDTH - 3 * 4) as i16,
+                2,
+                color,
+                "{:>2}s",
+                time_left
+            );
+        }
     }
 }
+
+#[derive(Debug)]
+enum GameMode {
+    Init,
+    InGame {
+        start_time: f32,
+        time_left: u8,
+    },
+    Ended {
+        time: f32,
+        flash: bool,
+        _music: Option<PlayingMusic>,
+        won: bool,
+    },
+}
+
+impl GameMode {
+    fn start(&mut self, ctx: &mut Context) {
+        assert!(matches!(self, Self::Init | Self::Ended { .. }));
+
+        *self = Self::InGame {
+            start_time: ctx.time(),
+            time_left: GAME_TIMEOUT,
+        };
+    }
+}
+
+#[derive(Debug)]
+struct Taken {
+    x: i16,
+    y: i16,
+    sprite: SpriteId,
+    points: u8,
+}
+
+impl Taken {
+    fn new_coin(x: i16, y: i16) -> Self {
+        Self {
+            x,
+            y,
+            sprite: COIN_SPRITE,
+            points: COIN_POINTS,
+        }
+    }
+    fn new_trophy(x: i16, y: i16) -> Self {
+        Self {
+            x,
+            y,
+            sprite: TROPHY_SPRITE,
+            points: TROPHY_POINTS,
+        }
+    }
+}
+
+const MAX_TAKEN: usize = 8;
+
+const SOLID: SpriteFlag = SpriteFlag::Flag0;
+// Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
+// Body keeps coherent. At a whole pixel per frame there would be no zigzag.
+const RUN: f32 = 0.7;
+const HERO_SPRITE: SpriteId = SpriteId(1);
+const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
+const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
+const COIN_SPRITE: SpriteId = SpriteId(3);
+const TROPHY_SPRITE: SpriteId = SpriteId(4);
+const COIN_POINTS: u8 = 1;
+const TROPHY_POINTS: u8 = 4;
+const GAME_TIMEOUT: u8 = 30;
+const GAME_OVER_TIMEOUT: f32 = 5.0;
+
+const JUMP_SFX: SfxId = SfxId::new(0).unwrap();
+const COIN_SFX: SfxId = SfxId::new(1).unwrap();
+const COMPLETION_MUSIC: MusicId = MusicId::new(0).unwrap();
