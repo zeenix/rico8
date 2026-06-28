@@ -30,11 +30,6 @@ struct Platformer {
     frame: u32,
 }
 
-const SOLID: SpriteFlag = SpriteFlag::Flag0;
-// Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
-// Body keeps coherent. At a whole pixel per frame there would be no zigzag.
-const RUN: f32 = 0.7;
-
 impl Platformer {
     fn solid_at(&self, ctx: &Context, px: i16, py: i16) -> bool {
         ctx.map_tile(px / 8, py / 8)
@@ -126,3 +121,8 @@ impl Game for Platformer {
         printf!(gfx, 2, 2, Color::YELLOW, "Coins {}", self.coins);
     }
 }
+
+const SOLID: SpriteFlag = SpriteFlag::Flag0;
+// Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
+// Body keeps coherent. At a whole pixel per frame there would be no zigzag.
+const RUN: f32 = 0.7;
