@@ -110,12 +110,12 @@ impl Platformer {
         let cy = (self.body.y() as i16 + 4) / 8;
         match ctx.map_tile(cx, cy) {
             Some(COIN_SPRITE) => {
-                let _ = ctx.set_map_tile(cx, cy, SpriteId(0));
+                ctx.set_map_tile(cx, cy, SpriteId(0)).unwrap();
                 self.coins += 1;
                 ctx.sfx(COIN_SFX);
             }
             Some(TROPHY_SPRITE) => {
-                let _ = ctx.set_map_tile(cx, cy, SpriteId(0));
+                ctx.set_map_tile(cx, cy, SpriteId(0)).unwrap();
                 // Another music can't be playing becase `PlayingMusic` instace has had to have been
                 // dropped when the game mode switch away from `Ended`.
                 let music = ctx.music(COMPLETION_MUSIC).play().unwrap();
