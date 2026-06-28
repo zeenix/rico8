@@ -18,7 +18,7 @@ game!(Platformer {
     flip: false,
     coins: 0,
     frame: 0,
-    mode: GameMode::InGame,
+    mode: GameMode::Init,
 });
 
 struct Platformer {
@@ -47,6 +47,25 @@ impl Platformer {
     }
 
     fn in_game_update(&mut self, ctx: &mut Context) {
+        let GameMode::InGame {
+            start_time,
+            time_left,
+        } = &mut self.mode
+        else {
+            unreachable!();
+        };
+
+        if *time_left == 0 {
+            self.mode = GameMode::Ended {
+                time: ctx.time(),
+                flash: false,
+            };
+
+            return;
+        }
+        let elapsed = (ctx.time() - *start_time).max(0.0) as u8;
+        *time_left = GAME_TIMEOUT - elapsed;
+
         // Horizontal movement (pixels per frame).
         if ctx.is_button_down(Button::Left) {
             self.vx = -RUN;
@@ -105,7 +124,7 @@ impl Platformer {
         }
     }
 
-    fn restart_game(&mut self) {
+    fn restart_game(&mut self, ctx: &mut Context) {
         self.body = Body::new(16.0, 80.0);
         self.vx = 0.0;
         self.vy = 0.0;
@@ -113,7 +132,7 @@ impl Platformer {
         self.flip = false;
         self.coins = 0;
         self.frame = 0;
-        self.mode = GameMode::InGame;
+        self.mode.start(ctx);
     }
 }
 
@@ -122,9 +141,10 @@ impl Game for Platformer {
         self.frame += 1;
 
         match &mut self.mode {
-            GameMode::InGame => self.in_game_update(ctx),
+            mode @ GameMode::Init => mode.start(ctx),
+            GameMode::InGame { .. } => self.in_game_update(ctx),
             GameMode::Ended { time, .. } if ctx.time() - *time > GAME_OVER_TIMEOUT => {
-                self.restart_game()
+                self.restart_game(ctx)
             }
             // Flash on every 16th frame.
             GameMode::Ended { flash, .. } => *flash = self.frame.is_multiple_of(16),
@@ -160,13 +180,41 @@ impl Game for Platformer {
         .unwrap();
         gfx.camera(0, 0);
         printf!(gfx, 2, 2, Color::YELLOW, "Coins {}", self.coins);
+
+        if let GameMode::InGame { time_left, .. } = self.mode {
+            let color = if time_left < 5 {
+                Color::RED
+            } else {
+                Color::YELLOW
+            };
+            printf!(
+                gfx,
+                (SCREEN_WIDTH - 3 * 4) as i16,
+                2,
+                color,
+                "{:>2}s",
+                time_left
+            );
+        }
     }
 }
 
 #[derive(Debug)]
 enum GameMode {
-    InGame,
+    Init,
+    InGame { start_time: f32, time_left: u8 },
     Ended { time: f32, flash: bool },
+}
+
+impl GameMode {
+    fn start(&mut self, ctx: &mut Context) {
+        assert!(matches!(self, Self::Init | Self::Ended { .. }));
+
+        *self = Self::InGame {
+            start_time: ctx.time(),
+            time_left: GAME_TIMEOUT,
+        };
+    }
 }
 
 const SOLID: SpriteFlag = SpriteFlag::Flag0;
@@ -177,4 +225,5 @@ const HERO_SPRITE: SpriteId = SpriteId(1);
 const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
+const GAME_TIMEOUT: u8 = 30;
 const GAME_OVER_TIMEOUT: f32 = 5.0;
