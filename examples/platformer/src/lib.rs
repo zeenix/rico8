@@ -80,7 +80,7 @@ impl Platformer {
         if self.grounded && (ctx.is_button_pressed(Button::O) || ctx.is_button_pressed(Button::Up))
         {
             self.vy = -3.25;
-            ctx.sfx(SfxId::new(0).unwrap());
+            ctx.sfx(JUMP_SFX);
         }
         self.vy = (self.vy + 0.25).min(4.0);
 
@@ -110,11 +110,11 @@ impl Platformer {
             Some(COIN_SPRITE) => {
                 let _ = ctx.set_map_tile(cx, cy, SpriteId(0));
                 self.coins += 1;
-                ctx.sfx(SfxId::new(1).unwrap());
+                ctx.sfx(COIN_SFX);
             }
             Some(TROPHY_SPRITE) => {
                 let _ = ctx.set_map_tile(cx, cy, SpriteId(0));
-                ctx.sfx(SfxId::new(8).unwrap());
+                ctx.sfx(TROPHY_SFX);
                 self.mode = GameMode::Ended {
                     time: ctx.time(),
                     flash: false,
@@ -227,3 +227,7 @@ const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
 const GAME_TIMEOUT: u8 = 30;
 const GAME_OVER_TIMEOUT: f32 = 5.0;
+
+const JUMP_SFX: SfxId = SfxId::new(0).unwrap();
+const COIN_SFX: SfxId = SfxId::new(1).unwrap();
+const TROPHY_SFX: SfxId = SfxId::new(8).unwrap();
