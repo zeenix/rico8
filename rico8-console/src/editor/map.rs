@@ -2,12 +2,13 @@
 //! (draw, paste, select, pan, fill, circle), a clipboard, and a full-page
 //! sprite sheet picker along the bottom.
 
+use super::history::History;
 use crate::{
     shell::{Key, Mods},
     ui::{self, draw_icon8, Icon8, Mouse, ICON_PENCIL},
 };
 use rico8_runtime::{
-    assets::{Assets, MAP_H, MAP_W, SPRITES_PER_ROW},
+    assets::{Assets, MapData, MAP_H, MAP_W, SPRITES_PER_ROW},
     fb::Framebuffer,
     palette::col,
 };
@@ -118,6 +119,8 @@ pub struct MapEditor {
     sel: Option<Selection>,
     clip: Option<Clipboard>,
     drag: Drag,
+    /// Undo/redo of the tile map (last 10 edits).
+    history: History<MapData>,
 }
 
 impl MapEditor {
@@ -135,6 +138,7 @@ impl MapEditor {
             sel: None,
             clip: None,
             drag: Drag::None,
+            history: History::new(),
         }
     }
 
@@ -188,6 +192,30 @@ impl MapEditor {
     }
 
     pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets) {
+        if mods.ctrl {
+            if let Key::Char(c) = key {
+                match c.to_ascii_lowercase() {
+                    'z' if mods.shift => {
+                        self.history.redo(&mut assets.map);
+                        return;
+                    }
+                    'z' => {
+                        self.history.undo(&mut assets.map);
+                        return;
+                    }
+                    'y' => {
+                        self.history.redo(&mut assets.map);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // A key edit (cut / delete) is a self-contained gesture: snapshot before
+        // and commit after, so it lands as a single undo step. The commit
+        // compares, so non-editing keys (tool switches, camera moves) record
+        // nothing.
+        self.history.begin(&assets.map);
         match key {
             Key::Left => self.cam_x = (self.cam_x - 1).max(0),
             Key::Right => self.cam_x = (self.cam_x + 1).min(MAP_W as i32 - VIEW_TILES_X),
@@ -207,12 +235,22 @@ impl MapEditor {
             Key::Tab => self.set_fullscreen(!self.fullscreen),
             _ => {}
         }
+        self.history.commit(&assets.map);
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
         self.frame = self.frame.wrapping_add(1);
         self.mx = mouse.x;
         self.my = mouse.y;
+
+        // Bracket each mouse gesture for undo. Some tools (fill, circle, move)
+        // only mutate the map on the release frame, so the snapshot is taken
+        // while the button is held and committed once it is released — at the
+        // end of tick, after that release-frame mutation has run.
+        let down = mouse.left || mouse.right;
+        if down {
+            self.history.begin(&assets.map);
+        }
 
         // Toolbar / sheet / page-dot clicks take priority over map drags.
         if mouse.left_pressed && self.handle_chrome_click(mouse) {
@@ -350,6 +388,13 @@ impl MapEditor {
                     }
                 }
             }
+        }
+
+        // Close the gesture once the button is released, after any release-frame
+        // mutation above. The commit compares, so pans and empty marquees (which
+        // leave the map untouched) record nothing.
+        if !down {
+            self.history.commit(&assets.map);
         }
     }
 
@@ -1117,6 +1162,62 @@ mod tests {
         assert!(ed.is_fullscreen());
         ed.key(Key::Tab, Mods::default(), &mut a);
         assert!(!ed.is_fullscreen());
+    }
+
+    fn ctrl(shift: bool) -> Mods {
+        Mods {
+            ctrl: true,
+            shift,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn undo_and_redo_a_draw_stroke() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.brush = 7;
+        // Paint cell (1,0), then release to close the stroke.
+        ed.tick(&press(9, VIEW_Y + 1), &mut a);
+        ed.tick(&rel(9, VIEW_Y + 1), &mut a);
+        assert_eq!(a.map.get(1, 0), 7);
+        ed.key(Key::Char('z'), ctrl(false), &mut a);
+        assert_eq!(a.map.get(1, 0), 0, "undo clears the tile");
+        ed.key(Key::Char('y'), ctrl(false), &mut a); // Ctrl+Y redo
+        assert_eq!(a.map.get(1, 0), 7, "redo restores the tile");
+    }
+
+    #[test]
+    fn undo_reverts_a_fill_committed_on_release() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        a.map.set(50, 50, 3); // make the map non-uniform.
+        ed.tool = Tool::Fill;
+        ed.brush = 4;
+        // A drag fills a rectangle on the release frame.
+        ed.tick(&press(9, VIEW_Y + 9), &mut a); // (1,1)
+        ed.tick(&held(2 * 8 + 1, VIEW_Y + 2 * 8 + 1), &mut a); // (2,2)
+        ed.tick(&rel(2 * 8 + 1, VIEW_Y + 2 * 8 + 1), &mut a);
+        assert_eq!(a.map.get(1, 1), 4);
+        ed.key(Key::Char('z'), ctrl(false), &mut a);
+        assert_eq!(
+            a.map.get(1, 1),
+            0,
+            "release-frame fill is undone in one step"
+        );
+        assert_eq!(a.map.get(2, 2), 0);
+    }
+
+    #[test]
+    fn undo_reverts_a_delete_key() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        a.map.set(2, 1, 11);
+        make_selection(&mut ed, &mut a, 2, 1, 1, 1);
+        ed.key(Key::Delete, Mods::default(), &mut a);
+        assert_eq!(a.map.get(2, 1), 0);
+        ed.key(Key::Char('z'), ctrl(false), &mut a);
+        assert_eq!(a.map.get(2, 1), 11, "delete is one undo step");
     }
 
     #[test]

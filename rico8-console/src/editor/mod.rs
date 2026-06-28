@@ -2,6 +2,7 @@
 
 pub mod code;
 pub mod file_picker;
+pub mod history;
 pub mod map;
 pub mod music;
 pub mod sfx;

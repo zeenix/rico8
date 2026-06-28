@@ -912,6 +912,7 @@ impl Shell {
             ("esc", "Console <-> editor / stop"),
             ("ctrl+r", "Run cart"),
             ("ctrl+s", "Save + build check"),
+            ("ctrl+z / ctrl+y", "Undo / redo (in editors)"),
             ("alt+left/right", "Switch editor"),
             ("arrows + z/x", "Game buttons"),
             ("f1", "Toggle resource stats"),
