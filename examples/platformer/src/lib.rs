@@ -142,14 +142,14 @@ impl Game for Platformer {
         let cam = (self.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
         gfx.camera(cam as i16, 0);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
-        let frame = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
-            2
+        let sprite = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
+            HERO_LEGS_EXTEND_SPRITE
         } else {
-            1
+            HERO_SPRITE
         };
         // The body's coherent pixel — a running jump climbs cleanly, no zigzag.
         gfx.sprite_ext(
-            SpriteId(frame),
+            sprite,
             self.body.draw_x(),
             self.body.draw_y(),
             8,
@@ -173,6 +173,8 @@ const SOLID: SpriteFlag = SpriteFlag::Flag0;
 // Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
 // Body keeps coherent. At a whole pixel per frame there would be no zigzag.
 const RUN: f32 = 0.7;
+const HERO_SPRITE: SpriteId = SpriteId(1);
+const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
 const GAME_OVER_TIMEOUT: f32 = 5.0;
