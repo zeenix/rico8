@@ -22,3 +22,4 @@ anyhow.workspace = true
 winit.workspace = true
 wgpu.workspace = true
 pollster.workspace = true
+arboard = { version = "3.6", default-features = false, features = ["wayland-data-control"] }

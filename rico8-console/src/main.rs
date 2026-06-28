@@ -5,6 +5,7 @@
 //! `extract`, `import-pico8`) support the external-editor workflow and CI.
 
 mod builder;
+mod clipboard;
 mod editor;
 mod gpu;
 mod shell;

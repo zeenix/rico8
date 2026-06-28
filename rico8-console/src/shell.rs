@@ -23,6 +23,7 @@ use rico8_runtime::{
     fb::Framebuffer,
     font,
     palette::col,
+    pico8::{self, Pasted},
     project::{decode_assets, encode_assets, Project},
     vm::{GameVm, RuntimeError, UI_FPS},
 };
@@ -657,6 +658,15 @@ impl Shell {
                 _ => {}
             }
         }
+        // Ctrl+V pastes PICO-8 assets from the system clipboard into the active
+        // editor. The code editor keeps its own (text) paste.
+        if mods.ctrl
+            && key == Key::Char('v')
+            && matches!(self.mode, Mode::Sprite | Mode::Sfx | Mode::Music)
+        {
+            self.cmd_paste();
+            return;
+        }
         if self.loaded_none() {
             return;
         }
@@ -1006,6 +1016,44 @@ impl Shell {
         }
         self.say(&message, col::GREEN);
         Ok(())
+    }
+
+    /// Read the system clipboard, decode a PICO-8 asset blob, and paste it into
+    /// the active editor. Any failure shows a short message in the editor's bar.
+    fn cmd_paste(&mut self) {
+        // Bar messages are short fixed strings so they always fit the 31-char bar.
+        let text = match crate::clipboard::read_text() {
+            Ok(t) => t,
+            Err(_) => return self.set_editor_status("no text on clipboard".into()),
+        };
+        match pico8::parse_clipboard(&text) {
+            Ok(pasted) => self.apply_paste(pasted),
+            Err(_) => self.set_editor_status("no PICO-8 asset on clipboard".into()),
+        }
+    }
+
+    /// Dispatch a decoded clipboard blob to the active editor. Separated from
+    /// the clipboard read so it can be tested without a display server.
+    fn apply_paste(&mut self, pasted: Pasted) {
+        let Some(a) = assets_of(&mut self.loaded) else {
+            return self.set_editor_status("load a project first".into());
+        };
+        match self.mode {
+            Mode::Sprite => self.sprite_ed.paste(&pasted, a),
+            Mode::Sfx => self.sfx_ed.paste(&pasted, a),
+            Mode::Music => self.music_ed.paste(&pasted, a),
+            _ => {}
+        }
+    }
+
+    /// Show a transient message in the active editor's bottom bar.
+    fn set_editor_status(&mut self, msg: String) {
+        match self.mode {
+            Mode::Sprite => self.sprite_ed.set_status(msg),
+            Mode::Sfx => self.sfx_ed.set_status(msg),
+            Mode::Music => self.music_ed.set_status(msg),
+            _ => {}
+        }
     }
 
     /// Ctrl+S: save, flash feedback where the user is looking, and (for
@@ -2594,6 +2642,33 @@ mod tests {
         );
         assert_eq!(shell.mode, Mode::Console, "must stay at the console");
         assert!(!shell.run_after_build, "must not arm a run");
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn apply_paste_routes_sfx_to_the_sfx_editor() {
+        use rico8_runtime::pico8::{Pasted, SfxClip, Slotted};
+        let dir = std::env::temp_dir().join(format!("rico8_paste_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut shell = test_shell();
+        shell.cwd = dir.clone();
+        shell.cmd_new(&["dest"]).expect("new");
+        shell.mode = Mode::Sfx; // the SFX editor's slot defaults to 0.
+
+        let mut sfx = rico8_runtime::assets::Sfx::default();
+        sfx.notes[0].pitch = 21;
+        sfx.notes[0].volume = 4;
+        let clip = SfxClip {
+            records: vec![Slotted { src: 0, value: sfx }],
+            patterns: vec![],
+        };
+        shell.apply_paste(Pasted::Sfx(clip));
+
+        let assets = assets_ref(&shell.loaded).unwrap();
+        assert_eq!(assets.sfx[0].notes[0].pitch, 21);
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
