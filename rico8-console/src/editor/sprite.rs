@@ -9,6 +9,7 @@ use rico8_runtime::{
     assets::{Assets, SPRITES_PER_ROW},
     fb::Framebuffer,
     palette::col,
+    pico8::{self, Pasted},
 };
 
 // Layout.
@@ -39,6 +40,8 @@ pub struct SpriteEditor {
     /// Last-known cursor position in screen pixels (for hover / status bar).
     mx: i32,
     my: i32,
+    /// Transient bottom-bar message (e.g. a paste result).
+    status: ui::StatusMsg,
 }
 
 impl SpriteEditor {
@@ -51,6 +54,7 @@ impl SpriteEditor {
             fullscreen: false,
             mx: -16,
             my: -16,
+            status: ui::StatusMsg::default(),
         }
     }
 
@@ -146,6 +150,7 @@ impl SpriteEditor {
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
+        self.status.tick();
         self.mx = mouse.x;
         self.my = mouse.y;
         let m = *mouse;
@@ -412,7 +417,26 @@ impl SpriteEditor {
             let flags = assets.sprites.flags(self.sprite);
             format!("Spr {:03} flags {:08b}", self.sprite, flags)
         };
-        ui::status_bar(fb, &text);
+        self.status.show(fb, &text);
+    }
+
+    /// Set a transient bottom-bar message (used for clipboard errors).
+    pub fn set_status(&mut self, msg: String) {
+        self.status.set(msg);
+    }
+
+    /// Paste a decoded PICO-8 clipboard blob. Only sprite pixels apply here;
+    /// other kinds set a hint pointing at the right editor.
+    pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
+        match pasted {
+            Pasted::Sprites(rect) => {
+                let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
+                let y0 = (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8;
+                let report = pico8::paste_sprites(&mut assets.sprites, rect, x0, y0);
+                self.status.set(report.summary);
+            }
+            Pasted::Sfx(_) => self.status.set("sfx - use sfx editor".into()),
+        }
     }
 }
 
@@ -435,6 +459,43 @@ const ICON_FILL: Icon8 = [
 const ICON_PICKER: Icon8 = [
     0b00000111, 0b00000111, 0b00001110, 0b00011100, 0b00111000, 0b01110000, 0b01100000, 0b00000000,
 ];
+
+#[cfg(test)]
+mod paste_tests {
+    use super::*;
+    use rico8_runtime::pico8::{Pasted, PixelRect};
+
+    #[test]
+    fn pastes_pixels_at_selected_sprite() {
+        let mut ed = SpriteEditor::new(); // sprite 1 -> sheet (8, 0).
+        let mut assets = Assets::default();
+        let rect = PixelRect {
+            w: 2,
+            h: 1,
+            pixels: vec![9, 10],
+        };
+        ed.paste(&Pasted::Sprites(rect), &mut assets);
+        assert_eq!(assets.sprites.get(8, 0), 9);
+        assert_eq!(assets.sprites.get(9, 0), 10);
+        assert!(ed.status.current().unwrap().contains("pasted"));
+    }
+
+    #[test]
+    fn rejects_sfx_with_a_hint() {
+        use rico8_runtime::pico8::SfxClip;
+        let mut ed = SpriteEditor::new();
+        let mut assets = Assets::default();
+        ed.paste(
+            &Pasted::Sfx(SfxClip {
+                records: vec![],
+                patterns: vec![],
+            }),
+            &mut assets,
+        );
+        assert!(ed.status.current().unwrap().contains("sfx"));
+        assert_eq!(assets.sprites.get(8, 0), 0); // nothing drawn.
+    }
+}
 
 #[cfg(test)]
 mod tests {

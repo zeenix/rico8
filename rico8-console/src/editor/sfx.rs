@@ -12,6 +12,7 @@ use rico8_runtime::{
     audio::AudioHandle,
     fb::Framebuffer,
     palette::col,
+    pico8::{self, Pasted},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -60,6 +61,7 @@ pub struct SfxEditor {
     /// Pitch-mode palette shown as numbers (toggled by the circle button)
     /// rather than waveform glyphs.
     palette_numeric: bool,
+    status: ui::StatusMsg,
 }
 
 impl SfxEditor {
@@ -72,6 +74,7 @@ impl SfxEditor {
             mode: SfxMode::Pitch,
             wave_sel: 0,
             palette_numeric: false,
+            status: ui::StatusMsg::default(),
         }
     }
 
@@ -208,6 +211,7 @@ impl SfxEditor {
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets, audio: &AudioHandle) {
+        self.status.tick();
         let _ = audio;
         let m = *mouse;
         // Press-edge controls: buttons, spinners, selectors, palette.
@@ -462,7 +466,7 @@ impl SfxEditor {
         for i in 0..3 {
             fb.line(118 + i * 2, 96, 118 + i * 2, 99, col::DARK_BLUE);
         }
-        ui::status_bar(fb, "Tab tracker  drag pitch/vol");
+        self.status.show(fb, "Tab tracker  drag pitch/vol");
     }
 
     /// The waveform palette: 8 boxes (graphical glyphs or plain numbers), with
@@ -547,7 +551,8 @@ impl SfxEditor {
             let c = if on { col::ORANGE } else { col::DARK_GREY };
             fb.print(&val, FX_X + 12, y, c);
         }
-        ui::status_bar(fb, &format!("Tab pitch  oct {} zsxd..", self.octave));
+        self.status
+            .show(fb, &format!("Tab pitch  oct {} zsxd..", self.octave));
     }
 
     fn draw_wave(&self, fb: &mut Framebuffer, assets: &Assets) {
@@ -575,7 +580,24 @@ impl SfxEditor {
             WAVE_BOT + 4,
             if on { col::ORANGE } else { col::DARK_GREY },
         );
-        ui::status_bar(fb, "Tab pitch  drag to draw wave");
+        self.status.show(fb, "Tab pitch  drag to draw wave");
+    }
+
+    /// Set a transient bottom-bar message (used for clipboard errors).
+    pub fn set_status(&mut self, msg: String) {
+        self.status.set(msg);
+    }
+
+    /// Paste a decoded PICO-8 clipboard blob. Only `[sfx]` applies here: its
+    /// records overwrite consecutive slots from the selected one.
+    pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
+        match pasted {
+            Pasted::Sfx(clip) => {
+                let report = pico8::paste_sfx(&mut assets.sfx, &clip.records, self.sfx);
+                self.status.set(report.summary);
+            }
+            Pasted::Sprites(_) => self.status.set("sprites - use sprite editor".into()),
+        }
     }
 }
 
@@ -689,5 +711,35 @@ mod tests {
             "drawn sample should be high, got {}",
             w.samples[0]
         );
+    }
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::*;
+    use rico8_runtime::pico8::{Pasted, SfxClip, Slotted};
+
+    fn one_sfx(pitch: u8) -> Sfx {
+        let mut s = Sfx::default();
+        s.notes[0].pitch = pitch;
+        s.notes[0].volume = 4;
+        s
+    }
+
+    #[test]
+    fn pastes_sfx_from_selected_slot() {
+        let mut ed = SfxEditor::new();
+        ed.select(7);
+        let mut assets = Assets::default();
+        let clip = SfxClip {
+            records: vec![Slotted {
+                src: 0,
+                value: one_sfx(33),
+            }],
+            patterns: vec![],
+        };
+        ed.paste(&Pasted::Sfx(clip), &mut assets);
+        assert_eq!(assets.sfx[7].notes[0].pitch, 33);
+        assert!(ed.status.current().unwrap().contains("SFX 7"));
     }
 }
