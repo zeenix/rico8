@@ -59,6 +59,7 @@ impl Platformer {
             self.mode = GameMode::Ended {
                 time: ctx.time(),
                 flash: false,
+                _music: None,
             };
 
             return;
@@ -114,10 +115,13 @@ impl Platformer {
             }
             Some(TROPHY_SPRITE) => {
                 let _ = ctx.set_map_tile(cx, cy, SpriteId(0));
-                ctx.sfx(TROPHY_SFX);
+                // Another music can't be playing becase `PlayingMusic` instace has had to have been
+                // dropped when the game mode switch away from `Ended`.
+                let music = ctx.music(COMPLETION_MUSIC).play().unwrap();
                 self.mode = GameMode::Ended {
                     time: ctx.time(),
                     flash: false,
+                    _music: Some(music),
                 };
             }
             _ => (),
@@ -202,8 +206,15 @@ impl Game for Platformer {
 #[derive(Debug)]
 enum GameMode {
     Init,
-    InGame { start_time: f32, time_left: u8 },
-    Ended { time: f32, flash: bool },
+    InGame {
+        start_time: f32,
+        time_left: u8,
+    },
+    Ended {
+        time: f32,
+        flash: bool,
+        _music: Option<PlayingMusic>,
+    },
 }
 
 impl GameMode {
@@ -230,4 +241,4 @@ const GAME_OVER_TIMEOUT: f32 = 5.0;
 
 const JUMP_SFX: SfxId = SfxId::new(0).unwrap();
 const COIN_SFX: SfxId = SfxId::new(1).unwrap();
-const TROPHY_SFX: SfxId = SfxId::new(8).unwrap();
+const COMPLETION_MUSIC: MusicId = MusicId::new(0).unwrap();
