@@ -63,12 +63,7 @@ fn main() -> Result<()> {
             !rest.contains(&"--no-source"),
         ),
         ["extract", png, dir] => headless_extract(Path::new(png), Path::new(dir)),
-        ["import-pico8", src] => {
-            let src = Path::new(src);
-            let dir = rico8_runtime::pico8::default_dir_name(src);
-            headless_import_pico8(src, Path::new(&dir))
-        }
-        ["import-pico8", src, dir] => headless_import_pico8(Path::new(src), Path::new(dir)),
+        ["import-pico8", rest @ ..] => headless_import_pico8_cli(rest),
         ["export-web", input, out] => headless_export_web(Path::new(input), Path::new(out)),
         ["verify", png] => headless_verify(Path::new(png)),
         ["snap", project, outdir] => headless_snap(Path::new(project), Path::new(outdir)),
@@ -100,8 +95,11 @@ fn print_help() {
          \x20 rico8 extract <cart.png> <dir>\n\
          \x20                            Turn an editable cart into a project\n\
          \x20 rico8 import-pico8 <cart.p8|.p8.png> [dir]\n\
-         \x20                            Import a PICO-8 cart's assets into a project\n\
+         \x20                            Import a PICO-8 cart's assets into a new project\n\
          \x20                            (dir defaults to the cart's name)\n\
+         \x20 rico8 import-pico8 <cart.p8|.p8.png> --into <project-dir>\n\
+         \x20                            [--sprites R] [--sfx R] [--music R]\n\
+         \x20                            Append selected assets into an existing project\n\
          \x20 rico8 export-web <dir|cart.png> <out.html>\n\
          \x20                            Export a self-contained playable web page\n\
          \x20 rico8 verify <cart.png>    Load a cart and run 60 frames headless",
@@ -183,6 +181,82 @@ fn headless_extract(png: &Path, dir: &Path) -> Result<()> {
 fn headless_import_pico8(src: &Path, dir: &Path) -> Result<()> {
     rico8_runtime::pico8::import_project(src, dir)?;
     println!("Imported {} into {}", src.display(), dir.display());
+    Ok(())
+}
+
+/// The value following a flag, rejecting a missing value or another flag taken
+/// as the value (e.g. `--into --sfx 0`).
+fn flag_value<'a>(next: Option<&'a &'a str>, flag: &str) -> Result<&'a str> {
+    match next {
+        Some(&v) if !v.starts_with("--") => Ok(v),
+        _ => bail!("{flag} needs a value"),
+    }
+}
+
+/// Parse `import-pico8` arguments and dispatch to create-new vs additive
+/// (`--into`) mode. Create: `<src> [dir]`. Additive: `<src> --into <dir>
+/// [--sprites R] [--sfx R] [--music R]`.
+fn headless_import_pico8_cli(args: &[&str]) -> Result<()> {
+    let (mut src, mut dir, mut into) = (None, None, None);
+    let (mut sprites, mut sfx, mut music) = (None, None, None);
+    let mut it = args.iter();
+    // Iterating `&[&str]` yields `&&str`; `flag_value(it.next(), ...)` gives a `&str`.
+    while let Some(&a) = it.next() {
+        match a {
+            "--into" => into = Some(flag_value(it.next(), "--into")?),
+            "--sprites" => sprites = Some(flag_value(it.next(), "--sprites")?),
+            "--sfx" => sfx = Some(flag_value(it.next(), "--sfx")?),
+            "--music" => music = Some(flag_value(it.next(), "--music")?),
+            flag if flag.starts_with("--") => bail!("unknown flag {flag}"),
+            pos if src.is_none() => src = Some(pos),
+            pos if dir.is_none() => dir = Some(pos),
+            pos => bail!("unexpected argument {pos}"),
+        }
+    }
+    let Some(src) = src else {
+        bail!(
+            "Usage: rico8 import-pico8 <cart.p8|.p8.png> [dir]\n   or: \
+             rico8 import-pico8 <cart.p8|.p8.png> --into <project-dir> \
+             [--sprites R] [--sfx R] [--music R]"
+        );
+    };
+    let src = Path::new(src);
+    match into {
+        Some(into) => {
+            if dir.is_some() {
+                bail!("--into supplies the destination; do not also pass a positional dir");
+            }
+            let sel = rico8_runtime::pico8::Selection::parse(sprites, sfx, music)?;
+            headless_import_pico8_into(src, Path::new(into), &sel)
+        }
+        None => {
+            if sprites.is_some() || sfx.is_some() || music.is_some() {
+                bail!("--sprites/--sfx/--music only apply with --into <project-dir>");
+            }
+            let dir = dir
+                .map(PathBuf::from)
+                .unwrap_or_else(|| PathBuf::from(rico8_runtime::pico8::default_dir_name(src)));
+            headless_import_pico8(src, &dir)
+        }
+    }
+}
+
+/// Append selected PICO-8 assets into the existing project at `dir`.
+fn headless_import_pico8_into(
+    src: &Path,
+    dir: &Path,
+    sel: &rico8_runtime::pico8::Selection,
+) -> Result<()> {
+    let mut project = Project::load(dir)?;
+    let assets = rico8_runtime::pico8::parse_file(src)?;
+    let report = rico8_runtime::pico8::append_pico8_assets(&mut project.assets, &assets, sel)?;
+    project.save()?;
+    for line in report.summary_lines() {
+        println!("Imported {line} into {}", dir.display());
+    }
+    for w in &report.warnings {
+        eprintln!("warning: {w}");
+    }
     Ok(())
 }
 
@@ -486,5 +560,45 @@ impl ApplicationHandler for App {
             }
         }
         event_loop.set_control_flow(ControlFlow::WaitUntil(self.next_tick));
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn into_rejects_positional_dir() {
+        // `--into` supplies the destination, so a positional dir is ambiguous.
+        let err = headless_import_pico8_cli(&["c.p8", "mydir", "--into", "dest", "--sfx", "0"])
+            .unwrap_err();
+        assert!(err.to_string().contains("positional"), "got: {err}");
+    }
+
+    #[test]
+    fn selection_flags_require_into() {
+        let err = headless_import_pico8_cli(&["c.p8", "--sprites", "0-3"]).unwrap_err();
+        assert!(err.to_string().contains("--into"), "got: {err}");
+    }
+
+    #[test]
+    fn into_requires_a_selection() {
+        let err = headless_import_pico8_cli(&["c.p8", "--into", "dest"]).unwrap_err();
+        assert!(err.to_string().contains("at least one"), "got: {err}");
+    }
+
+    #[test]
+    fn unknown_flag_is_rejected() {
+        let err = headless_import_pico8_cli(&["c.p8", "--into", "dest", "--bogus"]).unwrap_err();
+        assert!(err.to_string().contains("bogus"), "got: {err}");
+    }
+
+    #[test]
+    fn flag_without_value_is_rejected() {
+        let err = headless_import_pico8_cli(&["c.p8", "--into", "--sfx", "0"]).unwrap_err();
+        assert!(
+            err.to_string().contains("--into needs a value"),
+            "got: {err}"
+        );
     }
 }

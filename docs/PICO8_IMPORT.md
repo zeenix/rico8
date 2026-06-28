@@ -52,6 +52,39 @@ The new project gets a small stub `src/lib.rs` that builds immediately and
 draws a placeholder; write your game logic in Rust there, against the
 imported art and audio.
 
+## Selective, additive import
+
+The whole-cart `import-pico8` above makes a *new* project. To pull only some
+assets into an **existing** project, use `--into`:
+
+```text
+rico8 import-pico8 <cart.p8|.p8.png> --into <project-dir> [--sprites R] [--sfx R] [--music R]
+```
+
+or, from the console prompt with a project loaded:
+
+```text
+> import-pico8 <cart> --into --sprites 0-15,32 --sfx 0-3
+```
+
+Each `R` is a comma-separated list of indices and inclusive ranges, e.g.
+`0-15,32,40-43`. At least one of `--sprites`, `--sfx`, `--music` is required.
+
+The import is **additive**: each kind's items are appended immediately after the
+destination's last used slot, so nothing already in the cart is overwritten or
+renumbered. Sprites bring their flag bytes along.
+
+Because imported items land at different slot numbers than in the source, references
+**within a single import** are remapped: imported music patterns are repointed at
+wherever their imported SFX landed. A reference to a slot you did not select is
+left as-is and reported as a warning — for example, importing music without the
+SFX it plays. One limit carries over from PICO-8: a note's custom-instrument
+reference is only three bits wide (slots 0-7), so an imported custom instrument
+that lands past slot 7 cannot be repointed; it is left as-is and a warning is
+printed.
+
+Map tiles and the cart label are not part of selective import.
+
 ## The two formats
 
 - **`.p8`** — the plain-text cartridge: `__gfx__`, `__gff__`, `__label__`,

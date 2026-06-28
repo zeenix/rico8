@@ -23,13 +23,14 @@
 
 use crate::{
     assets::{
-        self, Assets, MapData, MusicPattern, Note, Sfx, MAP_H, MAP_W, MUSIC_COUNT, SFX_COUNT,
-        SFX_LEN, SHEET_H, SHEET_W, SPRITE_COUNT,
+        self, Assets, MapData, MusicPattern, Note, Sfx, SpriteSheet, MAP_H, MAP_W, MUSIC_COUNT,
+        NOTE_CUSTOM_FLAG, SFX_COUNT, SFX_LEN, SHEET_H, SHEET_W, SPRITES_PER_ROW, SPRITE_COUNT,
+        SPRITE_SIZE,
     },
     project::Project,
 };
 use anyhow::{anyhow, bail, Result};
-use std::path::Path;
+use std::{collections::HashMap, path::Path};
 
 const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
 
@@ -74,6 +75,304 @@ impl Game for Cart {
 
 rico8::game!(Cart);
 "#;
+
+/// Which source assets to append into a destination cart. Indices are the
+/// source PICO-8 cart's own indices (sprite 0..256, SFX/music 0..64).
+#[derive(Debug, Clone, Default)]
+pub struct Selection {
+    pub sprites: Vec<u8>,
+    pub sfx: Vec<u8>,
+    pub music: Vec<u8>,
+}
+
+impl Selection {
+    /// Build a selection from the range strings as typed on the command line,
+    /// e.g. `Selection::parse(Some("0-15,32"), Some("0-3"), None)`. At least
+    /// one kind must be given, or this is an error. Each string is parsed with
+    /// inclusive ranges and validated against its kind's maximum.
+    pub fn parse(sprites: Option<&str>, sfx: Option<&str>, music: Option<&str>) -> Result<Self> {
+        if sprites.is_none() && sfx.is_none() && music.is_none() {
+            bail!("select at least one of sprites, SFX or music to import");
+        }
+        Ok(Self {
+            sprites: sprites
+                .map(|s| parse_index_ranges(s, SPRITE_COUNT))
+                .transpose()?
+                .unwrap_or_default(),
+            sfx: sfx
+                .map(|s| parse_index_ranges(s, SFX_COUNT))
+                .transpose()?
+                .unwrap_or_default(),
+            music: music
+                .map(|s| parse_index_ranges(s, MUSIC_COUNT))
+                .transpose()?
+                .unwrap_or_default(),
+        })
+    }
+}
+
+/// Where one kind's appended items landed in the destination.
+#[derive(Debug, Clone, Copy, Default)]
+pub struct Placement {
+    /// First destination slot written (meaningful only when `count > 0`).
+    pub start: usize,
+    /// Number of items appended.
+    pub count: usize,
+}
+
+impl Placement {
+    /// A human line like `"12 sprites at slots 16 to 27"`, or `None` if nothing
+    /// of this kind was appended.
+    fn describe(&self, kind: &str) -> Option<String> {
+        (self.count > 0).then(|| {
+            format!(
+                "{} {kind} at slots {} to {}",
+                self.count,
+                self.start,
+                self.start + self.count - 1
+            )
+        })
+    }
+}
+
+/// The outcome of an append: where each kind landed, plus any warnings (e.g.
+/// references left pointing at slots that were not part of the selection).
+#[derive(Debug, Clone, Default)]
+pub struct Report {
+    pub sprites: Placement,
+    pub sfx: Placement,
+    pub music: Placement,
+    pub warnings: Vec<String>,
+}
+
+impl Report {
+    /// One line per kind that had anything appended.
+    pub fn summary_lines(&self) -> Vec<String> {
+        [
+            self.sprites.describe("sprites"),
+            self.sfx.describe("SFX"),
+            self.music.describe("music"),
+        ]
+        .into_iter()
+        .flatten()
+        .collect()
+    }
+}
+
+/// Append the selected `src` assets into `dest`, after `dest`'s last used slot
+/// of each kind. Imported audio cross-references (music channels and SFX
+/// custom-instrument notes) are remapped to the slots their targets landed in;
+/// references to slots that were not selected are left as-is and reported as
+/// warnings. `dest` is only mutated on success (a capacity or validation error
+/// leaves it untouched).
+pub fn append_pico8_assets(dest: &mut Assets, src: &Assets, sel: &Selection) -> Result<Report> {
+    // Guard against out-of-range indices so a hand-built selection can't panic
+    // on an indexing operation below (sprite indices are u8, always in range).
+    if let Some(&s) = sel.sfx.iter().find(|&&s| s as usize >= SFX_COUNT) {
+        bail!("SFX index {s} is out of range (below {SFX_COUNT})");
+    }
+    if let Some(&m) = sel.music.iter().find(|&&m| m as usize >= MUSIC_COUNT) {
+        bail!("music index {m} is out of range (below {MUSIC_COUNT})");
+    }
+
+    // Build into a clone; commit only after everything succeeds.
+    let mut out = dest.clone();
+    let mut warnings = Vec::new();
+
+    // --- Sprites: copy the 8x8 block and the flag byte. No references. ---
+    let spr_start = next_free_sprite(&out.sprites);
+    if spr_start + sel.sprites.len() > SPRITE_COUNT {
+        bail!(
+            "not enough room for {} sprites: {} of {} slots free",
+            sel.sprites.len(),
+            SPRITE_COUNT - spr_start,
+            SPRITE_COUNT
+        );
+    }
+    for (i, &s) in sel.sprites.iter().enumerate() {
+        copy_sprite(&mut out.sprites, spr_start + i, &src.sprites, s as usize);
+    }
+    let sprites = Placement {
+        start: spr_start,
+        count: sel.sprites.len(),
+    };
+
+    // --- SFX: copy, then remap each copy's custom-instrument note refs. ---
+    let sfx_start = next_free_sfx(&out.sfx);
+    if sfx_start + sel.sfx.len() > SFX_COUNT {
+        bail!(
+            "not enough room for {} SFX: {} of {} slots free",
+            sel.sfx.len(),
+            SFX_COUNT - sfx_start,
+            SFX_COUNT
+        );
+    }
+    // Source SFX index -> destination slot, for remapping references.
+    let mut sfx_map: HashMap<u8, usize> = HashMap::new();
+    for (i, &s) in sel.sfx.iter().enumerate() {
+        out.sfx[sfx_start + i] = src.sfx[s as usize].clone();
+        sfx_map.insert(s, sfx_start + i);
+    }
+    for (i, &s) in sel.sfx.iter().enumerate() {
+        for step in 0..SFX_LEN {
+            let note = &mut out.sfx[sfx_start + i].notes[step];
+            let Some(inst) = note.instrument() else {
+                continue;
+            };
+            match sfx_map.get(&inst) {
+                // A custom instrument can only be addressed in slots 0..8.
+                Some(&dst) if dst <= 7 => note.wave = NOTE_CUSTOM_FLAG | dst as u8,
+                Some(&dst) => warnings.push(format!(
+                    "SFX {s}: custom instrument landed in slot {dst}, which a note \
+                     can't reference (only slots 0-7); left pointing at slot {inst}"
+                )),
+                None => warnings.push(format!(
+                    "SFX {s}: custom instrument {inst} was not imported; left \
+                     pointing at slot {inst}"
+                )),
+            }
+        }
+    }
+    let sfx = Placement {
+        start: sfx_start,
+        count: sel.sfx.len(),
+    };
+
+    // --- Music: copy, then remap each channel's SFX reference. ---
+    let mus_start = next_free_music(&out.music);
+    if mus_start + sel.music.len() > MUSIC_COUNT {
+        bail!(
+            "not enough room for {} music patterns: {} of {} slots free",
+            sel.music.len(),
+            MUSIC_COUNT - mus_start,
+            MUSIC_COUNT
+        );
+    }
+    for (i, &m) in sel.music.iter().enumerate() {
+        let mut pat = src.music[m as usize];
+        for ch in pat.channels.iter_mut() {
+            let Some(old) = *ch else { continue };
+            match sfx_map.get(&old) {
+                Some(&dst) => *ch = Some(dst as u8),
+                None => warnings.push(format!(
+                    "music {m}: channel SFX {old} was not imported; left pointing \
+                     at slot {old}"
+                )),
+            }
+        }
+        out.music[mus_start + i] = pat;
+    }
+    let music = Placement {
+        start: mus_start,
+        count: sel.music.len(),
+    };
+
+    assets::validate(&out)?;
+    *dest = out;
+    Ok(Report {
+        sprites,
+        sfx,
+        music,
+        warnings,
+    })
+}
+
+/// The first free sprite slot: one past the highest used sprite, or 0 if none
+/// is used. A sprite is "used" when its 8x8 block has any non-zero pixel or its
+/// flag byte is non-zero.
+fn next_free_sprite(sheet: &SpriteSheet) -> usize {
+    (0..SPRITE_COUNT)
+        .rev()
+        .find(|&n| sprite_used(sheet, n))
+        .map(|n| n + 1)
+        .unwrap_or(0)
+}
+
+/// True when sprite `n` has any non-zero pixel or a non-zero flag byte.
+fn sprite_used(sheet: &SpriteSheet, n: usize) -> bool {
+    if sheet.flags[n] != 0 {
+        return true;
+    }
+    let sx = (n % SPRITES_PER_ROW) * SPRITE_SIZE;
+    let sy = (n / SPRITES_PER_ROW) * SPRITE_SIZE;
+    (0..SPRITE_SIZE)
+        .any(|dy| (0..SPRITE_SIZE).any(|dx| sheet.pixels[(sy + dy) * SHEET_W + (sx + dx)] != 0))
+}
+
+/// The first free SFX slot: one past the highest non-empty or custom-wave SFX, or 0.
+fn next_free_sfx(sfx: &[Sfx]) -> usize {
+    (0..SFX_COUNT)
+        .rev()
+        .find(|&i| !sfx[i].is_empty() || sfx[i].custom_wave.is_some())
+        .map(|i| i + 1)
+        .unwrap_or(0)
+}
+
+/// The first free music slot: one past the highest non-empty or flow-control pattern, or 0.
+fn next_free_music(music: &[MusicPattern]) -> usize {
+    (0..MUSIC_COUNT)
+        .rev()
+        .find(|&i| {
+            let p = &music[i];
+            !p.is_empty() || p.loop_back || p.loop_start || p.stop_at_end
+        })
+        .map(|i| i + 1)
+        .unwrap_or(0)
+}
+
+/// Copy sprite `src_n`'s 8x8 block and flag byte into `dst_n`.
+fn copy_sprite(dst: &mut SpriteSheet, dst_n: usize, src: &SpriteSheet, src_n: usize) {
+    let dx0 = (dst_n % SPRITES_PER_ROW) * SPRITE_SIZE;
+    let dy0 = (dst_n / SPRITES_PER_ROW) * SPRITE_SIZE;
+    let sx0 = (src_n % SPRITES_PER_ROW) * SPRITE_SIZE;
+    let sy0 = (src_n / SPRITES_PER_ROW) * SPRITE_SIZE;
+    for dy in 0..SPRITE_SIZE {
+        for dx in 0..SPRITE_SIZE {
+            dst.pixels[(dy0 + dy) * SHEET_W + (dx0 + dx)] =
+                src.pixels[(sy0 + dy) * SHEET_W + (sx0 + dx)];
+        }
+    }
+    dst.flags[dst_n] = src.flags[src_n];
+}
+
+/// Parse a comma-separated list of indices and inclusive ranges (e.g.
+/// `"0-15,32,40-43"`) into a sorted, deduped list, validating every value is
+/// below `max`.
+fn parse_index_ranges(s: &str, max: usize) -> Result<Vec<u8>> {
+    let mut out = Vec::new();
+    for tok in s.split(',') {
+        let tok = tok.trim();
+        if tok.is_empty() {
+            bail!("empty index in selection \"{s}\"");
+        }
+        let (lo, hi) = match tok.split_once('-') {
+            Some((a, b)) => (parse_one(a, max)?, parse_one(b, max)?),
+            None => {
+                let v = parse_one(tok, max)?;
+                (v, v)
+            }
+        };
+        if hi < lo {
+            bail!("reversed range \"{tok}\": start {lo} is past end {hi}");
+        }
+        out.extend(lo..=hi);
+    }
+    out.sort_unstable();
+    out.dedup();
+    Ok(out)
+}
+
+/// Parse one index, requiring it to be a number below `max`.
+fn parse_one(s: &str, max: usize) -> Result<u8> {
+    let v: usize = s
+        .trim()
+        .parse()
+        .map_err(|_| anyhow!("\"{s}\" is not a number"))?;
+    if v >= max {
+        bail!("index {v} is out of range (must be below {max})");
+    }
+    Ok(v as u8)
+}
 
 /// Read a PICO-8 cart's assets from a file, auto-detecting `.p8` text vs
 /// `.p8.png`.
@@ -727,6 +1026,289 @@ mod tests {
         assert!(project.code.contains("Imported from PICO-8"));
         // Only assets are imported; no Lua is preserved.
         assert!(!dir.join("pico8.lua").exists());
+
+        std::fs::remove_dir_all(&base).unwrap();
+    }
+
+    #[test]
+    fn parse_ranges_singles_and_ranges() {
+        assert_eq!(
+            parse_index_ranges("0-3,5,8-9", 64).unwrap(),
+            vec![0, 1, 2, 3, 5, 8, 9]
+        );
+        assert_eq!(parse_index_ranges("7", 64).unwrap(), vec![7]);
+        // Whitespace is tolerated; output is sorted and deduped.
+        assert_eq!(
+            parse_index_ranges(" 3, 1 ,1, 2 ", 64).unwrap(),
+            vec![1, 2, 3]
+        );
+        // The max is exclusive: index 255 is the last valid sprite.
+        assert_eq!(parse_index_ranges("255", 256).unwrap(), vec![255]);
+    }
+
+    #[test]
+    fn parse_ranges_rejects_bad_input() {
+        assert!(parse_index_ranges("", 64).is_err(), "empty string");
+        assert!(parse_index_ranges("1,,2", 64).is_err(), "empty token");
+        assert!(parse_index_ranges("64", 64).is_err(), "out of range");
+        assert!(parse_index_ranges("5-3", 64).is_err(), "reversed range");
+        assert!(parse_index_ranges("x", 64).is_err(), "non-numeric");
+        assert!(
+            parse_index_ranges("0-99", 64).is_err(),
+            "range end out of bounds"
+        );
+    }
+
+    #[test]
+    fn selection_parse_requires_one_kind() {
+        assert!(Selection::parse(None, None, None).is_err());
+        let s = Selection::parse(Some("0-2"), None, Some("3")).unwrap();
+        assert_eq!(s.sprites, vec![0, 1, 2]);
+        assert!(s.sfx.is_empty());
+        assert_eq!(s.music, vec![3]);
+    }
+
+    #[test]
+    fn append_sprites_into_empty_lands_at_zero() {
+        let mut src = Assets::default();
+        src.sprites.set(0, 0, 7); // sprite 0, pixel (0,0).
+        src.sprites.set(8, 0, 9); // sprite 1, pixel (0,0).
+        src.sprites.flags[1] = 0x05;
+        let mut dest = Assets::default();
+        let sel = Selection {
+            sprites: vec![0, 1],
+            sfx: vec![],
+            music: vec![],
+        };
+
+        let r = append_pico8_assets(&mut dest, &src, &sel).unwrap();
+
+        assert_eq!((r.sprites.start, r.sprites.count), (0, 2));
+        assert_eq!(dest.sprites.get(0, 0), 7);
+        assert_eq!(dest.sprites.get(8, 0), 9);
+        assert_eq!(dest.sprites.flags(1), 0x05);
+        assert!(r.warnings.is_empty());
+    }
+
+    #[test]
+    fn append_sprites_after_last_used_slot() {
+        let mut dest = Assets::default();
+        dest.sprites.set(0, 0, 1); // sprite 0 used by a pixel.
+        dest.sprites.flags[3] = 0x01; // sprite 3 used by a flag only.
+        let mut src = Assets::default();
+        src.sprites.set(0, 0, 0xc);
+        let sel = Selection {
+            sprites: vec![0],
+            sfx: vec![],
+            music: vec![],
+        };
+
+        let r = append_pico8_assets(&mut dest, &src, &sel).unwrap();
+
+        // Highest used was sprite 3, so the import lands at sprite 4.
+        assert_eq!(r.sprites.start, 4);
+        // Sprite 4 sits at sheet (32, 0).
+        assert_eq!(dest.sprites.get(32, 0), 0xc);
+        // Earlier slots are untouched.
+        assert_eq!(dest.sprites.get(0, 0), 1);
+    }
+
+    #[test]
+    fn append_music_remaps_imported_sfx_refs() {
+        let mut src = Assets::default();
+        src.sfx[5].notes[0].volume = 5;
+        src.sfx[6].notes[0].volume = 5;
+        src.music[0].channels = [Some(5), Some(6), None, None];
+        let mut dest = Assets::default();
+        let sel = Selection {
+            sprites: vec![],
+            sfx: vec![5, 6],
+            music: vec![0],
+        };
+
+        let r = append_pico8_assets(&mut dest, &src, &sel).unwrap();
+
+        assert_eq!((r.sfx.start, r.sfx.count), (0, 2));
+        assert_eq!((r.music.start, r.music.count), (0, 1));
+        // SFX 5 landed in slot 0 and 6 in slot 1; the channels follow.
+        assert_eq!(dest.music[0].channels, [Some(0), Some(1), None, None]);
+        assert!(r.warnings.is_empty());
+    }
+
+    #[test]
+    fn append_music_keeps_and_warns_on_dangling_ref() {
+        let mut src = Assets::default();
+        src.sfx[5].notes[0].volume = 5;
+        // Channel 1 references SFX 9, which is not in the selection.
+        src.music[0].channels = [Some(5), Some(9), None, None];
+        let mut dest = Assets::default();
+        let sel = Selection {
+            sprites: vec![],
+            sfx: vec![5],
+            music: vec![0],
+        };
+
+        let r = append_pico8_assets(&mut dest, &src, &sel).unwrap();
+
+        assert_eq!(dest.music[0].channels, [Some(0), Some(9), None, None]);
+        assert_eq!(r.warnings.len(), 1);
+        assert!(
+            r.warnings[0].contains('9'),
+            "warning names the dangling slot"
+        );
+    }
+
+    #[test]
+    fn append_custom_instrument_past_slot7_keeps_and_warns() {
+        let mut src = Assets::default();
+        src.sfx[2].notes[0].volume = 5; // a referenced instrument timbre.
+        src.sfx[10].notes[0] = Note {
+            pitch: 20,
+            wave: NOTE_CUSTOM_FLAG | 2, // plays SFX 2 as a custom instrument.
+            volume: 5,
+            effect: 0,
+        };
+        let mut dest = Assets::default();
+        // Fill SFX 0..8 so the import is forced to land at slot 8+.
+        for i in 0..8 {
+            dest.sfx[i].notes[0].volume = 1;
+        }
+        let sel = Selection {
+            sprites: vec![],
+            sfx: vec![2, 10],
+            music: vec![],
+        };
+
+        let r = append_pico8_assets(&mut dest, &src, &sel).unwrap();
+
+        assert_eq!(r.sfx.start, 8); // SFX 2 -> slot 8, SFX 10 -> slot 9.
+                                    // The custom-instrument ref can't point past slot 7,
+                                    // so it is kept.
+        assert_eq!(dest.sfx[9].notes[0].instrument(), Some(2));
+        assert!(r.warnings.iter().any(|w| w.contains("custom instrument")));
+    }
+
+    #[test]
+    fn append_overflow_errors_and_leaves_dest_untouched() {
+        let mut dest = Assets::default();
+        dest.sfx[63].notes[0].volume = 1; // highest slot used -> no room.
+        let src = Assets::default();
+        let sel = Selection {
+            sprites: vec![],
+            sfx: vec![0],
+            music: vec![],
+        };
+
+        let err = append_pico8_assets(&mut dest, &src, &sel).unwrap_err();
+
+        assert!(err.to_string().contains("room"), "got: {err}");
+        // Transactional: the destination is unchanged on error.
+        assert_eq!(dest.sfx[63].notes[0].volume, 1);
+    }
+
+    #[test]
+    fn append_does_not_overwrite_custom_wave_instrument() {
+        let mut dest = Assets::default();
+        // A silent custom-wave instrument at slot 3 (no audible notes).
+        dest.sfx[3].custom_wave = Some(assets::CustomWave {
+            samples: [0; SFX_LEN],
+            bass: false,
+        });
+        let mut src = Assets::default();
+        src.sfx[0].notes[0].volume = 5;
+        let sel = Selection {
+            sprites: vec![],
+            sfx: vec![0],
+            music: vec![],
+        };
+
+        let r = append_pico8_assets(&mut dest, &src, &sel).unwrap();
+
+        // The instrument at slot 3 counts as used, so the import lands at slot 4.
+        assert_eq!(r.sfx.start, 4);
+        assert!(dest.sfx[3].custom_wave.is_some(), "instrument preserved");
+    }
+
+    #[test]
+    fn append_does_not_overwrite_flow_only_music_pattern() {
+        let mut dest = Assets::default();
+        // A pattern with no channels but a stop flag (a real song terminator).
+        dest.music[2].stop_at_end = true;
+        let mut src = Assets::default();
+        src.music[0].channels[0] = Some(0);
+        let sel = Selection {
+            sprites: vec![],
+            sfx: vec![],
+            music: vec![0],
+        };
+
+        let r = append_pico8_assets(&mut dest, &src, &sel).unwrap();
+
+        assert_eq!(r.music.start, 3, "import lands after the flow-only pattern");
+        assert!(dest.music[2].stop_at_end, "flow pattern preserved");
+    }
+
+    #[test]
+    fn append_sprite_overflow_errors_and_keeps_dest() {
+        let mut dest = Assets::default();
+        dest.sprites.set(120, 120, 1); // sprite 255's block -> sheet is full.
+        let src = Assets::default();
+        let sel = Selection {
+            sprites: vec![0],
+            sfx: vec![],
+            music: vec![],
+        };
+
+        let err = append_pico8_assets(&mut dest, &src, &sel).unwrap_err();
+
+        assert!(err.to_string().contains("room"), "got: {err}");
+        assert_eq!(dest.sprites.get(120, 120), 1); // unchanged.
+    }
+
+    #[test]
+    fn append_music_overflow_errors() {
+        let mut dest = Assets::default();
+        dest.music[63].channels[0] = Some(0); // pattern 63 used -> full.
+        let src = Assets::default();
+        let sel = Selection {
+            sprites: vec![],
+            sfx: vec![],
+            music: vec![0],
+        };
+
+        let err = append_pico8_assets(&mut dest, &src, &sel).unwrap_err();
+        assert!(err.to_string().contains("room"), "got: {err}");
+    }
+
+    #[test]
+    fn append_round_trips_through_a_project() {
+        let base = std::env::temp_dir().join(format!("rico8_append_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&base);
+        let src = base.join("celeste.p8");
+        std::fs::create_dir_all(&base).unwrap();
+        std::fs::write(&src, sample_p8()).unwrap();
+
+        // Destination project with sprite 0 already used.
+        let dir = base.join("dest");
+        let mut project = Project::create(&dir, "dest").unwrap();
+        project.assets.sprites.set(0, 0, 4);
+        project.save().unwrap();
+
+        // Append source sprite 0 (pixel (2,0) = 0xa per sample_p8).
+        let assets = parse_file(&src).unwrap();
+        let sel = Selection {
+            sprites: vec![0],
+            sfx: vec![],
+            music: vec![],
+        };
+        append_pico8_assets(&mut project.assets, &assets, &sel).unwrap();
+        project.save().unwrap();
+
+        // Reload from disk and confirm the append persisted at sprite 1.
+        let reloaded = Project::load(&dir).unwrap();
+        // Sprite 1 sits at sheet (8, 0); source pixel (2,0) lands at (10, 0).
+        assert_eq!(reloaded.assets.sprites.get(10, 0), 0xa);
+        assert_eq!(reloaded.assets.sprites.get(0, 0), 4); // original kept.
 
         std::fs::remove_dir_all(&base).unwrap();
     }

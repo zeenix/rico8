@@ -880,7 +880,11 @@ impl Shell {
             ("run", "Build + run (esc stops)"),
             ("export <f.png|f.html>", "Export cart (PNG or web)"),
             ("import <f.png> <dir>", "Cart -> project"),
-            ("import-pico8 <f> [dir]", "PICO-8 cart -> project"),
+            ("import-pico8 <f> [dir]", "PICO-8 cart -> new project"),
+            (
+                "import-pico8 <f> --into ...",
+                "Append assets to loaded project",
+            ),
             ("info", "Cart metadata"),
             ("title/author <text>", "Set metadata"),
             ("code/sprite/map/sfx/music", "Editors (esc)"),
@@ -1236,6 +1240,9 @@ impl Shell {
     /// Import a PICO-8 cart's assets into a fresh project. Only the graphics,
     /// map, sound and music transfer; the cart's Lua code is ignored.
     fn cmd_import_pico8(&mut self, args: &[&str]) -> Result<()> {
+        if args.contains(&"--into") {
+            return self.cmd_import_pico8_into(args);
+        }
         let Some(src) = args.first() else {
             bail!("Usage: import-pico8 <cart.p8|cart.p8.png> [dir]");
         };
@@ -1256,6 +1263,51 @@ impl Shell {
             self.project_watch = Some(ProjectWatch::new(p));
         }
         self.cart_watch = None;
+        Ok(())
+    }
+
+    /// Append selected PICO-8 assets into the currently-loaded project.
+    /// `import-pico8 <src> --into [--sprites R] [--sfx R] [--music R]`.
+    fn cmd_import_pico8_into(&mut self, args: &[&str]) -> Result<()> {
+        let (mut src, mut sprites, mut sfx, mut music) = (None, None, None, None);
+        let mut it = args.iter();
+        while let Some(&a) = it.next() {
+            match a {
+                "--into" => {} // marks additive mode; the target is the loaded project.
+                "--sprites" => sprites = Some(flag_value(it.next(), "--sprites")?),
+                "--sfx" => sfx = Some(flag_value(it.next(), "--sfx")?),
+                "--music" => music = Some(flag_value(it.next(), "--music")?),
+                flag if flag.starts_with("--") => bail!("unknown flag {flag}"),
+                pos if src.is_none() => src = Some(pos),
+                pos => bail!("unexpected argument {pos}"),
+            }
+        }
+        let Some(src) = src else {
+            bail!("Usage: import-pico8 <cart> --into [--sprites R] [--sfx R] [--music R]");
+        };
+        let sel = rico8_runtime::pico8::Selection::parse(sprites, sfx, music)?;
+
+        let report = {
+            let Loaded::Project(project) = &mut self.loaded else {
+                bail!("import-pico8 --into needs a project loaded; use `new` or `load` first");
+            };
+            let assets = rico8_runtime::pico8::parse_file(&self.cwd.join(src))?;
+            let report =
+                rico8_runtime::pico8::append_pico8_assets(&mut project.assets, &assets, &sel)?;
+            project.save()?;
+            report
+        };
+        // The save rewrote src/lib.rs too; re-baseline the whole watcher (code +
+        // assets + source tree) so rico8's own write isn't seen as an external edit.
+        if let (Loaded::Project(p), Some(w)) = (&self.loaded, &mut self.project_watch) {
+            w.sync(p);
+        }
+        for line in report.summary_lines() {
+            self.say(&format!("Imported {line}"), col::GREEN);
+        }
+        for w in &report.warnings {
+            self.say(w, col::YELLOW);
+        }
         Ok(())
     }
 
@@ -1865,6 +1917,15 @@ impl Shell {
     }
 }
 
+/// The value following a flag, rejecting a missing value or another flag taken
+/// as the value (e.g. `--into --sfx 0`).
+fn flag_value<'a>(next: Option<&'a &'a str>, flag: &str) -> Result<&'a str> {
+    match next {
+        Some(&v) if !v.starts_with("--") => Ok(v),
+        _ => bail!("{flag} needs a value"),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2457,6 +2518,82 @@ mod tests {
             "toast must name the file that failed to save; got: {}",
             toast.0
         );
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn import_pico8_into_appends_to_loaded_project() {
+        let dir = std::env::temp_dir().join(format!("rico8_shell_into_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        // A source cart with sprite 0 pixel (0,0) = 0xc.
+        let mut row0 = vec![b'0'; 128];
+        row0[0] = b'c';
+        let p8 = format!(
+            "pico-8 cartridge // http://www.pico-8.com\nversion 41\n__gfx__\n{}\n",
+            String::from_utf8(row0).unwrap()
+        );
+        std::fs::write(dir.join("src.p8"), p8).unwrap();
+
+        let mut shell = test_shell();
+        shell.cwd = dir.clone();
+        // `new` creates the project under cwd and loads it as the destination.
+        shell.cmd_new(&["dest"]).expect("new");
+        // Mark sprite 0 of the loaded project as used, so an additive import must
+        // land the imported sprite at slot 1 (after the last used slot).
+        shell.assets_mut().expect("loaded").sprites.set(0, 0, 5);
+
+        shell.exec("import-pico8 src.p8 --into --sprites 0");
+
+        // The command must append INTO the loaded `dest` project, not replace it
+        // with a freshly-created one: the loaded project is still `dest`...
+        match &shell.loaded {
+            Loaded::Project(p) => assert_eq!(p.name, "dest"),
+            _ => panic!("expected the dest project to remain loaded"),
+        }
+        let assets = shell.assets().expect("a project is loaded");
+        // ...the pre-existing sprite 0 is untouched...
+        assert_eq!(assets.sprites.get(0, 0), 5);
+        // ...and the imported sprite landed at slot 1 (sheet (8, 0)).
+        assert_eq!(assets.sprites.get(8, 0), 0xc);
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn additive_import_does_not_trigger_a_rebuild() {
+        let dir = std::env::temp_dir().join(format!("rico8_into_norebuild_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut row0 = vec![b'0'; 128];
+        row0[0] = b'c';
+        let p8 = format!(
+            "pico-8 cartridge // http://www.pico-8.com\nversion 41\n__gfx__\n{}\n",
+            String::from_utf8(row0).unwrap()
+        );
+        std::fs::write(dir.join("src.p8"), p8).unwrap();
+
+        let mut shell = test_shell();
+        shell.cwd = dir.clone();
+        shell.cmd_new(&["dest"]).expect("new");
+
+        shell.exec("import-pico8 src.p8 --into --sprites 0");
+
+        // The save rewrote src/lib.rs too; the import must re-baseline the whole
+        // watcher. Tick past the source-tree poll interval and confirm no rebuild was
+        // triggered and we stayed at the console (no spontaneous run into Run mode).
+        for _ in 0..40 {
+            shell.tick();
+        }
+        assert!(
+            shell.build.is_none(),
+            "additive import must not spawn a build"
+        );
+        assert_eq!(shell.mode, Mode::Console, "must stay at the console");
+        assert!(!shell.run_after_build, "must not arm a run");
 
         std::fs::remove_dir_all(&dir).unwrap();
     }
