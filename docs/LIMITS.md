@@ -96,9 +96,6 @@ impl Game for MyGame {
 rico8::game!(MyGame { x: 64, y: 64 });
 ```
 
-See [`examples/hello`](../examples/hello) for the minimal, runnable starting
-point.
-
 ### Fixed-size collections with `heapless`
 
 When you need a vector, string, or map, reach for [`heapless`]. Its

@@ -383,10 +383,8 @@ mod tests {
         // assets-format change that forgets to regenerate them.
         let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../examples");
         for dir in [
-            "hello",
             "sprite_move",
             "platformer",
-            "map_demo",
             "sfx_demo",
             "music_demo",
             "stress",
