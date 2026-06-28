@@ -60,6 +60,7 @@ impl Platformer {
                 time: ctx.time(),
                 flash: false,
                 _music: None,
+                won: false,
             };
 
             return;
@@ -122,6 +123,7 @@ impl Platformer {
                     time: ctx.time(),
                     flash: false,
                     _music: Some(music),
+                    won: true,
                 };
             }
             _ => (),
@@ -167,7 +169,11 @@ impl Game for Platformer {
         gfx.camera(cam as i16, 0);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
         let sprite = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
-            HERO_LEGS_EXTEND_SPRITE
+            match self.mode {
+                GameMode::Ended { won, .. } if won => HERO_HAPPY_SPRITE,
+                GameMode::InGame { .. } | GameMode::Ended { .. } => HERO_LEGS_EXTEND_SPRITE,
+                GameMode::Init => unreachable!(),
+            }
         } else {
             HERO_SPRITE
         };
@@ -214,6 +220,7 @@ enum GameMode {
         time: f32,
         flash: bool,
         _music: Option<PlayingMusic>,
+        won: bool,
     },
 }
 
@@ -234,6 +241,7 @@ const SOLID: SpriteFlag = SpriteFlag::Flag0;
 const RUN: f32 = 0.7;
 const HERO_SPRITE: SpriteId = SpriteId(1);
 const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
+const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
 const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
 const GAME_TIMEOUT: u8 = 30;
