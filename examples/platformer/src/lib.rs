@@ -8,6 +8,7 @@
 
 #![no_std]
 
+use heapless::Vec;
 use rico8::*;
 
 game!(Platformer {
@@ -16,7 +17,7 @@ game!(Platformer {
     vy: 0.0,
     grounded: false,
     flip: false,
-    coins: 0,
+    taken: Vec::new(),
     frame: 0,
     mode: GameMode::Init,
 });
@@ -27,7 +28,7 @@ struct Platformer {
     vy: f32,
     grounded: bool,
     flip: bool,
-    coins: u32,
+    taken: Vec<Taken, MAX_TAKEN>,
     frame: u32,
     mode: GameMode,
 }
@@ -111,11 +112,12 @@ impl Platformer {
         match ctx.map_tile(cx, cy) {
             Some(COIN_SPRITE) => {
                 ctx.set_map_tile(cx, cy, SpriteId(0)).unwrap();
-                self.coins += 1;
+                self.taken.push(Taken::new_coin(cx, cy)).unwrap();
                 ctx.sfx(COIN_SFX);
             }
             Some(TROPHY_SPRITE) => {
                 ctx.set_map_tile(cx, cy, SpriteId(0)).unwrap();
+                self.taken.push(Taken::new_trophy(cx, cy)).unwrap();
                 // Another music can't be playing becase `PlayingMusic` instace has had to have been
                 // dropped when the game mode switch away from `Ended`.
                 let music = ctx.music(COMPLETION_MUSIC).play().unwrap();
@@ -136,9 +138,13 @@ impl Platformer {
         self.vy = 0.0;
         self.grounded = false;
         self.flip = false;
-        self.coins = 0;
         self.frame = 0;
         self.mode.start(ctx);
+        // Put all the rewards back on the map.
+        for Taken { x, y, sprite, .. } in &self.taken {
+            ctx.set_map_tile(*x, *y, *sprite).unwrap();
+        }
+        self.taken.clear();
     }
 }
 
@@ -189,7 +195,14 @@ impl Game for Platformer {
         )
         .unwrap();
         gfx.camera(0, 0);
-        printf!(gfx, 2, 2, Color::YELLOW, "Coins {}", self.coins);
+        printf!(
+            gfx,
+            2,
+            2,
+            Color::YELLOW,
+            "Score {}",
+            self.taken.iter().fold(0, |acc, r| acc + r.points)
+        );
 
         if let GameMode::InGame { time_left, .. } = self.mode {
             let color = if time_left < 5 {
@@ -235,6 +248,35 @@ impl GameMode {
     }
 }
 
+#[derive(Debug)]
+struct Taken {
+    x: i16,
+    y: i16,
+    sprite: SpriteId,
+    points: u8,
+}
+
+impl Taken {
+    fn new_coin(x: i16, y: i16) -> Self {
+        Self {
+            x,
+            y,
+            sprite: COIN_SPRITE,
+            points: COIN_POINTS,
+        }
+    }
+    fn new_trophy(x: i16, y: i16) -> Self {
+        Self {
+            x,
+            y,
+            sprite: TROPHY_SPRITE,
+            points: TROPHY_POINTS,
+        }
+    }
+}
+
+const MAX_TAKEN: usize = 8;
+
 const SOLID: SpriteFlag = SpriteFlag::Flag0;
 // Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
 // Body keeps coherent. At a whole pixel per frame there would be no zigzag.
@@ -244,6 +286,8 @@ const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
 const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
+const COIN_POINTS: u8 = 1;
+const TROPHY_POINTS: u8 = 4;
 const GAME_TIMEOUT: u8 = 30;
 const GAME_OVER_TIMEOUT: f32 = 5.0;
 
