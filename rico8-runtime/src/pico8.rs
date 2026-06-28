@@ -32,6 +32,12 @@ use crate::{
 use anyhow::{anyhow, bail, Result};
 use std::{collections::HashMap, path::Path};
 
+mod clipboard;
+pub use clipboard::{
+    parse_clipboard, paste_pattern, paste_sfx, paste_sprites, PasteReport, Pasted, PixelRect,
+    SfxClip, Slotted,
+};
+
 const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
 
 /// PICO-8 cart image dimensions, fixed by the format.
@@ -214,24 +220,12 @@ pub fn append_pico8_assets(dest: &mut Assets, src: &Assets, sel: &Selection) -> 
         sfx_map.insert(s, sfx_start + i);
     }
     for (i, &s) in sel.sfx.iter().enumerate() {
-        for step in 0..SFX_LEN {
-            let note = &mut out.sfx[sfx_start + i].notes[step];
-            let Some(inst) = note.instrument() else {
-                continue;
-            };
-            match sfx_map.get(&inst) {
-                // A custom instrument can only be addressed in slots 0..8.
-                Some(&dst) if dst <= 7 => note.wave = NOTE_CUSTOM_FLAG | dst as u8,
-                Some(&dst) => warnings.push(format!(
-                    "SFX {s}: custom instrument landed in slot {dst}, which a note \
-                     can't reference (only slots 0-7); left pointing at slot {inst}"
-                )),
-                None => warnings.push(format!(
-                    "SFX {s}: custom instrument {inst} was not imported; left \
-                     pointing at slot {inst}"
-                )),
-            }
-        }
+        remap_custom_instruments(
+            &mut out.sfx[sfx_start + i].notes,
+            &sfx_map,
+            &format!("SFX {s}"),
+            &mut warnings,
+        );
     }
     let sfx = Placement {
         start: sfx_start,
@@ -250,16 +244,7 @@ pub fn append_pico8_assets(dest: &mut Assets, src: &Assets, sel: &Selection) -> 
     }
     for (i, &m) in sel.music.iter().enumerate() {
         let mut pat = src.music[m as usize];
-        for ch in pat.channels.iter_mut() {
-            let Some(old) = *ch else { continue };
-            match sfx_map.get(&old) {
-                Some(&dst) => *ch = Some(dst as u8),
-                None => warnings.push(format!(
-                    "music {m}: channel SFX {old} was not imported; left pointing \
-                     at slot {old}"
-                )),
-            }
-        }
+        remap_music_channels(&mut pat, &sfx_map, &format!("music {m}"), &mut warnings);
         out.music[mus_start + i] = pat;
     }
     let music = Placement {
@@ -333,6 +318,55 @@ fn copy_sprite(dst: &mut SpriteSheet, dst_n: usize, src: &SpriteSheet, src_n: us
         }
     }
     dst.flags[dst_n] = src.flags[src_n];
+}
+
+/// Remap custom-instrument note refs in `notes` through `sfx_map` (source SFX
+/// slot to destination slot). A note whose instrument landed outside slots 0-7,
+/// or was not among the mapped SFX, is left as-is and a warning is pushed.
+/// `label` names the SFX in warnings (e.g. `"SFX 3"`).
+fn remap_custom_instruments(
+    notes: &mut [Note],
+    sfx_map: &HashMap<u8, usize>,
+    label: &str,
+    warnings: &mut Vec<String>,
+) {
+    for note in notes.iter_mut() {
+        let Some(inst) = note.instrument() else {
+            continue;
+        };
+        match sfx_map.get(&inst) {
+            // A custom instrument can only be addressed in slots 0..8.
+            Some(&dst) if dst <= 7 => note.wave = NOTE_CUSTOM_FLAG | dst as u8,
+            Some(&dst) => warnings.push(format!(
+                "{label}: custom instrument landed in slot {dst}, which a note \
+                 can't reference (only slots 0-7); left pointing at slot {inst}"
+            )),
+            None => warnings.push(format!(
+                "{label}: custom instrument {inst} was not imported; left \
+                 pointing at slot {inst}"
+            )),
+        }
+    }
+}
+
+/// Remap a music pattern's channel SFX refs through `sfx_map`. A channel whose
+/// SFX was not among the mapped SFX is left as-is and a warning is pushed.
+fn remap_music_channels(
+    pat: &mut MusicPattern,
+    sfx_map: &HashMap<u8, usize>,
+    label: &str,
+    warnings: &mut Vec<String>,
+) {
+    for ch in pat.channels.iter_mut() {
+        let Some(old) = *ch else { continue };
+        match sfx_map.get(&old) {
+            Some(&dst) => *ch = Some(dst as u8),
+            None => warnings.push(format!(
+                "{label}: channel SFX {old} was not imported; left pointing \
+                 at slot {old}"
+            )),
+        }
+    }
 }
 
 /// Parse a comma-separated list of indices and inclusive ranges (e.g.

@@ -195,6 +195,46 @@ pub fn status_bar(fb: &mut Framebuffer, text: &str) {
     fb.print(text, 2, HEIGHT - 7, col::DARK_PURPLE);
 }
 
+/// Frames a transient status message stays up (~2.5s at 60fps).
+pub const STATUS_TTL: u16 = 150;
+
+/// A transient bottom-bar message with a frame countdown; falls back to a
+/// static hint once it expires. Callers pass text already sized for the bar.
+#[derive(Default)]
+pub struct StatusMsg {
+    text: Option<String>,
+    ttl: u16,
+}
+
+impl StatusMsg {
+    /// Show `text` for [`STATUS_TTL`] frames.
+    pub fn set(&mut self, text: String) {
+        self.text = Some(text);
+        self.ttl = STATUS_TTL;
+    }
+
+    /// Count down one frame, clearing the message at zero. Call once per tick.
+    pub fn tick(&mut self) {
+        if self.ttl > 0 {
+            self.ttl -= 1;
+            if self.ttl == 0 {
+                self.text = None;
+            }
+        }
+    }
+
+    /// Draw the message if set, else `fallback`.
+    pub fn show(&self, fb: &mut Framebuffer, fallback: &str) {
+        status_bar(fb, self.text.as_deref().unwrap_or(fallback));
+    }
+
+    /// The current message text, if any (used by tests to assert paste feedback).
+    #[cfg(test)]
+    pub fn current(&self) -> Option<&str> {
+        self.text.as_deref()
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Shared SFX/music editor chrome, matching PICO-8's. Pixel-exact icons (flow
 // buttons, waveform palette, the wave/circle toggles) are blitted from grids
@@ -382,6 +422,23 @@ pub const WAVEI: [&str; 5] = [
 /// Draw the mouse cursor on top of everything.
 pub fn draw_cursor(fb: &mut Framebuffer, mouse: &Mouse) {
     rui::cursor(fb, mouse.x, mouse.y);
+}
+
+#[cfg(test)]
+mod paste_status_tests {
+    use super::*;
+
+    #[test]
+    fn status_msg_falls_back_then_expires() {
+        let mut m = StatusMsg::default();
+        assert_eq!(m.current(), None);
+        m.set("done".into());
+        assert_eq!(m.current(), Some("done"));
+        for _ in 0..STATUS_TTL {
+            m.tick();
+        }
+        assert_eq!(m.current(), None);
+    }
 }
 
 #[cfg(test)]

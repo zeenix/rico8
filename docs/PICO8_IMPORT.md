@@ -114,3 +114,22 @@ actually used and clear the other in the editor.
   waveform) at the played pitch, and the filter switches (noiz/buzz/detune/
   reverb/dampen) are faithful approximations of PICO-8's, not its exact DSP.
 - **The code, as above.** Assets transfer; the logic is yours to write.
+
+## Pasting from PICO-8
+
+Besides importing a whole cart, you can copy individual assets out of PICO-8 and paste them
+straight into a RICO-8 editor. In PICO-8, select sprites, a range of SFX, or a music pattern and
+press **Ctrl+C**; switch to the matching RICO-8 editor and press **Ctrl+V**.
+
+- **Sprites** (sprite editor) paste as a rectangle with its top-left at the selected sprite.
+  Anything past the edge is clipped.
+- **SFX** (SFX editor) overwrite consecutive slots starting at the selected one; a note that
+  plays another copied SFX as a custom instrument is repointed to where that SFX lands.
+- **Music patterns** are a special case: PICO-8 copies a pattern as its SFX. Pasted in the
+  music editor, RICO-8 rebuilds the pattern at the selected slot and appends its SFX after the
+  last used SFX slot, repointing the pattern's channels to them — your existing SFX are left
+  alone.
+
+The bottom bar reports what happened (e.g. `pasted 4 SFX 3-6`), including a count if something
+did not fit or a reference could not be resolved. Pasting the wrong kind for an editor shows a
+hint naming the right one.

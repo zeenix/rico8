@@ -13,6 +13,7 @@ use rico8_runtime::{
     audio::AudioHandle,
     fb::Framebuffer,
     palette::col,
+    pico8::{self, Pasted},
 };
 
 // Layout, matching PICO-8's recovered framebuffer.
@@ -42,6 +43,7 @@ pub struct MusicEditor {
     grid: bool,
     /// In grid view: false = patterns (Pat), true = SFX.
     grid_sfx: bool,
+    status: ui::StatusMsg,
 }
 
 impl MusicEditor {
@@ -53,6 +55,7 @@ impl MusicEditor {
             edit_request: None,
             grid: false,
             grid_sfx: false,
+            status: ui::StatusMsg::default(),
         }
     }
 
@@ -132,6 +135,7 @@ impl MusicEditor {
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets, audio: &AudioHandle) {
+        self.status.tick();
         // While a song plays, follow the playing pattern so the view scrolls
         // through patterns and reveals channels that come in on later patterns.
         if let Some(p) = audio.with_synth(|s| s.playing_pattern()) {
@@ -279,7 +283,7 @@ impl MusicEditor {
             let hx = PANEL_X[self.channel];
             fb.rect(hx, 22, hx + PANEL_W, 30, col::PINK);
             self.draw_grid(fb, assets, audio);
-            ui::status_bar(fb, "Tab notes  click a cell to pick");
+            self.status.show(fb, "Tab notes  click a cell to pick");
             return;
         }
 
@@ -321,7 +325,7 @@ impl MusicEditor {
             }
         }
 
-        ui::status_bar(fb, "Spc play  pgup/dn pat  x ch");
+        self.status.show(fb, "Spc play  pgup/dn pat  x ch");
     }
 
     /// The grid view: an 8x8 grid of all 64 patterns or SFX, the current one boxed
@@ -376,6 +380,24 @@ impl MusicEditor {
                 let off = (*step as i32 * (G_CELL_W - 2) / total).clamp(0, G_CELL_W - 2);
                 fb.line(cx + off, cy, cx + off, cy + G_CELL_H - 2, col::WHITE);
             }
+        }
+    }
+
+    /// Set a transient bottom-bar message (used for clipboard errors).
+    pub fn set_status(&mut self, msg: String) {
+        self.status.set(msg);
+    }
+
+    /// Paste a decoded PICO-8 clipboard blob. An `[sfx]` blob (which is what a
+    /// copied pattern is) rebuilds a pattern at the selected slot, appending its
+    /// SFX after the last used slot.
+    pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
+        match pasted {
+            Pasted::Sfx(clip) => {
+                let report = pico8::paste_pattern(assets, clip, self.pattern);
+                self.status.set(report.summary);
+            }
+            Pasted::Sprites(_) => self.status.set("sprites - use sprite editor".into()),
         }
     }
 }
@@ -573,5 +595,49 @@ mod tests {
         ed.draw(&mut fb, &a, &dummy()); // exercises thumbnails + playhead path.
         ed.grid_sfx = false;
         ed.draw(&mut fb, &a, &dummy()); // exercises pattern cells + activity dots.
+    }
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::*;
+    use rico8_runtime::{
+        assets::{MusicPattern, Sfx},
+        pico8::{Pasted, SfxClip, Slotted},
+    };
+
+    fn one_sfx(pitch: u8) -> Sfx {
+        let mut s = Sfx::default();
+        s.notes[0].pitch = pitch;
+        s.notes[0].volume = 4;
+        s
+    }
+
+    #[test]
+    fn rebuilds_pattern_at_selected_slot() {
+        let mut ed = MusicEditor::new(); // pattern 0.
+        let mut assets = Assets::default();
+        let clip = SfxClip {
+            records: vec![
+                Slotted {
+                    src: 8,
+                    value: one_sfx(1),
+                },
+                Slotted {
+                    src: 9,
+                    value: one_sfx(2),
+                },
+            ],
+            patterns: vec![MusicPattern {
+                channels: [Some(8), Some(9), None, None],
+                loop_back: false,
+                loop_start: false,
+                stop_at_end: false,
+            }],
+        };
+        ed.paste(&Pasted::Sfx(clip), &mut assets);
+        assert_eq!(assets.sfx[0].notes[0].pitch, 1); // appended at slot 0.
+        assert_eq!(assets.music[0].channels, [Some(0), Some(1), None, None]);
+        assert!(ed.status.current().unwrap().contains("pat 0"));
     }
 }
