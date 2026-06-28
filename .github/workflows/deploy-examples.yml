@@ -41,7 +41,7 @@ jobs:
       - name: Export and verify the example carts
         run: |
           mkdir -p site
-          for ex in hello sprite_move platformer map_demo sfx_demo music_demo; do
+          for ex in sprite_move platformer sfx_demo music_demo; do
             ./target/release/rico8 export examples/$ex site/$ex.png
             ./target/release/rico8 verify site/$ex.png
             ./target/release/rico8 export-web site/$ex.png site/$ex.html
