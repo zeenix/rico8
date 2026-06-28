@@ -10,10 +10,8 @@ site="${1:?usage: build-index.sh <site-dir>}"
 
 # name:description pairs, in shelf order.
 carts=(
-  "hello:the canonical first cart"
   "sprite_move:sprite drawing, flipping, animation"
   "platformer:run, jump, collect coins"
-  "map_demo:map scrolling and layer masks"
   "sfx_demo:a soundboard"
   "music_demo:starting and stopping a song"
 )
