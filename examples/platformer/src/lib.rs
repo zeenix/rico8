@@ -159,8 +159,11 @@ impl Game for Platformer {
             GameMode::Ended { time, .. } if ctx.time() - *time > GAME_OVER_TIMEOUT => {
                 self.restart_game(ctx)
             }
-            // Flash on every 16th frame.
-            GameMode::Ended { flash, .. } => *flash = self.frame.is_multiple_of(16),
+            // Flash on every 16th frame if game ended with winning.
+            GameMode::Ended {
+                flash, won: true, ..
+            } => *flash = self.frame.is_multiple_of(16),
+            GameMode::Ended { .. } => (),
         }
     }
 
