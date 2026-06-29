@@ -107,7 +107,7 @@ impl Platformer {
         }
         self.body.move_by(dx, dy);
 
-        // Coins (tile 3) & trophy: sample the hitbox center.
+        // Coins & trophy: sample the hitbox center.
         let cx = (self.body.x() as i16 + 4) / 8;
         let cy = (self.body.y() as i16 + 4) / 8;
         match ctx.map_tile(cx, cy) {
