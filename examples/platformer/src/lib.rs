@@ -16,6 +16,7 @@ game!(Platformer {
     vx: 0.0,
     vy: 0.0,
     grounded: false,
+    badie: Charachter::new_badie(),
     taken: Vec::new(),
     frame: 0,
     mode: GameMode::Init,
@@ -26,6 +27,7 @@ struct Platformer {
     vx: f32,
     vy: f32,
     grounded: bool,
+    badie: Charachter,
     taken: Vec<Taken, MAX_TAKEN>,
     frame: u32,
     mode: GameMode,
@@ -55,13 +57,7 @@ impl Platformer {
         };
 
         if *time_left == 0 {
-            let music = ctx.music(GAME_OVER_MUSIC).play().unwrap();
-            self.mode = GameMode::Ended {
-                time: ctx.time(),
-                flash: false,
-                _music: music,
-                won: false,
-            };
+            self.game_over(ctx);
 
             return;
         }
@@ -70,10 +66,10 @@ impl Platformer {
 
         // Horizontal movement (pixels per frame).
         if ctx.is_button_down(Button::Left) {
-            self.vx = -RUN;
+            self.vx = -HERO_SPEED;
             self.hero.flip = true;
         } else if ctx.is_button_down(Button::Right) {
-            self.vx = RUN;
+            self.vx = HERO_SPEED;
             self.hero.flip = false;
         } else {
             self.vx = 0.0;
@@ -104,6 +100,30 @@ impl Platformer {
             self.grounded = false;
         }
         self.hero.body.move_by(dx, dy);
+
+        // Check for collision between our hero and the badie, and decide who dies if there is one.
+        if self.hero.body.x() + HERO_WIDTH >= self.badie.body.x()
+            && self.hero.body.x() < self.badie.body.x() + BADIE_WIDTH
+            && self.hero.body.y() + HERO_HEIGHT >= self.badie.body.y()
+            && self.hero.body.y() < self.badie.body.y() + BADIE_HEIGHT
+        {
+            self.hero.dead = true;
+            self.game_over(ctx);
+
+            return;
+        }
+
+        // Our badie moves horizontally back & forth between two points.
+        if self.badie.body.x() < BADIE_END_X {
+            self.badie.flip = true;
+        } else if self.badie.body.x() > BADIE_START_X {
+            self.badie.flip = false;
+        }
+        if self.badie.flip {
+            self.badie.body.move_by(BADIE_SPEED, 0.0);
+        } else {
+            self.badie.body.move_by(-BADIE_SPEED, 0.0);
+        }
 
         // Coins & trophy: sample the hitbox center.
         let cx = (self.hero.body.x() as i16 + 4) / 8;
@@ -136,6 +156,7 @@ impl Platformer {
         self.vx = 0.0;
         self.vy = 0.0;
         self.grounded = false;
+        self.badie = Charachter::new_badie();
         self.frame = 0;
         self.mode.start(ctx);
         // Put all the rewards back on the map.
@@ -143,6 +164,16 @@ impl Platformer {
             ctx.set_map_tile(*x, *y, *sprite).unwrap();
         }
         self.taken.clear();
+    }
+
+    fn game_over(&mut self, ctx: &mut Context) {
+        let music = ctx.music(GAME_OVER_MUSIC).play().unwrap();
+        self.mode = GameMode::Ended {
+            time: ctx.time(),
+            flash: false,
+            _music: music,
+            won: false,
+        };
     }
 }
 
@@ -175,7 +206,8 @@ impl Game for Platformer {
         let cam = (self.hero.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
         gfx.camera(cam as i16, 0);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
-        let sprite = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
+        let is_alt_frame = (self.frame / 4).is_multiple_of(2);
+        let sprite = if !self.grounded || (self.vx != 0.0 && is_alt_frame) {
             match self.mode {
                 GameMode::Ended { won, .. } if won => HERO_HAPPY_SPRITE,
                 GameMode::InGame { .. } | GameMode::Ended { .. } => HERO_LEGS_EXTEND_SPRITE,
@@ -195,7 +227,25 @@ impl Game for Platformer {
             false,
         )
         .unwrap();
+
+        let sprite = match self.mode {
+            GameMode::InGame { .. } if is_alt_frame => BADIE_ALT_SPRITE,
+            GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
+            GameMode::Init => unreachable!(),
+        };
+        gfx.sprite_ext(
+            sprite,
+            self.badie.body.draw_x(),
+            self.badie.body.draw_y(),
+            8,
+            8,
+            self.badie.flip,
+            false,
+        )
+        .unwrap();
+
         gfx.camera(0, 0);
+
         printf!(
             gfx,
             2,
@@ -227,6 +277,7 @@ impl Game for Platformer {
 struct Charachter {
     body: Body,
     flip: bool,
+    dead: bool,
 }
 
 impl Charachter {
@@ -234,6 +285,15 @@ impl Charachter {
         Self {
             body: Body::new(16.0, 80.0),
             flip: false,
+            dead: false,
+        }
+    }
+
+    fn new_badie() -> Self {
+        Self {
+            body: Body::new(BADIE_START_X, BADIE_Y),
+            flip: false,
+            dead: false,
         }
     }
 }
@@ -296,11 +356,23 @@ const MAX_TAKEN: usize = 8;
 const SOLID: SpriteFlag = SpriteFlag::Flag0;
 // Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
 // Body keeps coherent. At a whole pixel per frame there would be no zigzag.
-const RUN: f32 = 0.7;
+const HERO_SPEED: f32 = 0.7;
+// Our badie moves slower.
+const BADIE_SPEED: f32 = 0.5;
 
 const HERO_SPRITE: SpriteId = SpriteId(1);
 const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
+const HERO_WIDTH: f32 = 8.0;
+const HERO_HEIGHT: f32 = 7.0;
+
+const BADIE_SPRITE: SpriteId = SpriteId(6);
+const BADIE_ALT_SPRITE: SpriteId = SpriteId(7);
+const BADIE_START_X: f32 = (SCREEN_WIDTH * 2 - 8) as f32;
+const BADIE_END_X: f32 = (SCREEN_WIDTH * 2 - 8 * 8) as f32;
+const BADIE_Y: f32 = (SCREEN_HEIGHT - 3 * 8) as f32;
+const BADIE_WIDTH: f32 = 8.0;
+const BADIE_HEIGHT: f32 = 7.0;
 
 const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
