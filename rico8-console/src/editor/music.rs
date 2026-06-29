@@ -424,6 +424,13 @@ impl MusicEditor {
         self.status.set(msg);
     }
 
+    /// Copy the selected pattern as an `[sfx]` clipboard blob (its channel SFX
+    /// plus a footer that rebuilds the pattern).
+    pub fn copy(&mut self, assets: &Assets) -> String {
+        self.status.set(format!("copied pat {}", self.pattern));
+        pico8::encode_pattern(assets, self.pattern)
+    }
+
     /// Paste a decoded PICO-8 clipboard blob. An `[sfx]` blob (which is what a
     /// copied pattern is) rebuilds a pattern at the selected slot, appending its
     /// SFX after the last used slot.
@@ -675,7 +682,7 @@ mod paste_tests {
     use super::*;
     use rico8_runtime::{
         assets::{MusicPattern, Sfx},
-        pico8::{Pasted, SfxClip, Slotted},
+        pico8::{parse_clipboard, Pasted, SfxClip, Slotted},
     };
 
     fn one_sfx(pitch: u8) -> Sfx {
@@ -711,5 +718,19 @@ mod paste_tests {
         assert_eq!(assets.sfx[0].notes[0].pitch, 1); // appended at slot 0.
         assert_eq!(assets.music[0].channels, [Some(0), Some(1), None, None]);
         assert!(ed.status.current().unwrap().contains("pat 0"));
+    }
+
+    #[test]
+    fn copies_selected_pattern() {
+        let mut ed = MusicEditor::new();
+        let mut assets = Assets::default();
+        assets.music[0].channels = [Some(3), None, None, None];
+        assets.sfx[3].notes[0].volume = 5;
+        let blob = ed.copy(&assets);
+        assert!(ed.status.current().unwrap().contains("copied pat 0"));
+        let Pasted::Sfx(clip) = parse_clipboard(&blob).unwrap() else {
+            panic!("not sfx")
+        };
+        assert_eq!(clip.patterns[0].channels, [Some(3), None, None, None]);
     }
 }
