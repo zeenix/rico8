@@ -12,22 +12,20 @@ use heapless::Vec;
 use rico8::*;
 
 game!(Platformer {
-    body: Body::new(16.0, 80.0),
+    hero: Charachter::new_hero(),
     vx: 0.0,
     vy: 0.0,
     grounded: false,
-    flip: false,
     taken: Vec::new(),
     frame: 0,
     mode: GameMode::Init,
 });
 
 struct Platformer {
-    body: Body,
+    hero: Charachter,
     vx: f32,
     vy: f32,
     grounded: bool,
-    flip: bool,
     taken: Vec<Taken, MAX_TAKEN>,
     frame: u32,
     mode: GameMode,
@@ -73,10 +71,10 @@ impl Platformer {
         // Horizontal movement (pixels per frame).
         if ctx.is_button_down(Button::Left) {
             self.vx = -RUN;
-            self.flip = true;
+            self.hero.flip = true;
         } else if ctx.is_button_down(Button::Right) {
             self.vx = RUN;
-            self.flip = false;
+            self.hero.flip = false;
         } else {
             self.vx = 0.0;
         }
@@ -92,7 +90,7 @@ impl Platformer {
         // then hand the allowed movement over in one call so the diagonal
         // render stays coherent. Tile lookups want whole pixels; positions
         // stay >= 0, so the truncating cast floors.
-        let (x, y) = (self.body.x(), self.body.y());
+        let (x, y) = (self.hero.body.x(), self.hero.body.y());
         let mut dx = self.vx;
         if self.collide(ctx, (x + dx) as i16, y as i16) {
             dx = 0.0;
@@ -105,11 +103,11 @@ impl Platformer {
         } else {
             self.grounded = false;
         }
-        self.body.move_by(dx, dy);
+        self.hero.body.move_by(dx, dy);
 
         // Coins & trophy: sample the hitbox center.
-        let cx = (self.body.x() as i16 + 4) / 8;
-        let cy = (self.body.y() as i16 + 4) / 8;
+        let cx = (self.hero.body.x() as i16 + 4) / 8;
+        let cy = (self.hero.body.y() as i16 + 4) / 8;
         match ctx.map_tile(cx, cy) {
             Some(COIN_SPRITE) => {
                 ctx.set_map_tile(cx, cy, SpriteId(0)).unwrap();
@@ -134,11 +132,10 @@ impl Platformer {
     }
 
     fn restart_game(&mut self, ctx: &mut Context) {
-        self.body = Body::new(16.0, 80.0);
+        self.hero = Charachter::new_hero();
         self.vx = 0.0;
         self.vy = 0.0;
         self.grounded = false;
-        self.flip = false;
         self.frame = 0;
         self.mode.start(ctx);
         // Put all the rewards back on the map.
@@ -175,7 +172,7 @@ impl Game for Platformer {
         }
 
         // Camera follows the player across the 32-tile-wide level.
-        let cam = (self.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
+        let cam = (self.hero.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
         gfx.camera(cam as i16, 0);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
         let sprite = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
@@ -190,11 +187,11 @@ impl Game for Platformer {
         // The body's coherent pixel — a running jump climbs cleanly, no zigzag.
         gfx.sprite_ext(
             sprite,
-            self.body.draw_x(),
-            self.body.draw_y(),
+            self.hero.body.draw_x(),
+            self.hero.body.draw_y(),
             8,
             8,
-            self.flip,
+            self.hero.flip,
             false,
         )
         .unwrap();
@@ -222,6 +219,21 @@ impl Game for Platformer {
                 "{:>2}s",
                 time_left
             );
+        }
+    }
+}
+
+#[derive(Debug)]
+struct Charachter {
+    body: Body,
+    flip: bool,
+}
+
+impl Charachter {
+    fn new_hero() -> Self {
+        Self {
+            body: Body::new(16.0, 80.0),
+            flip: false,
         }
     }
 }
@@ -285,9 +297,11 @@ const SOLID: SpriteFlag = SpriteFlag::Flag0;
 // Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
 // Body keeps coherent. At a whole pixel per frame there would be no zigzag.
 const RUN: f32 = 0.7;
+
 const HERO_SPRITE: SpriteId = SpriteId(1);
 const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
+
 const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
 const COIN_POINTS: u8 = 1;
