@@ -294,6 +294,23 @@ impl Sfx {
         self.reverb = byte / 24 % 3;
         self.dampen = byte / 72 % 3;
     }
+
+    /// PICO-8's packed filter byte — the inverse of [`Sfx::set_filters`]: bit 1
+    /// noiz, bit 2 buzz, then base-3 digits for detune (x8), reverb (x24) and
+    /// dampen (x72). Bit 0 (PICO-8's editor mode) is always left clear.
+    pub fn filters_byte(&self) -> u8 {
+        let mut byte = 0u8;
+        if self.noiz {
+            byte |= 2;
+        }
+        if self.buzz {
+            byte |= 4;
+        }
+        byte += self.detune * 8;
+        byte += self.reverb * 24;
+        byte += self.dampen * 72;
+        byte
+    }
 }
 
 /// One music pattern: an SFX slot per channel, plus flow control flags.
