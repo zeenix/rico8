@@ -57,10 +57,11 @@ impl Platformer {
         };
 
         if *time_left == 0 {
+            let music = ctx.music(GAME_OVER_MUSIC).play().unwrap();
             self.mode = GameMode::Ended {
                 time: ctx.time(),
                 flash: false,
-                _music: None,
+                _music: music,
                 won: false,
             };
 
@@ -124,7 +125,7 @@ impl Platformer {
                 self.mode = GameMode::Ended {
                     time: ctx.time(),
                     flash: false,
-                    _music: Some(music),
+                    _music: music,
                     won: true,
                 };
             }
@@ -232,7 +233,7 @@ enum GameMode {
     Ended {
         time: f32,
         flash: bool,
-        _music: Option<PlayingMusic>,
+        _music: PlayingMusic,
         won: bool,
     },
 }
@@ -294,3 +295,4 @@ const GAME_OVER_TIMEOUT: f32 = 5.0;
 const JUMP_SFX: SfxId = SfxId::new(0).unwrap();
 const COIN_SFX: SfxId = SfxId::new(1).unwrap();
 const COMPLETION_MUSIC: MusicId = MusicId::new(0).unwrap();
+const GAME_OVER_MUSIC: MusicId = MusicId::new(1).unwrap();
