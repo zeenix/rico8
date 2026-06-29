@@ -1,11 +1,16 @@
 //! The code editor: 31 columns of Rust in a 4x7 pixel font, with the
 //! classic immediate cursor feel. Not an IDE — a place to type games.
 
+use super::history::History;
 use crate::{
     shell::{Key, Mods},
     ui::{self, Mouse},
 };
 use rico8_runtime::{fb::Framebuffer, font, palette::col};
+
+/// An undo snapshot of the buffer: the lines plus the cursor position, so undo
+/// restores where the cursor was as well as the text.
+type Snapshot = (Vec<String>, usize, usize);
 
 /// Visible text geometry. The row count is derived from the font's line height
 /// so the text never overruns the status bar (the bottom 8 rows of the screen).
@@ -40,7 +45,7 @@ pub struct CodeEditor {
     scroll_x: usize,
     anchor: Option<(usize, usize)>,
     clipboard: String,
-    undo: Vec<(Vec<String>, usize, usize)>,
+    history: History<Snapshot>,
     frame: u64,
 }
 
@@ -55,7 +60,7 @@ impl CodeEditor {
             scroll_x: 0,
             anchor: None,
             clipboard: String::new(),
-            undo: Vec::new(),
+            history: History::new(),
             frame: 0,
         }
     }
@@ -75,7 +80,7 @@ impl CodeEditor {
             self.scroll_y = 0;
             self.scroll_x = 0;
             self.anchor = None;
-            self.undo.clear();
+            self.history.clear();
         }
     }
 
@@ -88,11 +93,25 @@ impl CodeEditor {
         self.col = self.col.min(self.lines[self.line].chars().count());
     }
 
+    fn snapshot(&self) -> Snapshot {
+        (self.lines.clone(), self.line, self.col)
+    }
+
+    /// Open an undo step, snapshotting the buffer before an edit. Idempotent
+    /// within a single `key` call, so one keypress is one undo step.
     fn push_undo(&mut self) {
-        self.undo.push((self.lines.clone(), self.line, self.col));
-        if self.undo.len() > 200 {
-            self.undo.remove(0);
-        }
+        let snap = self.snapshot();
+        self.history.begin(&snap);
+    }
+
+    /// Replace the buffer from an undo/redo snapshot.
+    fn restore(&mut self, snap: Snapshot) {
+        let (lines, line, col) = snap;
+        self.lines = lines;
+        self.line = line;
+        self.col = col;
+        self.anchor = None;
+        self.clamp_cursor();
     }
 
     fn byte_idx(s: &str, char_idx: usize) -> usize {
@@ -228,7 +247,7 @@ impl CodeEditor {
             | Key::End
             | Key::PageUp
             | Key::PageDown => self.move_cursor(key, mods),
-            Key::Char(c) if mods.ctrl => match c {
+            Key::Char(c) if mods.ctrl => match c.to_ascii_lowercase() {
                 'a' => {
                     self.anchor = Some((0, 0));
                     self.line = self.lines.len() - 1;
@@ -250,12 +269,23 @@ impl CodeEditor {
                         self.insert_str(&text);
                     }
                 }
+                // Ctrl+Z undoes; Ctrl+Shift+Z and Ctrl+Y redo.
+                'z' if mods.shift => {
+                    let mut snap = self.snapshot();
+                    if self.history.redo(&mut snap) {
+                        self.restore(snap);
+                    }
+                }
                 'z' => {
-                    if let Some((lines, line, col)) = self.undo.pop() {
-                        self.lines = lines;
-                        self.line = line;
-                        self.col = col;
-                        self.anchor = None;
+                    let mut snap = self.snapshot();
+                    if self.history.undo(&mut snap) {
+                        self.restore(snap);
+                    }
+                }
+                'y' => {
+                    let mut snap = self.snapshot();
+                    if self.history.redo(&mut snap) {
+                        self.restore(snap);
                     }
                 }
                 _ => {}
@@ -315,6 +345,10 @@ impl CodeEditor {
             }
             Key::Escape | Key::CaptureLabel | Key::ToggleStats => {}
         }
+        // Close the undo step opened by this keypress (a no-op when nothing
+        // changed, e.g. cursor motion or an undo/redo that already closed it).
+        let snap = self.snapshot();
+        self.history.commit(&snap);
         self.scroll_to_cursor();
         *code = self.text();
     }
@@ -648,6 +682,34 @@ mod tests {
             &mut code,
         );
         assert_eq!(code, "abc");
+    }
+
+    #[test]
+    fn redo_reapplies_an_undone_edit() {
+        let (mut e, mut code) = ed_with("abc");
+        let ctrl = Mods {
+            ctrl: true,
+            ..Default::default()
+        };
+        let ctrl_shift = Mods {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+        e.key(Key::End, Mods::default(), &mut code);
+        e.key(Key::Char('!'), Mods::default(), &mut code);
+        assert_eq!(code, "abc!");
+        e.key(Key::Char('z'), ctrl, &mut code); // undo
+        assert_eq!(code, "abc");
+        // Ctrl+Shift+Z arrives as an uppercase 'Z' from the keyboard layer.
+        e.key(Key::Char('Z'), ctrl_shift, &mut code);
+        assert_eq!(code, "abc!", "redo reapplies the typed character");
+        // A fresh edit clears the redo stack.
+        e.key(Key::Char('z'), ctrl, &mut code); // undo back to "abc"
+        e.key(Key::Char('?'), Mods::default(), &mut code);
+        assert_eq!(code, "abc?");
+        e.key(Key::Char('Z'), ctrl_shift, &mut code); // nothing to redo
+        assert_eq!(code, "abc?");
     }
 
     #[test]

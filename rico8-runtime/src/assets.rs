@@ -41,7 +41,7 @@ pub struct SfxId(pub u8);
 pub struct MusicId(pub u8);
 
 /// 128x128 indexed-color sprite sheet plus one flag byte per sprite.
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SpriteSheet {
     /// One palette index per pixel, row-major, `SHEET_W * SHEET_H` long.
     pub pixels: Vec<u8>,
@@ -101,7 +101,7 @@ impl SpriteSheet {
 }
 
 /// 128x64 tile map; each cell holds a sprite number (0 = empty).
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MapData {
     pub tiles: Vec<u8>,
 }
@@ -190,7 +190,7 @@ impl SfxEffect {
 
 /// One step of an SFX: pitch (0..64, where 33 = A-4 = 440 Hz), waveform,
 /// volume (0..8, 0 = silent) and effect.
-#[derive(Debug, Clone, Copy, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Note {
     pub pitch: u8,
     /// Timbre, packed like PICO-8's SFX waveform nibble: bits 0-2 are the
@@ -234,7 +234,7 @@ pub struct CustomWave {
 }
 
 /// One sound effect: 32 steps played at a configurable speed.
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Sfx {
     pub notes: [Note; SFX_LEN],
     /// Duration of one step in 1/128ths of a second (1..=255).
@@ -299,7 +299,7 @@ impl Sfx {
 /// One music pattern: an SFX slot per channel, plus flow control flags.
 /// A song is a chain of patterns; playback walks forward from the started
 /// pattern until it hits `stop_at_end` or loops back.
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct MusicPattern {
     /// SFX index per channel; `None` leaves the channel free for game SFX.
     pub channels: [Option<u8>; CHANNELS],

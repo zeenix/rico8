@@ -3,6 +3,7 @@
 //! (a 32-step table edited with piano keys), and the wave designer (drawing a
 //! custom waveform into SFX slots 0..8). Space previews the SFX.
 
+use super::history::History;
 use crate::{
     shell::{Key, Mods},
     ui::{self, Mouse},
@@ -62,6 +63,8 @@ pub struct SfxEditor {
     /// rather than waveform glyphs.
     palette_numeric: bool,
     status: ui::StatusMsg,
+    /// Undo/redo of the whole SFX bank (last 10 edits).
+    history: History<Vec<Sfx>>,
 }
 
 impl SfxEditor {
@@ -75,6 +78,7 @@ impl SfxEditor {
             wave_sel: 0,
             palette_numeric: false,
             status: ui::StatusMsg::default(),
+            history: History::new(),
         }
     }
 
@@ -119,6 +123,28 @@ impl SfxEditor {
     }
 
     pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets, audio: &AudioHandle) {
+        if mods.ctrl {
+            if let Key::Char(c) = key {
+                match c.to_ascii_lowercase() {
+                    'z' if mods.shift => {
+                        self.history.redo(&mut assets.sfx);
+                        return;
+                    }
+                    'z' => {
+                        self.history.undo(&mut assets.sfx);
+                        return;
+                    }
+                    'y' => {
+                        self.history.redo(&mut assets.sfx);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Snapshot before, commit after: a key edit is one undo step, and the
+        // compare drops keys that change nothing (Tab, navigation, preview).
+        self.history.begin(&assets.sfx);
         match key {
             // TAB toggles pitch <-> tracker (wave mode is left via its own button).
             Key::Tab => {
@@ -141,6 +167,7 @@ impl SfxEditor {
             _ if self.mode == SfxMode::Tracker => self.tracker_key(key, mods, assets),
             _ => {}
         }
+        self.history.commit(&assets.sfx);
     }
 
     fn tracker_key(&mut self, key: Key, mods: Mods, assets: &mut Assets) {
@@ -214,6 +241,16 @@ impl SfxEditor {
         self.status.tick();
         let _ = audio;
         let m = *mouse;
+        // Bracket each mouse gesture for undo. Edits land on the press/hold
+        // frames (spinners, drag-drawing), never on release, so a snapshot taken
+        // while the button is down and committed once it comes up captures the
+        // whole gesture. The commit compares, so non-editing clicks (mode
+        // buttons, slot selection) record nothing.
+        if m.left || m.right {
+            self.history.begin(&assets.sfx);
+        } else {
+            self.history.commit(&assets.sfx);
+        }
         // Press-edge controls: buttons, spinners, selectors, palette.
         if (m.left_pressed || m.right_pressed) && self.handle_press(&m, assets) {
             return;
@@ -689,6 +726,49 @@ mod tests {
             }
         });
         assert!(peak > 0.01, "drawing into the waveform should be audible");
+    }
+
+    fn ctrl(shift: bool) -> Mods {
+        Mods {
+            ctrl: true,
+            shift,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn undo_and_redo_a_speed_change() {
+        let mut ed = SfxEditor::new();
+        let mut a = Assets::default();
+        let start = a.sfx[0].speed;
+        ed.key(Key::Char('='), Mods::default(), &mut a, &dummy());
+        assert_eq!(a.sfx[0].speed, start + 1);
+        ed.key(Key::Char('z'), ctrl(false), &mut a, &dummy());
+        assert_eq!(a.sfx[0].speed, start, "undo restores the speed");
+        ed.key(Key::Char('z'), ctrl(true), &mut a, &dummy()); // Ctrl+Shift+Z
+        assert_eq!(a.sfx[0].speed, start + 1, "redo re-applies it");
+    }
+
+    #[test]
+    fn undo_reverts_a_wave_drag() {
+        let mut ed = SfxEditor::new();
+        ed.mode = SfxMode::Wave;
+        let mut a = Assets::default();
+        let m = Mouse {
+            x: 4,
+            y: WAVE_TOP + 2,
+            left: true,
+            left_pressed: true,
+            ..Default::default()
+        };
+        ed.tick(&m, &mut a, &dummy());
+        ed.tick(&Mouse::default(), &mut a, &dummy()); // release closes the stroke.
+        assert!(a.sfx[0].custom_wave.is_some());
+        ed.key(Key::Char('z'), ctrl(false), &mut a, &dummy());
+        assert!(
+            a.sfx[0].custom_wave.is_none(),
+            "undo removes the drawn waveform"
+        );
     }
 
     #[test]

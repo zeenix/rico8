@@ -4,12 +4,13 @@
 //! length is governed by its left-most non-looping channel (handled by the
 //! runtime sequencer); this editor just arranges patterns and flow flags.
 
+use super::history::History;
 use crate::{
     shell::{Key, Mods},
     ui::{self, Mouse},
 };
 use rico8_runtime::{
-    assets::{Assets, Sfx, CHANNELS, MUSIC_COUNT, SFX_LEN},
+    assets::{Assets, MusicPattern, Sfx, CHANNELS, MUSIC_COUNT, SFX_LEN},
     audio::AudioHandle,
     fb::Framebuffer,
     palette::col,
@@ -44,6 +45,8 @@ pub struct MusicEditor {
     /// In grid view: false = patterns (Pat), true = SFX.
     grid_sfx: bool,
     status: ui::StatusMsg,
+    /// Undo/redo of the song's patterns (last 10 edits).
+    history: History<Vec<MusicPattern>>,
 }
 
 impl MusicEditor {
@@ -56,6 +59,7 @@ impl MusicEditor {
             grid: false,
             grid_sfx: false,
             status: ui::StatusMsg::default(),
+            history: History::new(),
         }
     }
 
@@ -105,7 +109,29 @@ impl MusicEditor {
         }
     }
 
-    pub fn key(&mut self, key: Key, _mods: Mods, assets: &mut Assets, audio: &AudioHandle) {
+    pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets, audio: &AudioHandle) {
+        if mods.ctrl {
+            if let Key::Char(c) = key {
+                match c.to_ascii_lowercase() {
+                    'z' if mods.shift => {
+                        self.history.redo(&mut assets.music);
+                        return;
+                    }
+                    'z' => {
+                        self.history.undo(&mut assets.music);
+                        return;
+                    }
+                    'y' => {
+                        self.history.redo(&mut assets.music);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
+        // Snapshot before, commit after: each key edit is one undo step, and the
+        // compare drops keys that change no pattern (navigation, Tab, play).
+        self.history.begin(&assets.music);
         match key {
             Key::Up => self.channel = (self.channel + CHANNELS - 1) % CHANNELS,
             Key::Down => self.channel = (self.channel + 1) % CHANNELS,
@@ -132,6 +158,7 @@ impl MusicEditor {
             Key::Tab => self.grid = !self.grid,
             _ => {}
         }
+        self.history.commit(&assets.music);
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets, audio: &AudioHandle) {
@@ -142,6 +169,15 @@ impl MusicEditor {
             self.pattern = p;
         }
         let m = *mouse;
+        // Bracket each mouse gesture for undo. Pattern edits happen on the press
+        // frame (never on release), so a snapshot taken while the button is down
+        // and committed once it comes up is one undo step. The commit compares,
+        // so view/navigation clicks record nothing.
+        if m.left || m.right {
+            self.history.begin(&assets.music);
+        } else {
+            self.history.commit(&assets.music);
+        }
         // Top-bar buttons: notes|grid view toggle, and (in grid view) the Pat/Sfx toggle.
         if m.left_pressed && m.y < 8 {
             if m.over(4, 0, 12, 7) {
@@ -551,6 +587,42 @@ mod tests {
         ed.tick(&press(65, 43), &mut a, &dummy());
         assert_eq!(a.music[ed.pattern].channels[1], Some(12));
         assert_eq!(ed.last_sfx[1], 12);
+    }
+
+    fn ctrl(shift: bool) -> Mods {
+        Mods {
+            ctrl: true,
+            shift,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn undo_and_redo_a_channel_toggle() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        a.music[0].channels[0] = Some(7);
+        ed.key(Key::Char('x'), Mods::default(), &mut a, &dummy()); // toggle off
+        assert_eq!(a.music[0].channels[0], None);
+        ed.key(Key::Char('z'), ctrl(false), &mut a, &dummy());
+        assert_eq!(a.music[0].channels[0], Some(7), "undo restores the channel");
+        ed.key(Key::Char('z'), ctrl(true), &mut a, &dummy()); // Ctrl+Shift+Z
+        assert_eq!(a.music[0].channels[0], None, "redo toggles it back off");
+    }
+
+    #[test]
+    fn undo_reverts_a_grid_sfx_assignment() {
+        let mut ed = MusicEditor::new();
+        let mut a = Assets::default();
+        ed.grid = true;
+        ed.grid_sfx = true;
+        ed.channel = 1;
+        // Assign SFX via a grid click, then release to close the gesture.
+        ed.tick(&press(65, 43), &mut a, &dummy()); // cell 12 -> channel 1
+        ed.tick(&Mouse::default(), &mut a, &dummy());
+        assert_eq!(a.music[ed.pattern].channels[1], Some(12));
+        ed.key(Key::Char('z'), ctrl(false), &mut a, &dummy());
+        assert_eq!(a.music[ed.pattern].channels[1], None, "undo clears it");
     }
 
     #[test]

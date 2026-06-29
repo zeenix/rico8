@@ -1,12 +1,13 @@
 //! The sprite editor: zoomed 8x8 canvas, palette grid, tools, flags, and
 //! a sheet strip for picking sprites — the classic layout.
 
+use super::history::History;
 use crate::{
     shell::{Key, Mods},
     ui::{self, draw_icon8, Icon8, Mouse, ICON_PENCIL},
 };
 use rico8_runtime::{
-    assets::{Assets, SPRITES_PER_ROW},
+    assets::{Assets, SpriteSheet, SPRITES_PER_ROW},
     fb::Framebuffer,
     palette::col,
     pico8::{self, Pasted},
@@ -42,6 +43,8 @@ pub struct SpriteEditor {
     my: i32,
     /// Transient bottom-bar message (e.g. a paste result).
     status: ui::StatusMsg,
+    /// Undo/redo of the sprite sheet (last 10 edits).
+    history: History<SpriteSheet>,
 }
 
 impl SpriteEditor {
@@ -55,6 +58,7 @@ impl SpriteEditor {
             mx: -16,
             my: -16,
             status: ui::StatusMsg::default(),
+            history: History::new(),
         }
     }
 
@@ -79,7 +83,26 @@ impl SpriteEditor {
         )
     }
 
-    pub fn key(&mut self, key: Key, _mods: Mods, _assets: &mut Assets) {
+    pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets) {
+        if mods.ctrl {
+            if let Key::Char(c) = key {
+                match c.to_ascii_lowercase() {
+                    'z' if mods.shift => {
+                        self.history.redo(&mut assets.sprites);
+                        return;
+                    }
+                    'z' => {
+                        self.history.undo(&mut assets.sprites);
+                        return;
+                    }
+                    'y' => {
+                        self.history.redo(&mut assets.sprites);
+                        return;
+                    }
+                    _ => {}
+                }
+            }
+        }
         let mut moved = false;
         match key {
             Key::Left => {
@@ -154,6 +177,16 @@ impl SpriteEditor {
         self.mx = mouse.x;
         self.my = mouse.y;
         let m = *mouse;
+        // Bracket each gesture for undo. Painting happens on the press/hold
+        // frames (never on release), so a snapshot taken while the button is
+        // down and committed once it comes up captures the whole stroke. The
+        // commit compares against the snapshot, so non-drawing clicks (palette,
+        // tools, picker) record nothing.
+        if m.left || m.right {
+            self.history.begin(&assets.sprites);
+        } else {
+            self.history.commit(&assets.sprites);
+        }
         // View-toggle buttons in the top bar (normal | fullscreen).
         if m.left_pressed && m.y < 8 {
             if m.over(4, 0, 12, 7) {
@@ -623,6 +656,62 @@ mod tests {
         // one block and never bleeds into the adjacent one.
         assert_eq!(fb.pget(19, 44), col::WHITE);
         assert_ne!(fb.pget(18, 44), col::WHITE);
+    }
+
+    fn ctrl(shift: bool) -> Mods {
+        Mods {
+            ctrl: true,
+            shift,
+            ..Default::default()
+        }
+    }
+
+    fn release() -> Mouse {
+        Mouse::default()
+    }
+
+    #[test]
+    fn undo_and_redo_a_pencil_stroke() {
+        let mut ed = SpriteEditor::new(); // sprite 1 -> sheet (8,0), pencil, colour 7.
+        let mut a = Assets::default();
+        // Paint pixel (0,0) of the sprite, then release to close the stroke.
+        ed.tick(&press(CANVAS.0, CANVAS.1), &mut a);
+        ed.tick(&release(), &mut a);
+        assert_eq!(a.sprites.get(8, 0), 7);
+        // Undo restores the blank pixel; redo paints it again.
+        ed.key(Key::Char('z'), ctrl(false), &mut a);
+        assert_eq!(a.sprites.get(8, 0), 0);
+        ed.key(Key::Char('z'), ctrl(true), &mut a); // Ctrl+Shift+Z
+        assert_eq!(a.sprites.get(8, 0), 7);
+    }
+
+    #[test]
+    fn undo_only_keeps_the_last_ten_strokes() {
+        use crate::editor::history::MAX_HISTORY;
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        // MAX_HISTORY + 2 separate strokes, each on a distinct pixel of the 8x8
+        // sprite. Stroke i paints sprite pixel (i % 8, i / 8), i.e. sheet pixel
+        // (8 + i % 8, i / 8).
+        let strokes = MAX_HISTORY as i32 + 2;
+        for i in 0..strokes {
+            let sx = CANVAS.0 + (i % 8) * 8;
+            let sy = CANVAS.1 + (i / 8) * 8;
+            ed.tick(&press(sx, sy), &mut a);
+            ed.tick(&release(), &mut a);
+        }
+        // Undo the full depth; only MAX_HISTORY strokes can be reverted.
+        for _ in 0..MAX_HISTORY {
+            ed.key(Key::Char('z'), ctrl(false), &mut a);
+        }
+        // The two oldest pixels are past the cap and stay painted; the rest were
+        // undone.
+        assert_eq!(a.sprites.get(8, 0), 7, "oldest stroke is past the cap");
+        assert_eq!(a.sprites.get(9, 0), 7, "second-oldest stroke too");
+        assert_eq!(a.sprites.get(10, 0), 0, "third stroke was undone");
+        // Nothing left to undo beyond the cap.
+        ed.key(Key::Char('z'), ctrl(false), &mut a);
+        assert_eq!(a.sprites.get(8, 0), 7);
     }
 
     #[test]
