@@ -177,7 +177,13 @@ impl Platformer {
     }
 
     fn draw_hero(&self, gfx: &mut Graphics) {
-        let sprite = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
+        let is_alt_frame = (self.frame / 4).is_multiple_of(2);
+        if self.hero.dead && is_alt_frame {
+            // If hero dies, we show them flashing in & out of existence.
+            return;
+        }
+
+        let sprite = if !self.grounded || (self.vx != 0.0 && is_alt_frame) {
             match self.mode {
                 GameMode::Ended { won, .. } if won => HERO_HAPPY_SPRITE,
                 GameMode::InGame { .. } | GameMode::Ended { .. } => HERO_LEGS_EXTEND_SPRITE,
