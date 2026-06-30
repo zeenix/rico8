@@ -18,6 +18,7 @@ game!(Platformer {
     grounded: false,
     badie: Some(Charachter::new_badie()),
     taken: Vec::new(),
+    badies_killed: 0,
     frame: 0,
     mode: GameMode::Init,
 });
@@ -29,6 +30,7 @@ struct Platformer {
     grounded: bool,
     badie: Option<Charachter>,
     taken: Vec<Taken, MAX_TAKEN>,
+    badies_killed: u8,
     frame: u32,
     mode: GameMode,
 }
@@ -117,6 +119,7 @@ impl Platformer {
                 {
                     // Hero hitting the badie from the top, kills the badie and gives hero a boost.
                     self.badie = None;
+                    self.badies_killed += 1;
                     self.vy = -3.25;
                     ctx.sfx(BADIE_DEAD_SFX);
                     ctx.sfx(JUMP_SFX);
@@ -275,14 +278,9 @@ impl Game for Platformer {
 
         gfx.camera(0, 0);
 
-        printf!(
-            gfx,
-            2,
-            2,
-            Color::YELLOW,
-            "Score {}",
-            self.taken.iter().fold(0, |acc, r| acc + r.points)
-        );
+        let score = self.taken.iter().fold(0, |acc, r| acc + r.points)
+            + self.badies_killed * BADIE_KILL_POINTS;
+        printf!(gfx, 2, 2, Color::YELLOW, "Score {}", score);
 
         if let GameMode::InGame { time_left, .. } = self.mode {
             let color = if time_left < 5 {
@@ -407,6 +405,7 @@ const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
 const COIN_POINTS: u8 = 1;
 const TROPHY_POINTS: u8 = 4;
+const BADIE_KILL_POINTS: u8 = 4;
 const GAME_TIMEOUT: u8 = 30;
 const GAME_OVER_TIMEOUT: f32 = 5.0;
 
