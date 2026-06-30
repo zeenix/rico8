@@ -11,9 +11,9 @@ use crate::{
 use rico8_runtime::{
     assets::{Assets, CustomWave, Note, Sfx, NOTE_CUSTOM_FLAG, SFX_LEN},
     audio::AudioHandle,
+    clipboard::{self, ClipboardPayload, Pasted},
     fb::Framebuffer,
     palette::col,
-    pico8::{self, Pasted},
 };
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -630,17 +630,21 @@ impl SfxEditor {
     pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
         match pasted {
             Pasted::Sfx(clip) => {
-                let report = pico8::paste_sfx(&mut assets.sfx, &clip.records, self.sfx);
+                let report = clipboard::paste_sfx(&mut assets.sfx, &clip.records, self.sfx);
                 self.status.set(report.summary);
             }
-            Pasted::Sprites(_) => self.status.set("sprites - use sprite editor".into()),
+            Pasted::Sprites { .. } => self.status.set("sprites - use sprite editor".into()),
+            Pasted::Map { .. } => self.status.set("map - use map editor".into()),
         }
     }
 
-    /// Copy the selected SFX slot as an `[sfx]` clipboard blob.
+    /// Copy the selected SFX slot (full fidelity, incl. custom wave) as a native blob.
     pub fn copy(&mut self, assets: &Assets) -> String {
         self.status.set(format!("copied SFX {}", self.sfx));
-        pico8::encode_sfx(self.sfx as u8, &assets.sfx[self.sfx])
+        clipboard::encode(&ClipboardPayload::Sfx {
+            slot: self.sfx as u8,
+            sfx: assets.sfx[self.sfx].clone(),
+        })
     }
 }
 
@@ -803,7 +807,7 @@ mod tests {
 #[cfg(test)]
 mod paste_tests {
     use super::*;
-    use rico8_runtime::pico8::{parse_clipboard, Pasted, SfxClip, Slotted};
+    use rico8_runtime::clipboard::{parse, Pasted, SfxClip, Slotted};
 
     fn one_sfx(pitch: u8) -> Sfx {
         let mut s = Sfx::default();
@@ -842,7 +846,7 @@ mod paste_tests {
         };
         let blob = ed.copy(&assets);
         assert!(ed.status.current().unwrap().contains("copied SFX 7"));
-        let Pasted::Sfx(clip) = parse_clipboard(&blob).unwrap() else {
+        let Pasted::Sfx(clip) = parse(&blob).unwrap() else {
             panic!("not sfx")
         };
         assert_eq!(clip.records[0].src, 7);

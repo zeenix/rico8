@@ -20,10 +20,10 @@ use rico8_runtime::{
     assets::Assets,
     audio::AudioHandle,
     cart::{self, Cart},
+    clipboard::Pasted,
     fb::Framebuffer,
     font,
     palette::col,
-    pico8::{self, Pasted},
     project::{decode_assets, encode_assets, Project},
     vm::{GameVm, RuntimeError, UI_FPS},
 };
@@ -658,28 +658,27 @@ impl Shell {
                 _ => {}
             }
         }
-        // Ctrl+C/X/V move data through the system clipboard. The map editor
-        // keeps its own internal tile clipboard (its Ctrl+C/X are handled in
-        // MapEditor::key, so they fall through here).
+        // Ctrl+C/X/V move data through the system clipboard for every editor, including
+        // the map (its tile region uses the native format).
         if mods.ctrl {
             match key {
                 Key::Char('c')
                     if matches!(
                         self.mode,
-                        Mode::Sprite | Mode::Sfx | Mode::Music | Mode::Code
+                        Mode::Sprite | Mode::Sfx | Mode::Music | Mode::Code | Mode::Map
                     ) =>
                 {
                     self.cmd_copy();
                     return;
                 }
-                Key::Char('x') if self.mode == Mode::Code => {
+                Key::Char('x') if matches!(self.mode, Mode::Code | Mode::Map) => {
                     self.cmd_cut();
                     return;
                 }
                 Key::Char('v')
                     if matches!(
                         self.mode,
-                        Mode::Sprite | Mode::Sfx | Mode::Music | Mode::Code
+                        Mode::Sprite | Mode::Sfx | Mode::Music | Mode::Code | Mode::Map
                     ) =>
                 {
                     self.cmd_paste();
@@ -1057,7 +1056,7 @@ impl Shell {
             self.set_code(code);
             return;
         }
-        match pico8::parse_clipboard(&text) {
+        match rico8_runtime::clipboard::parse(&text) {
             Ok(pasted) => self.apply_paste(pasted),
             Err(_) => self.set_editor_status("nothing to paste".into()),
         }
@@ -1073,16 +1072,17 @@ impl Shell {
                 let code = self.code().unwrap_or_default().to_string();
                 self.code_ed.copy(&code)
             }
-            Mode::Sprite | Mode::Sfx | Mode::Music => {
+            Mode::Sprite | Mode::Sfx | Mode::Music | Mode::Map => {
                 let Some(a) = assets_of(&mut self.loaded) else {
                     return self.set_editor_status("load a project first".into());
                 };
-                Some(match self.mode {
-                    Mode::Sprite => self.sprite_ed.copy(a),
-                    Mode::Sfx => self.sfx_ed.copy(a),
-                    Mode::Music => self.music_ed.copy(a),
+                match self.mode {
+                    Mode::Sprite => Some(self.sprite_ed.copy(a)),
+                    Mode::Sfx => Some(self.sfx_ed.copy(a)),
+                    Mode::Music => Some(self.music_ed.copy(a)),
+                    Mode::Map => self.map_ed.copy_selection(a, false),
                     _ => unreachable!(),
-                })
+                }
             }
             _ => None,
         };
@@ -1093,14 +1093,29 @@ impl Shell {
         }
     }
 
-    /// Cut the code selection to the system clipboard (code editor only).
+    /// Cut the current selection to the system clipboard (code text or map tiles).
     fn cmd_cut(&mut self) {
-        if self.code().is_none() {
-            return self.set_editor_status("load a project first".into());
-        }
-        let mut code = self.code().unwrap_or_default().to_string();
-        if let Some(text) = self.code_ed.cut(&mut code) {
-            self.set_code(code);
+        let blob = match self.mode {
+            Mode::Code => {
+                if self.code().is_none() {
+                    return self.set_editor_status("load a project first".into());
+                }
+                let mut code = self.code().unwrap_or_default().to_string();
+                let cut = self.code_ed.cut(&mut code);
+                if cut.is_some() {
+                    self.set_code(code);
+                }
+                cut
+            }
+            Mode::Map => {
+                let Some(a) = assets_of(&mut self.loaded) else {
+                    return self.set_editor_status("load a project first".into());
+                };
+                self.map_ed.copy_selection(a, true)
+            }
+            _ => None,
+        };
+        if let Some(text) = blob {
             if crate::clipboard::write_text(&text).is_err() {
                 self.set_editor_status("clipboard unavailable".into());
             }
@@ -1117,6 +1132,7 @@ impl Shell {
             Mode::Sprite => self.sprite_ed.paste(&pasted, a),
             Mode::Sfx => self.sfx_ed.paste(&pasted, a),
             Mode::Music => self.music_ed.paste(&pasted, a),
+            Mode::Map => self.map_ed.paste(&pasted),
             _ => {}
         }
     }
@@ -2724,8 +2740,30 @@ mod tests {
     }
 
     #[test]
+    fn apply_paste_routes_map_blobs_to_the_map_editor() {
+        use rico8_runtime::clipboard::Pasted;
+        let dir = std::env::temp_dir().join(format!("rico8_mappaste_{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let mut shell = test_shell();
+        shell.cwd = dir.clone();
+        shell.cmd_new(&["dest"]).expect("new");
+        shell.mode = Mode::Map;
+
+        shell.apply_paste(Pasted::Map {
+            w: 1,
+            h: 1,
+            tiles: vec![7],
+        });
+        assert!(shell.map_ed.has_paste_buffer());
+
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
     fn apply_paste_routes_sfx_to_the_sfx_editor() {
-        use rico8_runtime::pico8::{Pasted, SfxClip, Slotted};
+        use rico8_runtime::clipboard::{Pasted, SfxClip, Slotted};
         let dir = std::env::temp_dir().join(format!("rico8_paste_{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&dir);
         std::fs::create_dir_all(&dir).unwrap();

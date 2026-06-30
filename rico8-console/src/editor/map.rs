@@ -9,6 +9,7 @@ use crate::{
 };
 use rico8_runtime::{
     assets::{Assets, MapData, MAP_H, MAP_W, SPRITES_PER_ROW},
+    clipboard::{self, ClipboardPayload, Pasted},
     fb::Framebuffer,
     palette::col,
 };
@@ -225,8 +226,6 @@ impl MapEditor {
             Key::Down => self.cam_y = (self.cam_y + 1).min(MAP_H as i32 - self.view_tiles_y()),
             Key::PageUp => self.page = (self.page + 3) % 4,
             Key::PageDown => self.page = (self.page + 1) % 4,
-            Key::Char('c') if mods.ctrl => self.copy_selection(assets, false),
-            Key::Char('x') if mods.ctrl => self.copy_selection(assets, true),
             Key::Delete | Key::Backspace => self.delete_selection(assets),
             Key::Char('d') => self.set_tool(Tool::Draw),
             Key::Char('t') => self.set_tool(Tool::Paste),
@@ -627,9 +626,10 @@ impl MapEditor {
         }
     }
 
-    /// Copy (or cut) the current selection into the clipboard.
-    fn copy_selection(&mut self, assets: &mut Assets, cut: bool) {
-        let Some(s) = self.sel else { return };
+    /// Copy (or cut) the current selection into the paste buffer and return it as a
+    /// native clipboard blob (for the shell to put on the system clipboard).
+    pub fn copy_selection(&mut self, assets: &mut Assets, cut: bool) -> Option<String> {
+        let s = self.sel?;
         let mut tiles = Vec::with_capacity((s.w * s.h) as usize);
         for y in 0..s.h {
             for x in 0..s.w {
@@ -639,7 +639,7 @@ impl MapEditor {
         self.clip = Some(Clipboard {
             w: s.w,
             h: s.h,
-            tiles,
+            tiles: tiles.clone(),
         });
         if cut {
             // Cut clears the source cells but keeps the selection rectangle.
@@ -651,6 +651,11 @@ impl MapEditor {
         }
         let verb = if cut { "cut" } else { "copied" };
         self.status.set(format!("{verb} {}x{} tiles", s.w, s.h));
+        Some(clipboard::encode(&ClipboardPayload::Map {
+            w: s.w as u8,
+            h: s.h as u8,
+            tiles,
+        }))
     }
 
     /// Clear the current selection to tile 0 without touching the clipboard. The
@@ -686,6 +691,34 @@ impl MapEditor {
     /// Set a transient bottom-bar message (used for clipboard errors).
     pub fn set_status(&mut self, msg: String) {
         self.status.set(msg);
+    }
+
+    /// Load a decoded clipboard blob into the paste buffer and arm the Paste tool.
+    /// Only `Map` blobs apply here; other kinds set a hint.
+    pub fn paste(&mut self, pasted: &Pasted) {
+        match pasted {
+            Pasted::Map { w, h, tiles } => self.begin_paste(*w, *h, tiles.clone()),
+            Pasted::Sprites { .. } => self.status.set("sprites - use sprite editor".into()),
+            Pasted::Sfx(_) => self.status.set("sfx - use sfx editor".into()),
+        }
+    }
+
+    /// Fill the paste buffer with an external tile block and switch to the Paste
+    /// tool so the user can stamp it.
+    fn begin_paste(&mut self, w: usize, h: usize, tiles: Vec<u8>) {
+        self.clip = Some(Clipboard {
+            w: w as i32,
+            h: h as i32,
+            tiles,
+        });
+        self.set_tool(Tool::Paste);
+    }
+
+    /// Whether a tile block is loaded in the paste buffer (used by shell tests,
+    /// which cannot reach the private `clip` field from another module).
+    #[cfg(test)]
+    pub(crate) fn has_paste_buffer(&self) -> bool {
+        self.clip.is_some()
     }
 
     /// Whether map cell (cx, cy) is inside the current selection.
@@ -959,14 +992,7 @@ mod tests {
         a.map.set(2, 1, 11);
         a.map.set(3, 1, 12);
         make_selection(&mut ed, &mut a, 2, 1, 2, 1);
-        ed.key(
-            Key::Char('c'),
-            Mods {
-                ctrl: true,
-                ..Default::default()
-            },
-            &mut a,
-        );
+        ed.copy_selection(&mut a, false);
         let clip = ed.clip.clone().expect("clipboard filled");
         assert_eq!((clip.w, clip.h, clip.tiles), (2, 1, vec![11, 12]));
         // Paste at cell (5, 4).
@@ -982,14 +1008,7 @@ mod tests {
         let mut a = Assets::default();
         a.map.set(2, 1, 11);
         make_selection(&mut ed, &mut a, 2, 1, 1, 1);
-        ed.key(
-            Key::Char('x'),
-            Mods {
-                ctrl: true,
-                ..Default::default()
-            },
-            &mut a,
-        );
+        ed.copy_selection(&mut a, true);
         assert_eq!(a.map.get(2, 1), 0);
         assert_eq!(ed.clip.as_ref().unwrap().tiles, vec![11]);
     }
@@ -1281,5 +1300,35 @@ mod tests {
         // Widest map clipboard message: full-map dimensions.
         assert!(text_width(&format!("copied {}x{} tiles", MAP_W, MAP_H)) <= budget);
         assert!(text_width(&format!("pasted {}x{} tiles", MAP_W, MAP_H)) <= budget);
+    }
+
+    #[test]
+    fn copy_returns_native_map_blob() {
+        use rico8_runtime::clipboard::{parse, Pasted};
+        let mut a = Assets::default();
+        let mut ed = MapEditor::new();
+        a.map.set(2, 1, 9);
+        make_selection(&mut ed, &mut a, 2, 1, 2, 1);
+        let blob = ed.copy_selection(&mut a, false).expect("blob");
+        let Pasted::Map { w, h, tiles } = parse(&blob).unwrap() else {
+            panic!("not map")
+        };
+        assert_eq!((w, h), (2, 1));
+        assert_eq!(tiles[0], 9);
+    }
+
+    #[test]
+    fn paste_arms_the_tool_from_a_map_blob() {
+        use rico8_runtime::clipboard::Pasted;
+        let mut ed = MapEditor::new();
+        ed.paste(&Pasted::Map {
+            w: 2,
+            h: 1,
+            tiles: vec![4, 5],
+        });
+        let clip = ed.clip.clone().expect("paste buffer filled");
+        assert_eq!((clip.w, clip.h), (2, 1));
+        assert_eq!(clip.tiles, vec![4, 5]);
+        assert!(matches!(ed.tool, Tool::Paste));
     }
 }

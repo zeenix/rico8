@@ -115,6 +115,7 @@ Every pipeline stage also exists as a subcommand of the `rico8` binary (dispatch
 ## Docs index
 
 `docs/ABI.md` (wasm import surface), `docs/ARCHITECTURE.md`, `docs/CART_FORMAT.md`,
+`docs/CLIPBOARD_FORMAT.md` (native `[rico8]` clipboard wire format + PICO-8 interop),
 `docs/LIMITS.md` + `docs/LIMITS_TESTING.md`, `docs/PICO8_IMPORT.md`,
 `docs/WEB_EXPORT.md`, `docs/HANDHELD.md`. Design plans/specs live under
 `docs/superpowers/`.
