@@ -461,6 +461,7 @@ impl SpriteEditor {
     /// Paste a decoded PICO-8 clipboard blob. Only sprite pixels apply here;
     /// other kinds set a hint pointing at the right editor.
     pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
+        self.history.begin(&assets.sprites);
         match pasted {
             Pasted::Sprites { rect, flags } => {
                 let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
@@ -472,6 +473,7 @@ impl SpriteEditor {
             Pasted::Sfx(_) => self.status.set("sfx - use sfx editor".into()),
             Pasted::Map { .. } => self.status.set("map - use map editor".into()),
         }
+        self.history.commit(&assets.sprites);
     }
 
     /// Copy the selected sprite's 8x8 block (pixels + flags) as a native blob.
@@ -564,6 +566,62 @@ mod paste_tests {
         assert_eq!((r.w, r.h), (8, 8));
         assert_eq!(r.pixels[0], 5);
         assert_eq!(r.pixels[63], 9);
+    }
+
+    #[test]
+    fn undo_and_redo_a_paste() {
+        let mut ed = SpriteEditor::new(); // sprite 1 -> sheet (8, 0).
+        let mut assets = Assets::default();
+        let rect = PixelRect {
+            w: 2,
+            h: 1,
+            pixels: vec![9, 10],
+        };
+        ed.paste(&Pasted::Sprites { rect, flags: None }, &mut assets);
+        assert_eq!(assets.sprites.get(8, 0), 9);
+
+        let ctrl = Mods {
+            ctrl: true,
+            shift: false,
+            ..Default::default()
+        };
+        let ctrl_shift = Mods {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+        ed.key(Key::Char('z'), ctrl, &mut assets);
+        assert_eq!(assets.sprites.get(8, 0), 0, "undo clears the paste");
+        assert_eq!(assets.sprites.get(9, 0), 0);
+        ed.key(Key::Char('z'), ctrl_shift, &mut assets);
+        assert_eq!(assets.sprites.get(8, 0), 9, "redo re-applies the paste");
+        assert_eq!(assets.sprites.get(9, 0), 10);
+    }
+
+    #[test]
+    fn an_incompatible_paste_records_no_undo() {
+        use rico8_runtime::clipboard::SfxClip;
+        let mut ed = SpriteEditor::new();
+        let mut assets = Assets::default();
+        assets.sprites.set(8, 0, 5); // a pre-existing pixel the undo must not touch.
+        ed.paste(
+            &Pasted::Sfx(SfxClip {
+                records: vec![],
+                patterns: vec![],
+            }),
+            &mut assets,
+        );
+        let ctrl = Mods {
+            ctrl: true,
+            shift: false,
+            ..Default::default()
+        };
+        ed.key(Key::Char('z'), ctrl, &mut assets);
+        assert_eq!(
+            assets.sprites.get(8, 0),
+            5,
+            "the hint paste recorded no undo step"
+        );
     }
 }
 
