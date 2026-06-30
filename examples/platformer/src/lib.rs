@@ -175,6 +175,47 @@ impl Platformer {
             won: false,
         };
     }
+
+    fn draw_hero(&self, gfx: &mut Graphics) {
+        let sprite = if !self.grounded || (self.vx != 0.0 && (self.frame / 4).is_multiple_of(2)) {
+            match self.mode {
+                GameMode::Ended { won, .. } if won => HERO_HAPPY_SPRITE,
+                GameMode::InGame { .. } | GameMode::Ended { .. } => HERO_LEGS_EXTEND_SPRITE,
+                GameMode::Init => unreachable!(),
+            }
+        } else {
+            HERO_SPRITE
+        };
+        // The body's coherent pixel — a running jump climbs cleanly, no zigzag.
+        gfx.sprite_ext(
+            sprite,
+            self.hero.body.draw_x(),
+            self.hero.body.draw_y(),
+            8,
+            8,
+            self.hero.flip,
+            false,
+        )
+        .unwrap();
+    }
+
+    fn draw_badie(&self, gfx: &mut Graphics) {
+        let sprite = match self.mode {
+            GameMode::InGame { .. } if (self.frame / 4).is_multiple_of(2) => BADIE_ALT_SPRITE,
+            GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
+            GameMode::Init => unreachable!(),
+        };
+        gfx.sprite_ext(
+            sprite,
+            self.badie.body.draw_x(),
+            self.badie.body.draw_y(),
+            8,
+            8,
+            self.badie.flip,
+            false,
+        )
+        .unwrap();
+    }
 }
 
 impl Game for Platformer {
@@ -206,43 +247,9 @@ impl Game for Platformer {
         let cam = (self.hero.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
         gfx.camera(cam as i16, 0);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
-        let is_alt_frame = (self.frame / 4).is_multiple_of(2);
-        let sprite = if !self.grounded || (self.vx != 0.0 && is_alt_frame) {
-            match self.mode {
-                GameMode::Ended { won, .. } if won => HERO_HAPPY_SPRITE,
-                GameMode::InGame { .. } | GameMode::Ended { .. } => HERO_LEGS_EXTEND_SPRITE,
-                GameMode::Init => unreachable!(),
-            }
-        } else {
-            HERO_SPRITE
-        };
-        // The body's coherent pixel — a running jump climbs cleanly, no zigzag.
-        gfx.sprite_ext(
-            sprite,
-            self.hero.body.draw_x(),
-            self.hero.body.draw_y(),
-            8,
-            8,
-            self.hero.flip,
-            false,
-        )
-        .unwrap();
 
-        let sprite = match self.mode {
-            GameMode::InGame { .. } if is_alt_frame => BADIE_ALT_SPRITE,
-            GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
-            GameMode::Init => unreachable!(),
-        };
-        gfx.sprite_ext(
-            sprite,
-            self.badie.body.draw_x(),
-            self.badie.body.draw_y(),
-            8,
-            8,
-            self.badie.flip,
-            false,
-        )
-        .unwrap();
+        self.draw_hero(gfx);
+        self.draw_badie(gfx);
 
         gfx.camera(0, 0);
 
