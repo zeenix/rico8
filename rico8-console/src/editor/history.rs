@@ -47,6 +47,27 @@ impl<T: Clone + PartialEq> History<T> {
         }
     }
 
+    /// Like [`begin`](Self::begin) but builds the snapshot lazily, only when a
+    /// gesture is actually opened. Lets callers whose snapshot is costly to
+    /// build (e.g. a clone of several asset banks) skip it on the idle frames
+    /// where `begin` would be a no-op.
+    pub fn begin_with(&mut self, current: impl FnOnce() -> T) {
+        if self.pending.is_none() {
+            self.pending = Some(current());
+        }
+    }
+
+    /// Like [`commit`](Self::commit) but builds the comparison snapshot lazily,
+    /// only when there is an open gesture to close.
+    pub fn commit_with(&mut self, current: impl FnOnce() -> T) {
+        if let Some(prev) = self.pending.take() {
+            if prev != current() {
+                push_capped(&mut self.undo, prev);
+                self.redo.clear();
+            }
+        }
+    }
+
     /// Undo the last committed change, restoring it through `current`. Returns
     /// whether anything was undone.
     pub fn undo(&mut self, current: &mut T) -> bool {
@@ -168,5 +189,45 @@ mod tests {
             count += 1;
         }
         assert_eq!(count, MAX_HISTORY);
+    }
+
+    #[test]
+    fn begin_with_and_commit_with_round_trip() {
+        let mut h = History::new();
+        let mut v = 0;
+        h.begin_with(|| v);
+        v = 1;
+        h.commit_with(|| v);
+        assert!(h.undo(&mut v));
+        assert_eq!(v, 0);
+        assert!(h.redo(&mut v));
+        assert_eq!(v, 1);
+    }
+
+    #[test]
+    fn lazy_snapshot_is_built_only_when_needed() {
+        use std::cell::Cell;
+        let calls = Cell::new(0);
+        let mut h: History<i32> = History::new();
+        // Nothing pending: commit_with must not build a snapshot.
+        h.commit_with(|| {
+            calls.set(calls.get() + 1);
+            7
+        });
+        assert_eq!(
+            calls.get(),
+            0,
+            "commit_with skips the snapshot with nothing pending"
+        );
+        // Opening a gesture builds one; a second begin within it builds none.
+        h.begin_with(|| {
+            calls.set(calls.get() + 1);
+            7
+        });
+        h.begin_with(|| {
+            calls.set(calls.get() + 1);
+            7
+        });
+        assert_eq!(calls.get(), 1, "begin_with is idempotent within a gesture");
     }
 }
