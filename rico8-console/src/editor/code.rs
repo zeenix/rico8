@@ -44,7 +44,7 @@ pub struct CodeEditor {
     scroll_y: usize,
     scroll_x: usize,
     anchor: Option<(usize, usize)>,
-    clipboard: String,
+    status: ui::StatusMsg,
     history: History<Snapshot>,
     frame: u64,
 }
@@ -59,7 +59,7 @@ impl CodeEditor {
             scroll_y: 0,
             scroll_x: 0,
             anchor: None,
-            clipboard: String::new(),
+            status: ui::StatusMsg::default(),
             history: History::new(),
             frame: 0,
         }
@@ -86,6 +86,56 @@ impl CodeEditor {
 
     pub fn text(&self) -> String {
         self.lines.join("\n")
+    }
+
+    /// Copy the selection for the system clipboard, or `None` when nothing is
+    /// selected.
+    pub fn copy(&mut self, code: &str) -> Option<String> {
+        self.set_text(code);
+        let text = self.selected_text();
+        if text.is_empty() {
+            return None;
+        }
+        self.status.set(clip_msg("copied", &text));
+        Some(text)
+    }
+
+    /// Cut the selection: return it for the clipboard and remove it from `code`.
+    pub fn cut(&mut self, code: &mut String) -> Option<String> {
+        self.set_text(code);
+        let text = self.selected_text();
+        if text.is_empty() {
+            return None;
+        }
+        self.push_undo();
+        self.delete_selection();
+        let snap = self.snapshot();
+        self.history.commit(&snap);
+        self.scroll_to_cursor();
+        *code = self.text();
+        self.status.set(clip_msg("cut", &text));
+        Some(text)
+    }
+
+    /// Insert clipboard `text` at the cursor, replacing any selection.
+    pub fn paste_text(&mut self, code: &mut String, text: &str) {
+        self.set_text(code);
+        if text.is_empty() {
+            return;
+        }
+        self.push_undo();
+        self.delete_selection();
+        self.insert_str(text);
+        let snap = self.snapshot();
+        self.history.commit(&snap);
+        self.scroll_to_cursor();
+        *code = self.text();
+        self.status.set(clip_msg("pasted", text));
+    }
+
+    /// Set a transient bottom-bar message.
+    pub fn set_status(&mut self, msg: String) {
+        self.status.set(msg);
     }
 
     fn clamp_cursor(&mut self) {
@@ -253,22 +303,6 @@ impl CodeEditor {
                     self.line = self.lines.len() - 1;
                     self.col = self.lines[self.line].chars().count();
                 }
-                'c' => self.clipboard = self.selected_text(),
-                'x' => {
-                    self.clipboard = self.selected_text();
-                    if !self.clipboard.is_empty() {
-                        self.push_undo();
-                        self.delete_selection();
-                    }
-                }
-                'v' => {
-                    if !self.clipboard.is_empty() {
-                        self.push_undo();
-                        self.delete_selection();
-                        let text = self.clipboard.clone();
-                        self.insert_str(&text);
-                    }
-                }
                 // Ctrl+Z undoes; Ctrl+Shift+Z and Ctrl+Y redo.
                 'z' if mods.shift => {
                     let mut snap = self.snapshot();
@@ -369,6 +403,7 @@ impl CodeEditor {
     }
 
     pub fn tick(&mut self, mouse: &Mouse, code: &str) {
+        self.status.tick();
         self.set_text(code);
         self.frame += 1;
         let in_area = mouse.y >= AREA_Y && mouse.y < AREA_Y + (ROWS as i32) * font::GLYPH_H;
@@ -468,10 +503,18 @@ impl CodeEditor {
             }
         }
 
-        ui::status_bar(
-            fb,
-            &format!("L{}/{} C{}", self.line + 1, lines.len(), self.col + 1),
-        );
+        let info = format!("L{}/{} C{}", self.line + 1, lines.len(), self.col + 1);
+        self.status.show(fb, &info);
+    }
+}
+
+/// A copy/cut/paste message sized to the text: lines when it spans more than
+/// one, else characters.
+fn clip_msg(verb: &str, text: &str) -> String {
+    if text.contains('\n') {
+        format!("{verb} {} lines", text.matches('\n').count() + 1)
+    } else {
+        format!("{verb} {} chars", text.chars().count())
     }
 }
 
@@ -660,11 +703,24 @@ mod tests {
             ctrl: true,
             ..Default::default()
         };
-        e.key(Key::Char('a'), ctrl, &mut code);
-        e.key(Key::Char('x'), ctrl, &mut code);
+        e.key(Key::Char('a'), ctrl, &mut code); // select all
+        let cut = e.cut(&mut code).unwrap();
+        assert_eq!(cut, "hello\nworld");
         assert_eq!(code, "");
-        e.key(Key::Char('v'), ctrl, &mut code);
+        e.paste_text(&mut code, &cut);
         assert_eq!(code, "hello\nworld");
+    }
+
+    #[test]
+    fn copy_reports_size() {
+        let (mut e, mut code) = ed_with("hello\nworld");
+        let ctrl = Mods {
+            ctrl: true,
+            ..Default::default()
+        };
+        e.key(Key::Char('a'), ctrl, &mut code); // select all
+        assert_eq!(e.copy(&code).unwrap(), "hello\nworld");
+        assert_eq!(e.status.current(), Some("copied 2 lines"));
     }
 
     #[test]
@@ -728,5 +784,27 @@ mod tests {
         assert!(scan_block_state("a /* b", false));
         assert!(!scan_block_state("b */ c", true));
         assert!(!scan_block_state("// /* not", false));
+    }
+
+    #[test]
+    fn paste_scrolls_cursor_into_view() {
+        let (mut e, mut code) = ed_with("");
+        let many: String = (0..50)
+            .map(|i| format!("l{i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        e.paste_text(&mut code, &many);
+        // Cursor ends on the last pasted line; it must be within the visible window.
+        assert!(e.line >= e.scroll_y && e.line < e.scroll_y + ROWS);
+    }
+
+    #[test]
+    fn status_messages_fit_the_bar() {
+        use rico8_runtime::{fb::WIDTH, font::text_width};
+        let budget = WIDTH - 2;
+        // Realistic large selections: a 7-digit char count and line count both
+        // stay well within the bar. Counts are display-only, not stored sizes.
+        assert!(text_width(&clip_msg("pasted", &"x\n".repeat(1_000_000))) <= budget);
+        assert!(text_width(&clip_msg("copied", &"x".repeat(1_000_000))) <= budget);
     }
 }

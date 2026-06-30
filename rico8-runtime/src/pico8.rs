@@ -34,8 +34,8 @@ use std::{collections::HashMap, path::Path};
 
 mod clipboard;
 pub use clipboard::{
-    parse_clipboard, paste_pattern, paste_sfx, paste_sprites, PasteReport, Pasted, PixelRect,
-    SfxClip, Slotted,
+    encode_gfx, encode_pattern, encode_sfx, parse_clipboard, paste_pattern, paste_sfx,
+    paste_sprites, PasteReport, Pasted, PixelRect, SfxClip, Slotted,
 };
 
 const PNG_SIG: [u8; 8] = [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'];
@@ -871,6 +871,64 @@ fn hex_bytes(s: &str) -> Vec<u8> {
         .collect()
 }
 
+/// `b` as a lowercase hex string, two digits per byte (inverse of [`hex_bytes`]).
+fn bytes_to_hex(b: &[u8]) -> String {
+    use std::fmt::Write;
+    let mut s = String::with_capacity(b.len() * 2);
+    for &byte in b {
+        let _ = write!(s, "{byte:02x}");
+    }
+    s
+}
+
+/// One music pattern's four cart-memory bytes (inverse of [`music_from_mem`]):
+/// each channel's SFX index in the low 6 bits, bit 6 set when the channel is
+/// silent, loop/stop flags in the high bit of the first three bytes.
+fn music_to_mem(pat: &MusicPattern) -> [u8; 4] {
+    let mut ch = [0u8; 4];
+    for (i, c) in pat.channels.iter().enumerate() {
+        ch[i] = match c {
+            Some(slot) => slot & 0x3f,
+            None => 0x40,
+        };
+    }
+    if pat.loop_start {
+        ch[0] |= 0x80;
+    }
+    if pat.loop_back {
+        ch[1] |= 0x80;
+    }
+    if pat.stop_at_end {
+        ch[2] |= 0x80;
+    }
+    ch
+}
+
+/// One SFX's 68 cart-memory bytes (inverse of [`sfx_from_mem`]): 32 notes of
+/// two little-endian bytes, then the filter byte, speed, loop-start, loop-end.
+///
+/// A drawn custom-waveform instrument (`Sfx::custom_wave`, slots 0..8) is not
+/// part of this 68-byte format, so it is dropped on copy — matching PICO-8 and
+/// the `.p8` import path.
+fn sfx_to_mem(sfx: &Sfx) -> [u8; SFX_MEM_LEN] {
+    let mut b = [0u8; SFX_MEM_LEN];
+    for (i, note) in sfx.notes.iter().enumerate() {
+        let custom = ((note.wave >> 3) & 1) as u16;
+        let v = (note.pitch as u16 & 0x3f)
+            | ((note.wave as u16 & 7) << 6)
+            | ((note.volume as u16 & 7) << 9)
+            | ((note.effect as u16 & 7) << 12)
+            | (custom << 15);
+        b[i * 2] = (v & 0xff) as u8;
+        b[i * 2 + 1] = (v >> 8) as u8;
+    }
+    b[64] = sfx.filters_byte();
+    b[65] = sfx.speed;
+    b[66] = sfx.loop_start;
+    b[67] = sfx.loop_end;
+    b
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1312,6 +1370,47 @@ mod tests {
 
         let err = append_pico8_assets(&mut dest, &src, &sel).unwrap_err();
         assert!(err.to_string().contains("room"), "got: {err}");
+    }
+
+    #[test]
+    fn sfx_mem_round_trips() {
+        let mut s = Sfx::default();
+        s.notes[0] = Note {
+            pitch: 40,
+            wave: NOTE_CUSTOM_FLAG | 3,
+            volume: 5,
+            effect: 2,
+        };
+        s.notes[31] = Note {
+            pitch: 12,
+            wave: 6,
+            volume: 7,
+            effect: 0,
+        };
+        s.speed = 7;
+        s.loop_start = 3;
+        s.loop_end = 9;
+        s.noiz = true;
+        s.detune = 2;
+        s.dampen = 1;
+        assert_eq!(sfx_from_mem(&sfx_to_mem(&s)), s);
+    }
+
+    #[test]
+    fn music_mem_round_trips() {
+        let p = MusicPattern {
+            channels: [Some(8), None, Some(63), Some(0)],
+            loop_back: true,
+            loop_start: false,
+            stop_at_end: true,
+        };
+        assert_eq!(music_from_mem(music_to_mem(&p)), p);
+    }
+
+    #[test]
+    fn hex_round_trips() {
+        let b = [0x00u8, 0x08, 0xff, 0x10, 0xab];
+        assert_eq!(hex_bytes(&bytes_to_hex(&b)), b);
     }
 
     #[test]

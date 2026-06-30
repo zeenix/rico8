@@ -636,6 +636,12 @@ impl SfxEditor {
             Pasted::Sprites(_) => self.status.set("sprites - use sprite editor".into()),
         }
     }
+
+    /// Copy the selected SFX slot as an `[sfx]` clipboard blob.
+    pub fn copy(&mut self, assets: &Assets) -> String {
+        self.status.set(format!("copied SFX {}", self.sfx));
+        pico8::encode_sfx(self.sfx as u8, &assets.sfx[self.sfx])
+    }
 }
 
 const WAVE_TOP: i32 = 30;
@@ -797,7 +803,7 @@ mod tests {
 #[cfg(test)]
 mod paste_tests {
     use super::*;
-    use rico8_runtime::pico8::{Pasted, SfxClip, Slotted};
+    use rico8_runtime::pico8::{parse_clipboard, Pasted, SfxClip, Slotted};
 
     fn one_sfx(pitch: u8) -> Sfx {
         let mut s = Sfx::default();
@@ -821,5 +827,25 @@ mod paste_tests {
         ed.paste(&Pasted::Sfx(clip), &mut assets);
         assert_eq!(assets.sfx[7].notes[0].pitch, 33);
         assert!(ed.status.current().unwrap().contains("SFX 7"));
+    }
+
+    #[test]
+    fn copies_selected_sfx() {
+        let mut ed = SfxEditor::new();
+        ed.select(7);
+        let mut assets = Assets::default();
+        assets.sfx[7].notes[0] = Note {
+            pitch: 40,
+            wave: 2,
+            volume: 5,
+            effect: 0,
+        };
+        let blob = ed.copy(&assets);
+        assert!(ed.status.current().unwrap().contains("copied SFX 7"));
+        let Pasted::Sfx(clip) = parse_clipboard(&blob).unwrap() else {
+            panic!("not sfx")
+        };
+        assert_eq!(clip.records[0].src, 7);
+        assert_eq!(clip.records[0].value.notes[0].pitch, 40);
     }
 }

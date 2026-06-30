@@ -658,14 +658,35 @@ impl Shell {
                 _ => {}
             }
         }
-        // Ctrl+V pastes PICO-8 assets from the system clipboard into the active
-        // editor. The code editor keeps its own (text) paste.
-        if mods.ctrl
-            && key == Key::Char('v')
-            && matches!(self.mode, Mode::Sprite | Mode::Sfx | Mode::Music)
-        {
-            self.cmd_paste();
-            return;
+        // Ctrl+C/X/V move data through the system clipboard. The map editor
+        // keeps its own internal tile clipboard (its Ctrl+C/X are handled in
+        // MapEditor::key, so they fall through here).
+        if mods.ctrl {
+            match key {
+                Key::Char('c')
+                    if matches!(
+                        self.mode,
+                        Mode::Sprite | Mode::Sfx | Mode::Music | Mode::Code
+                    ) =>
+                {
+                    self.cmd_copy();
+                    return;
+                }
+                Key::Char('x') if self.mode == Mode::Code => {
+                    self.cmd_cut();
+                    return;
+                }
+                Key::Char('v')
+                    if matches!(
+                        self.mode,
+                        Mode::Sprite | Mode::Sfx | Mode::Music | Mode::Code
+                    ) =>
+                {
+                    self.cmd_paste();
+                    return;
+                }
+                _ => {}
+            }
         }
         if self.loaded_none() {
             return;
@@ -1027,9 +1048,62 @@ impl Shell {
             Ok(t) => t,
             Err(_) => return self.set_editor_status("no text on clipboard".into()),
         };
+        if self.mode == Mode::Code {
+            if self.code().is_none() {
+                return self.set_editor_status("load a project first".into());
+            }
+            let mut code = self.code().unwrap_or_default().to_string();
+            self.code_ed.paste_text(&mut code, &text);
+            self.set_code(code);
+            return;
+        }
         match pico8::parse_clipboard(&text) {
             Ok(pasted) => self.apply_paste(pasted),
-            Err(_) => self.set_editor_status("no PICO-8 asset on clipboard".into()),
+            Err(_) => self.set_editor_status("nothing to paste".into()),
+        }
+    }
+
+    /// Encode the active editor's current item and put it on the system clipboard.
+    fn cmd_copy(&mut self) {
+        let blob = match self.mode {
+            Mode::Code => {
+                if self.code().is_none() {
+                    return self.set_editor_status("load a project first".into());
+                }
+                let code = self.code().unwrap_or_default().to_string();
+                self.code_ed.copy(&code)
+            }
+            Mode::Sprite | Mode::Sfx | Mode::Music => {
+                let Some(a) = assets_of(&mut self.loaded) else {
+                    return self.set_editor_status("load a project first".into());
+                };
+                Some(match self.mode {
+                    Mode::Sprite => self.sprite_ed.copy(a),
+                    Mode::Sfx => self.sfx_ed.copy(a),
+                    Mode::Music => self.music_ed.copy(a),
+                    _ => unreachable!(),
+                })
+            }
+            _ => None,
+        };
+        if let Some(text) = blob {
+            if crate::clipboard::write_text(&text).is_err() {
+                self.set_editor_status("clipboard unavailable".into());
+            }
+        }
+    }
+
+    /// Cut the code selection to the system clipboard (code editor only).
+    fn cmd_cut(&mut self) {
+        if self.code().is_none() {
+            return self.set_editor_status("load a project first".into());
+        }
+        let mut code = self.code().unwrap_or_default().to_string();
+        if let Some(text) = self.code_ed.cut(&mut code) {
+            self.set_code(code);
+            if crate::clipboard::write_text(&text).is_err() {
+                self.set_editor_status("clipboard unavailable".into());
+            }
         }
     }
 
@@ -1053,6 +1127,8 @@ impl Shell {
             Mode::Sprite => self.sprite_ed.set_status(msg),
             Mode::Sfx => self.sfx_ed.set_status(msg),
             Mode::Music => self.music_ed.set_status(msg),
+            Mode::Code => self.code_ed.set_status(msg),
+            Mode::Map => self.map_ed.set_status(msg),
             _ => {}
         }
     }

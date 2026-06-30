@@ -471,6 +471,20 @@ impl SpriteEditor {
             Pasted::Sfx(_) => self.status.set("sfx - use sfx editor".into()),
         }
     }
+
+    /// Copy the selected sprite's 8x8 block as a `[gfx]` clipboard blob.
+    pub fn copy(&mut self, assets: &Assets) -> String {
+        let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
+        let y0 = (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8;
+        let mut pixels = Vec::with_capacity(64);
+        for dy in 0..8 {
+            for dx in 0..8 {
+                pixels.push(assets.sprites.get(x0 + dx, y0 + dy));
+            }
+        }
+        self.status.set(format!("copied sprite {}", self.sprite));
+        pico8::encode_gfx(&pico8::PixelRect { w: 8, h: 8, pixels })
+    }
 }
 
 /// The tool's display name and keyboard shortcut, shown in the status bar.
@@ -496,7 +510,7 @@ const ICON_PICKER: Icon8 = [
 #[cfg(test)]
 mod paste_tests {
     use super::*;
-    use rico8_runtime::pico8::{Pasted, PixelRect};
+    use rico8_runtime::pico8::{parse_clipboard, Pasted, PixelRect};
 
     #[test]
     fn pastes_pixels_at_selected_sprite() {
@@ -527,6 +541,22 @@ mod paste_tests {
         );
         assert!(ed.status.current().unwrap().contains("sfx"));
         assert_eq!(assets.sprites.get(8, 0), 0); // nothing drawn.
+    }
+
+    #[test]
+    fn copies_selected_sprite() {
+        let mut ed = SpriteEditor::new(); // sprite 1 -> sheet (8, 0).
+        let mut assets = Assets::default();
+        assets.sprites.set(8, 0, 5);
+        assets.sprites.set(15, 7, 9);
+        let blob = ed.copy(&assets);
+        assert!(ed.status.current().unwrap().contains("copied sprite 1"));
+        let Pasted::Sprites(r) = parse_clipboard(&blob).unwrap() else {
+            panic!("not sprites")
+        };
+        assert_eq!((r.w, r.h), (8, 8));
+        assert_eq!(r.pixels[0], 5);
+        assert_eq!(r.pixels[63], 9);
     }
 }
 

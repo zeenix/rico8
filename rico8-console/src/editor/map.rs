@@ -121,6 +121,7 @@ pub struct MapEditor {
     drag: Drag,
     /// Undo/redo of the tile map (last 10 edits).
     history: History<MapData>,
+    status: ui::StatusMsg,
 }
 
 impl MapEditor {
@@ -139,6 +140,7 @@ impl MapEditor {
             clip: None,
             drag: Drag::None,
             history: History::new(),
+            status: ui::StatusMsg::default(),
         }
     }
 
@@ -240,6 +242,7 @@ impl MapEditor {
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
         self.frame = self.frame.wrapping_add(1);
+        self.status.tick();
         self.mx = mouse.x;
         self.my = mouse.y;
 
@@ -590,7 +593,7 @@ impl MapEditor {
                 None => format!("b{:03} pg{}", self.brush, self.page),
             }
         };
-        ui::status_bar(fb, &text);
+        self.status.show(fb, &text);
     }
 
     /// The tool whose toolbar icon is under the cursor, if any.
@@ -646,6 +649,8 @@ impl MapEditor {
                 }
             }
         }
+        let verb = if cut { "cut" } else { "copied" };
+        self.status.set(format!("{verb} {}x{} tiles", s.w, s.h));
     }
 
     /// Clear the current selection to tile 0 without touching the clipboard. The
@@ -660,8 +665,10 @@ impl MapEditor {
     }
 
     /// Stamp the clipboard at map cell (cx, cy).
-    fn paste_at(&self, assets: &mut Assets, cx: i32, cy: i32) {
-        let Some(clip) = &self.clip else { return };
+    fn paste_at(&mut self, assets: &mut Assets, cx: i32, cy: i32) {
+        let Some(clip) = self.clip.clone() else {
+            return;
+        };
         for y in 0..clip.h {
             for x in 0..clip.w {
                 let (dx, dy) = (cx + x, cy + y);
@@ -672,6 +679,13 @@ impl MapEditor {
                 }
             }
         }
+        self.status
+            .set(format!("pasted {}x{} tiles", clip.w, clip.h));
+    }
+
+    /// Set a transient bottom-bar message (used for clipboard errors).
+    pub fn set_status(&mut self, msg: String) {
+        self.status.set(msg);
     }
 
     /// Whether map cell (cx, cy) is inside the current selection.
@@ -1164,6 +1178,35 @@ mod tests {
         assert!(!ed.is_fullscreen());
     }
 
+    #[test]
+    fn copy_sets_status() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.sel = Some(Selection {
+            x: 0,
+            y: 0,
+            w: 3,
+            h: 2,
+        });
+        ed.copy_selection(&mut a, false);
+        assert_eq!(ed.status.current(), Some("copied 3x2 tiles"));
+        ed.copy_selection(&mut a, true);
+        assert_eq!(ed.status.current(), Some("cut 3x2 tiles"));
+    }
+
+    #[test]
+    fn paste_sets_status() {
+        let mut ed = MapEditor::new();
+        let mut a = Assets::default();
+        ed.clip = Some(Clipboard {
+            w: 2,
+            h: 1,
+            tiles: vec![4, 5],
+        });
+        ed.paste_at(&mut a, 0, 0);
+        assert_eq!(ed.status.current(), Some("pasted 2x1 tiles"));
+    }
+
     fn ctrl(shift: bool) -> Mods {
         Mods {
             ctrl: true,
@@ -1229,5 +1272,14 @@ mod tests {
         // In fullscreen the view top is y8; screen (1, 9) is map cell (0, 0).
         ed.tick(&press(1, 9), &mut a);
         assert_eq!(a.map.get(0, 0), 7);
+    }
+
+    #[test]
+    fn status_messages_fit_the_bar() {
+        use rico8_runtime::{fb::WIDTH, font::text_width};
+        let budget = WIDTH - 2;
+        // Widest map clipboard message: full-map dimensions.
+        assert!(text_width(&format!("copied {}x{} tiles", MAP_W, MAP_H)) <= budget);
+        assert!(text_width(&format!("pasted {}x{} tiles", MAP_W, MAP_H)) <= budget);
     }
 }

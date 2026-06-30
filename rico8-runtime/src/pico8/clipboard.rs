@@ -7,11 +7,12 @@
 //! blob (the SFX editor pastes the SFX; the music editor rebuilds the pattern).
 
 use super::{
-    hex, hex_bytes, music_from_mem, next_free_sfx, remap_custom_instruments, remap_music_channels,
-    sfx_from_mem, SFX_MEM_LEN,
+    bytes_to_hex, hex, hex_bytes, music_from_mem, music_to_mem, next_free_sfx,
+    remap_custom_instruments, remap_music_channels, sfx_from_mem, sfx_to_mem, SFX_MEM_LEN,
 };
 use crate::assets::{
     Assets, MusicPattern, Sfx, SpriteSheet, MUSIC_COUNT, SFX_COUNT, SHEET_H, SHEET_W,
+    SPRITES_PER_ROW, SPRITE_SIZE,
 };
 use anyhow::{bail, Result};
 use std::collections::HashMap;
@@ -52,7 +53,7 @@ pub fn parse_clipboard(text: &str) -> Result<Pasted> {
     if let Some(inner) = tagged(text, "sfx") {
         return Ok(Pasted::Sfx(parse_sfx(inner)?));
     }
-    bail!("no PICO-8 sprite or SFX data on the clipboard");
+    bail!("no sprite or sound on the clipboard");
 }
 
 /// The text between `[tag]` and `[/tag]`, if both are present.
@@ -97,7 +98,9 @@ fn parse_sfx(inner: &str) -> Result<SfxClip> {
     }
     let rec = 1 + SFX_MEM_LEN; // 1 slot byte + 68 SFX bytes.
     let count = (b[0] as usize).min(b.len().saturating_sub(2) / rec);
-    if count == 0 {
+    // A pattern copied from an all-silent pattern has zero SFX records but still
+    // carries its 4-byte channel footer; only a blob with neither is truly empty.
+    if count == 0 && b[2..].len() < 4 {
         bail!("clipboard SFX data is empty");
     }
     let mut records = Vec::with_capacity(count);
@@ -115,6 +118,46 @@ fn parse_sfx(inner: &str) -> Result<SfxClip> {
         .map(|c| music_from_mem([c[0], c[1], c[2], c[3]]))
         .collect();
     Ok(SfxClip { records, patterns })
+}
+
+/// Encode a pixel rectangle as a PICO-8 `[gfx]` blob: a 2-hex width and height,
+/// then one nibble per pixel, row-major.
+pub fn encode_gfx(rect: &PixelRect) -> String {
+    let mut s = format!("[gfx]{:02x}{:02x}", rect.w, rect.h);
+    for &p in &rect.pixels {
+        s.push(char::from_digit((p & 0xf) as u32, 16).unwrap());
+    }
+    s.push_str("[/gfx]");
+    s
+}
+
+/// Encode one SFX as a PICO-8 `[sfx]` blob: a 2-byte header (record count, then
+/// a byte PICO-8 emits as 1 and we ignore on decode), one record of the source
+/// slot byte and 68 SFX bytes.
+pub fn encode_sfx(slot: u8, sfx: &Sfx) -> String {
+    let mut b = vec![1, 1, slot];
+    b.extend_from_slice(&sfx_to_mem(sfx));
+    format!("[sfx]{}[/sfx]", bytes_to_hex(&b))
+}
+
+/// Encode one music pattern as a PICO-8 `[sfx]` blob: the SFX its channels
+/// reference (records tagged with their slot), then a 4-byte channel footer
+/// that rebuilds the pattern. Mirrors what PICO-8 emits for a copied pattern.
+pub fn encode_pattern(assets: &Assets, pattern: usize) -> String {
+    let pat = &assets.music[pattern];
+    let mut slots: Vec<u8> = Vec::new();
+    for &slot in pat.channels.iter().flatten() {
+        if !slots.contains(&slot) {
+            slots.push(slot);
+        }
+    }
+    let mut b = vec![slots.len() as u8, 1];
+    for &slot in &slots {
+        b.push(slot);
+        b.extend_from_slice(&sfx_to_mem(&assets.sfx[slot as usize]));
+    }
+    b.extend_from_slice(&music_to_mem(pat));
+    format!("[sfx]{}[/sfx]", bytes_to_hex(&b))
 }
 
 /// The outcome of a paste, ready for the editor's status bar.
@@ -141,8 +184,10 @@ pub fn paste_sprites(sheet: &mut SpriteSheet, rect: &PixelRect, x0: i32, y0: i32
             }
         }
     }
+    let slot =
+        (y0.max(0) as usize / SPRITE_SIZE) * SPRITES_PER_ROW + (x0.max(0) as usize / SPRITE_SIZE);
     PasteReport {
-        summary: rect_summary("spr", rect.w, rect.h, clipped),
+        summary: rect_summary(rect.w, rect.h, clipped, slot),
         clipped,
         warnings: Vec::new(),
     }
@@ -231,9 +276,9 @@ fn count(n: usize) -> String {
     }
 }
 
-/// `"pasted 8x8 spr"`, plus ` Ncut` when some cells fell off the sheet/map edge.
-fn rect_summary(kind: &str, w: usize, h: usize, clipped: usize) -> String {
-    let mut s = format!("pasted {w}x{h} {kind}");
+/// `"pasted 8x8 spr 1"`, plus ` Ncut` when some cells fell off the sheet.
+fn rect_summary(w: usize, h: usize, clipped: usize, slot: usize) -> String {
+    let mut s = format!("pasted {w}x{h} spr {slot}");
     if clipped > 0 {
         s.push_str(&format!(" {}cut", count(clipped)));
     }
@@ -421,8 +466,83 @@ mod tests {
         // Worst cases: a wide slot range with everything clipped and many warns.
         let budget = WIDTH - 2; // the bar's usable pixel width.
         assert!(text_width(&seq_summary("SFX", 10, 54, 255, 2048)) <= budget);
-        assert!(text_width(&rect_summary("spr", 128, 128, 16384)) <= budget);
+        assert!(text_width(&rect_summary(128, 128, 16384, 255)) <= budget);
         assert!(text_width(&pattern_summary(63, 1, 64, 255, 2048)) <= budget);
+    }
+
+    #[test]
+    fn gfx_round_trips() {
+        let rect = PixelRect {
+            w: 3,
+            h: 2,
+            pixels: vec![1, 2, 3, 4, 5, 6],
+        };
+        let Pasted::Sprites(r) = parse_clipboard(&encode_gfx(&rect)).unwrap() else {
+            panic!("not sprites")
+        };
+        assert_eq!((r.w, r.h), (3, 2));
+        assert_eq!(r.pixels, rect.pixels);
+    }
+
+    #[test]
+    fn sfx_round_trips() {
+        let mut s = Sfx::default();
+        s.notes[0] = Note {
+            pitch: 30,
+            wave: 2,
+            volume: 6,
+            effect: 1,
+        };
+        let Pasted::Sfx(clip) = parse_clipboard(&encode_sfx(7, &s)).unwrap() else {
+            panic!("not sfx")
+        };
+        assert_eq!(clip.records.len(), 1);
+        assert_eq!(clip.records[0].src, 7);
+        assert_eq!(clip.records[0].value, s);
+        assert!(clip.patterns.is_empty());
+    }
+
+    #[test]
+    fn pattern_round_trips() {
+        let mut assets = Assets::default();
+        assets.sfx[8] = sfx_with_first_note(20, 4);
+        assets.sfx[9] = sfx_with_first_note(22, 4);
+        assets.music[5] = MusicPattern {
+            channels: [Some(8), Some(9), None, None],
+            loop_back: false,
+            loop_start: false,
+            stop_at_end: false,
+        };
+        let Pasted::Sfx(clip) = parse_clipboard(&encode_pattern(&assets, 5)).unwrap() else {
+            panic!("not sfx")
+        };
+        assert_eq!(clip.records.len(), 2);
+        assert_eq!(clip.patterns.len(), 1);
+        assert_eq!(clip.patterns[0].channels, [Some(8), Some(9), None, None]);
+    }
+
+    #[test]
+    fn sprite_paste_summary_names_destination() {
+        let mut sheet = SpriteSheet::default();
+        let rect = PixelRect {
+            w: 8,
+            h: 8,
+            pixels: vec![1; 64],
+        };
+        // Sprite 1 lives at sheet pixel (8, 0).
+        let r = paste_sprites(&mut sheet, &rect, 8, 0);
+        assert_eq!(r.summary, "pasted 8x8 spr 1");
+    }
+
+    #[test]
+    fn empty_pattern_round_trips() {
+        let assets = Assets::default(); // music[0] defaults to all-None channels.
+        let Pasted::Sfx(clip) = parse_clipboard(&encode_pattern(&assets, 0)).unwrap() else {
+            panic!("not sfx")
+        };
+        assert!(clip.records.is_empty());
+        assert_eq!(clip.patterns.len(), 1);
+        assert_eq!(clip.patterns[0].channels, [None, None, None, None]);
     }
 
     #[test]
