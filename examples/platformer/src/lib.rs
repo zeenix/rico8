@@ -16,7 +16,7 @@ game!(Platformer {
     vx: 0.0,
     vy: 0.0,
     grounded: false,
-    badie: Charachter::new_badie(),
+    badie: Some(Charachter::new_badie()),
     taken: Vec::new(),
     frame: 0,
     mode: GameMode::Init,
@@ -27,7 +27,7 @@ struct Platformer {
     vx: f32,
     vy: f32,
     grounded: bool,
-    badie: Charachter,
+    badie: Option<Charachter>,
     taken: Vec<Taken, MAX_TAKEN>,
     frame: u32,
     mode: GameMode,
@@ -102,27 +102,40 @@ impl Platformer {
         self.hero.body.move_by(dx, dy);
 
         // Check for collision between our hero and the badie, and decide who dies if there is one.
-        if self.hero.body.x() + HERO_WIDTH >= self.badie.body.x()
-            && self.hero.body.x() < self.badie.body.x() + BADIE_WIDTH
-            && self.hero.body.y() + HERO_HEIGHT >= self.badie.body.y()
-            && self.hero.body.y() < self.badie.body.y() + BADIE_HEIGHT
-        {
-            self.hero.dead = true;
-            self.game_over(ctx);
+        if let Some(badie) = &mut self.badie {
+            if self.hero.body.draw_x() + HERO_WIDTH >= badie.body.draw_x()
+                && self.hero.body.draw_x() < badie.body.draw_x() + BADIE_WIDTH
+            {
+                if self.hero.body.draw_y() == badie.body.draw_y() {
+                    // Hero ramming into badie horizontally is a suicide.
+                    self.hero.dead = true;
+                    self.game_over(ctx);
 
-            return;
+                    return;
+                } else if self.hero.body.draw_y() + HERO_HEIGHT >= badie.body.draw_y()
+                    && self.hero.body.draw_y() < badie.body.draw_y() + BADIE_HEIGHT
+                {
+                    // Hero hitting the badie from the top, kills the badie and gives hero a boost.
+                    self.badie = None;
+                    self.vy = -3.25;
+                    ctx.sfx(BADIE_DEAD_SFX);
+                    ctx.sfx(JUMP_SFX);
+                }
+            }
         }
 
-        // Our badie moves horizontally back & forth between two points.
-        if self.badie.body.x() < BADIE_END_X {
-            self.badie.flip = true;
-        } else if self.badie.body.x() > BADIE_START_X {
-            self.badie.flip = false;
-        }
-        if self.badie.flip {
-            self.badie.body.move_by(BADIE_SPEED, 0.0);
-        } else {
-            self.badie.body.move_by(-BADIE_SPEED, 0.0);
+        if let Some(badie) = &mut self.badie {
+            // Our badie moves horizontally back & forth between two points.
+            if badie.body.x() < BADIE_END_X {
+                badie.flip = true;
+            } else if badie.body.x() > BADIE_START_X {
+                badie.flip = false;
+            }
+            if badie.flip {
+                badie.body.move_by(BADIE_SPEED, 0.0);
+            } else {
+                badie.body.move_by(-BADIE_SPEED, 0.0);
+            }
         }
 
         // Coins & trophy: sample the hitbox center.
@@ -156,7 +169,7 @@ impl Platformer {
         self.vx = 0.0;
         self.vy = 0.0;
         self.grounded = false;
-        self.badie = Charachter::new_badie();
+        self.badie = Some(Charachter::new_badie());
         self.frame = 0;
         self.mode.start(ctx);
         // Put all the rewards back on the map.
@@ -206,6 +219,9 @@ impl Platformer {
     }
 
     fn draw_badie(&self, gfx: &mut Graphics) {
+        let Some(badie) = &self.badie else {
+            return;
+        };
         let sprite = match self.mode {
             GameMode::InGame { .. } if (self.frame / 4).is_multiple_of(2) => BADIE_ALT_SPRITE,
             GameMode::Ended { .. } | GameMode::InGame { .. } => BADIE_SPRITE,
@@ -213,11 +229,11 @@ impl Platformer {
         };
         gfx.sprite_ext(
             sprite,
-            self.badie.body.draw_x(),
-            self.badie.body.draw_y(),
+            badie.body.draw_x(),
+            badie.body.draw_y(),
             8,
             8,
-            self.badie.flip,
+            badie.flip,
             false,
         )
         .unwrap();
@@ -376,16 +392,16 @@ const BADIE_SPEED: f32 = 0.5;
 const HERO_SPRITE: SpriteId = SpriteId(1);
 const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
 const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
-const HERO_WIDTH: f32 = 8.0;
-const HERO_HEIGHT: f32 = 7.0;
+const HERO_WIDTH: i16 = 8;
+const HERO_HEIGHT: i16 = 7;
 
 const BADIE_SPRITE: SpriteId = SpriteId(6);
 const BADIE_ALT_SPRITE: SpriteId = SpriteId(7);
 const BADIE_START_X: f32 = (SCREEN_WIDTH * 2 - 8) as f32;
 const BADIE_END_X: f32 = (SCREEN_WIDTH * 2 - 8 * 8) as f32;
 const BADIE_Y: f32 = (SCREEN_HEIGHT - 3 * 8) as f32;
-const BADIE_WIDTH: f32 = 8.0;
-const BADIE_HEIGHT: f32 = 7.0;
+const BADIE_WIDTH: i16 = 8;
+const BADIE_HEIGHT: i16 = 7;
 
 const COIN_SPRITE: SpriteId = SpriteId(3);
 const TROPHY_SPRITE: SpriteId = SpriteId(4);
@@ -396,5 +412,6 @@ const GAME_OVER_TIMEOUT: f32 = 5.0;
 
 const JUMP_SFX: SfxId = SfxId::new(0).unwrap();
 const COIN_SFX: SfxId = SfxId::new(1).unwrap();
+const BADIE_DEAD_SFX: SfxId = SfxId::new(4).unwrap();
 const COMPLETION_MUSIC: MusicId = MusicId::new(0).unwrap();
 const GAME_OVER_MUSIC: MusicId = MusicId::new(1).unwrap();
