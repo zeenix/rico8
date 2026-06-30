@@ -13,6 +13,7 @@
 pub mod assets;
 pub mod audio;
 pub mod cart;
+pub mod clipboard;
 pub mod fb;
 pub mod font;
 pub mod input;

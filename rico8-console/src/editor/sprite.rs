@@ -8,9 +8,9 @@ use crate::{
 };
 use rico8_runtime::{
     assets::{Assets, SpriteSheet, SPRITES_PER_ROW},
+    clipboard::{self, ClipboardPayload, Pasted},
     fb::Framebuffer,
     palette::col,
-    pico8::{self, Pasted},
 };
 
 // Layout.
@@ -462,17 +462,19 @@ impl SpriteEditor {
     /// other kinds set a hint pointing at the right editor.
     pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
         match pasted {
-            Pasted::Sprites(rect) => {
+            Pasted::Sprites { rect, flags } => {
                 let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
                 let y0 = (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8;
-                let report = pico8::paste_sprites(&mut assets.sprites, rect, x0, y0);
+                let report =
+                    clipboard::paste_sprites(&mut assets.sprites, rect, x0, y0, flags.as_deref());
                 self.status.set(report.summary);
             }
             Pasted::Sfx(_) => self.status.set("sfx - use sfx editor".into()),
+            Pasted::Map { .. } => self.status.set("map - use map editor".into()),
         }
     }
 
-    /// Copy the selected sprite's 8x8 block as a `[gfx]` clipboard blob.
+    /// Copy the selected sprite's 8x8 block (pixels + flags) as a native blob.
     pub fn copy(&mut self, assets: &Assets) -> String {
         let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
         let y0 = (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8;
@@ -483,7 +485,12 @@ impl SpriteEditor {
             }
         }
         self.status.set(format!("copied sprite {}", self.sprite));
-        pico8::encode_gfx(&pico8::PixelRect { w: 8, h: 8, pixels })
+        clipboard::encode(&ClipboardPayload::Sprite {
+            w: 8,
+            h: 8,
+            pixels,
+            flags: vec![assets.sprites.flags(self.sprite)],
+        })
     }
 }
 
@@ -510,7 +517,7 @@ const ICON_PICKER: Icon8 = [
 #[cfg(test)]
 mod paste_tests {
     use super::*;
-    use rico8_runtime::pico8::{parse_clipboard, Pasted, PixelRect};
+    use rico8_runtime::clipboard::{parse, Pasted, PixelRect};
 
     #[test]
     fn pastes_pixels_at_selected_sprite() {
@@ -521,7 +528,7 @@ mod paste_tests {
             h: 1,
             pixels: vec![9, 10],
         };
-        ed.paste(&Pasted::Sprites(rect), &mut assets);
+        ed.paste(&Pasted::Sprites { rect, flags: None }, &mut assets);
         assert_eq!(assets.sprites.get(8, 0), 9);
         assert_eq!(assets.sprites.get(9, 0), 10);
         assert!(ed.status.current().unwrap().contains("pasted"));
@@ -529,7 +536,7 @@ mod paste_tests {
 
     #[test]
     fn rejects_sfx_with_a_hint() {
-        use rico8_runtime::pico8::SfxClip;
+        use rico8_runtime::clipboard::SfxClip;
         let mut ed = SpriteEditor::new();
         let mut assets = Assets::default();
         ed.paste(
@@ -551,7 +558,7 @@ mod paste_tests {
         assets.sprites.set(15, 7, 9);
         let blob = ed.copy(&assets);
         assert!(ed.status.current().unwrap().contains("copied sprite 1"));
-        let Pasted::Sprites(r) = parse_clipboard(&blob).unwrap() else {
+        let Pasted::Sprites { rect: r, .. } = parse(&blob).unwrap() else {
             panic!("not sprites")
         };
         assert_eq!((r.w, r.h), (8, 8));
@@ -756,5 +763,21 @@ mod tests {
         };
         ed.tick(&on_palette, &mut a);
         assert_eq!(ed.canvas_pixel_under_cursor(), None);
+    }
+
+    #[test]
+    fn copy_emits_native_blob_with_flags() {
+        use rico8_runtime::clipboard::{parse, Pasted};
+        let mut a = Assets::default();
+        a.sprites.set_flag(1, 3, true); // flag bit 3 on sprite 1.
+        let mut ed = SpriteEditor::new();
+        ed.sprite = 1;
+        let blob = ed.copy(&a);
+        assert!(blob.starts_with("[rico8]"));
+        let Pasted::Sprites { flags, .. } = parse(&blob).unwrap() else {
+            panic!("not sprites")
+        };
+        assert_eq!(flags, Some(vec![0b0000_1000]));
+        assert_eq!(ed.status.current(), Some("copied sprite 1"));
     }
 }

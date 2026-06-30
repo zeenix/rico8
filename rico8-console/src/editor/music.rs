@@ -12,9 +12,9 @@ use crate::{
 use rico8_runtime::{
     assets::{Assets, MusicPattern, Sfx, CHANNELS, MUSIC_COUNT, SFX_LEN},
     audio::AudioHandle,
+    clipboard::{self, ClipboardPayload, Pasted},
     fb::Framebuffer,
     palette::col,
-    pico8::{self, Pasted},
 };
 
 // Layout, matching PICO-8's recovered framebuffer.
@@ -424,11 +424,17 @@ impl MusicEditor {
         self.status.set(msg);
     }
 
-    /// Copy the selected pattern as an `[sfx]` clipboard blob (its channel SFX
-    /// plus a footer that rebuilds the pattern).
+    /// Copy the selected pattern and the SFX it references as a native blob.
     pub fn copy(&mut self, assets: &Assets) -> String {
+        let pat = assets.music[self.pattern];
+        let mut sfx: Vec<(u8, Sfx)> = Vec::new();
+        for &slot in pat.channels.iter().flatten() {
+            if !sfx.iter().any(|(s, _)| *s == slot) {
+                sfx.push((slot, assets.sfx[slot as usize].clone()));
+            }
+        }
         self.status.set(format!("copied pat {}", self.pattern));
-        pico8::encode_pattern(assets, self.pattern)
+        clipboard::encode(&ClipboardPayload::Pattern { pattern: pat, sfx })
     }
 
     /// Paste a decoded PICO-8 clipboard blob. An `[sfx]` blob (which is what a
@@ -437,10 +443,11 @@ impl MusicEditor {
     pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
         match pasted {
             Pasted::Sfx(clip) => {
-                let report = pico8::paste_pattern(assets, clip, self.pattern);
+                let report = clipboard::paste_pattern(assets, clip, self.pattern);
                 self.status.set(report.summary);
             }
-            Pasted::Sprites(_) => self.status.set("sprites - use sprite editor".into()),
+            Pasted::Sprites { .. } => self.status.set("sprites - use sprite editor".into()),
+            Pasted::Map { .. } => self.status.set("map - use map editor".into()),
         }
     }
 }
@@ -682,7 +689,7 @@ mod paste_tests {
     use super::*;
     use rico8_runtime::{
         assets::{MusicPattern, Sfx},
-        pico8::{parse_clipboard, Pasted, SfxClip, Slotted},
+        clipboard::{parse, Pasted, SfxClip, Slotted},
     };
 
     fn one_sfx(pitch: u8) -> Sfx {
@@ -728,7 +735,7 @@ mod paste_tests {
         assets.sfx[3].notes[0].volume = 5;
         let blob = ed.copy(&assets);
         assert!(ed.status.current().unwrap().contains("copied pat 0"));
-        let Pasted::Sfx(clip) = parse_clipboard(&blob).unwrap() else {
+        let Pasted::Sfx(clip) = parse(&blob).unwrap() else {
             panic!("not sfx")
         };
         assert_eq!(clip.patterns[0].channels, [Some(3), None, None, None]);
