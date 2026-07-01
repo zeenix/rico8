@@ -1,10 +1,18 @@
-//! A tiny platformer: run, jump, collect coins. Solid tiles carry sprite
-//! flag 0; coins are tile 3 and are collected by rewriting the map.
+//! A tiny platformer: run and jump across a scrolling level, collect coins,
+//! grab the trophy to win, and dodge or stomp the patrolling badie — all
+//! before the 30-second clock runs out. Solid tiles carry sprite flag 0;
+//! coins (tile 3) and the trophy (tile 4) are collected by rewriting the map,
+//! and put back when the game restarts.
 //!
-//! The player is a [`Body`], so a running jump (hold Right + jump) — a
+//! The hero owns a [`Body`], so a running jump (hold Right + jump) — a
 //! sub-pixel diagonal — climbs a clean staircase instead of shimmering. The
 //! body owns the position; the cart just hands it the movement it worked out
 //! for the frame and draws at `draw_x`/`draw_y`.
+//!
+//! The code is split into small modules: `hero` and `badie` (the two moving
+//! actors), `taken` (a collected coin or trophy, so it can be scored and put
+//! back), `game_mode` (the `Init` → `InGame` → `Ended` state machine), and
+//! `constants`.
 
 #![no_std]
 
