@@ -110,6 +110,7 @@ impl Platformer {
         self.badie = Some(Badie::new());
         self.frame = 0;
         self.mode.start(ctx);
+        self.badies_killed = 0;
         for taken in self.taken.drain(..) {
             taken.put_back(ctx);
         }
