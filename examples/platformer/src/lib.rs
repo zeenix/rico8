@@ -12,11 +12,11 @@ use heapless::Vec;
 use rico8::*;
 
 game!(Platformer {
-    hero: Charachter::new_hero(),
+    hero: Hero::new(),
     vx: 0.0,
     vy: 0.0,
     grounded: false,
-    badie: Some(Charachter::new_badie()),
+    badie: Some(Badie::new()),
     taken: Vec::new(),
     badies_killed: 0,
     frame: 0,
@@ -24,11 +24,11 @@ game!(Platformer {
 });
 
 struct Platformer {
-    hero: Charachter,
+    hero: Hero,
     vx: f32,
     vy: f32,
     grounded: bool,
-    badie: Option<Charachter>,
+    badie: Option<Badie>,
     taken: Vec<Taken, MAX_TAKEN>,
     badies_killed: u8,
     frame: u32,
@@ -168,11 +168,11 @@ impl Platformer {
     }
 
     fn restart_game(&mut self, ctx: &mut Context) {
-        self.hero = Charachter::new_hero();
+        self.hero = Hero::new();
         self.vx = 0.0;
         self.vy = 0.0;
         self.grounded = false;
-        self.badie = Some(Charachter::new_badie());
+        self.badie = Some(Badie::new());
         self.frame = 0;
         self.mode.start(ctx);
         // Put all the rewards back on the map.
@@ -301,26 +301,33 @@ impl Game for Platformer {
 }
 
 #[derive(Debug)]
-struct Charachter {
+struct Hero {
     body: Body,
     flip: bool,
     dead: bool,
 }
 
-impl Charachter {
-    fn new_hero() -> Self {
+impl Hero {
+    fn new() -> Self {
         Self {
             body: Body::new(16.0, 80.0),
             flip: false,
             dead: false,
         }
     }
+}
 
-    fn new_badie() -> Self {
+#[derive(Debug)]
+struct Badie {
+    body: Body,
+    flip: bool,
+}
+
+impl Badie {
+    fn new() -> Self {
         Self {
             body: Body::new(BADIE_START_X, BADIE_Y),
             flip: false,
-            dead: false,
         }
     }
 }
