@@ -17,11 +17,16 @@ mod taken;
 use heapless::Vec;
 use rico8::*;
 
-use badie::*;
-use constants::*;
-use game_mode::*;
-use hero::*;
-use taken::*;
+use crate::{
+    badie::Badie,
+    constants::{
+        BADIE_DEAD_SFX, BADIE_HEIGHT, BADIE_KILL_POINTS, BADIE_WIDTH, COMPLETION_MUSIC,
+        GAME_OVER_MUSIC, GAME_OVER_TIMEOUT, GAME_TIMEOUT, HERO_HEIGHT, HERO_WIDTH, MAX_TAKEN,
+    },
+    game_mode::GameMode,
+    hero::Hero,
+    taken::Taken,
+};
 
 game!(Platformer {
     hero: Hero::new(),
