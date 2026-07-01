@@ -32,6 +32,10 @@ const G_Y: i32 = 31;
 const G_CELL_W: i32 = 15;
 const G_CELL_H: i32 = 11;
 
+/// Undo snapshot for the music editor: the patterns plus the SFX bank, because
+/// pasting a copied pattern also appends its SFX into the first free slots.
+type MusicSnapshot = (Vec<MusicPattern>, Vec<Sfx>);
+
 pub struct MusicEditor {
     pattern: usize,
     channel: usize,
@@ -45,8 +49,8 @@ pub struct MusicEditor {
     /// In grid view: false = patterns (Pat), true = SFX.
     grid_sfx: bool,
     status: ui::StatusMsg,
-    /// Undo/redo of the song's patterns (last 10 edits).
-    history: History<Vec<MusicPattern>>,
+    /// Undo/redo of the song's patterns and the SFX bank (last 10 edits).
+    history: History<MusicSnapshot>,
 }
 
 impl MusicEditor {
@@ -109,20 +113,41 @@ impl MusicEditor {
         }
     }
 
+    /// Snapshot the state a music edit can touch: the patterns and the SFX bank.
+    fn snapshot(assets: &Assets) -> MusicSnapshot {
+        (assets.music.clone(), assets.sfx.clone())
+    }
+
+    /// Restore a snapshot produced by [`Self::snapshot`].
+    fn restore(assets: &mut Assets, snap: MusicSnapshot) {
+        let (music, sfx) = snap;
+        assets.music = music;
+        assets.sfx = sfx;
+    }
+
     pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets, audio: &AudioHandle) {
         if mods.ctrl {
             if let Key::Char(c) = key {
                 match c.to_ascii_lowercase() {
                     'z' if mods.shift => {
-                        self.history.redo(&mut assets.music);
+                        let mut snap = Self::snapshot(assets);
+                        if self.history.redo(&mut snap) {
+                            Self::restore(assets, snap);
+                        }
                         return;
                     }
                     'z' => {
-                        self.history.undo(&mut assets.music);
+                        let mut snap = Self::snapshot(assets);
+                        if self.history.undo(&mut snap) {
+                            Self::restore(assets, snap);
+                        }
                         return;
                     }
                     'y' => {
-                        self.history.redo(&mut assets.music);
+                        let mut snap = Self::snapshot(assets);
+                        if self.history.redo(&mut snap) {
+                            Self::restore(assets, snap);
+                        }
                         return;
                     }
                     _ => {}
@@ -131,7 +156,7 @@ impl MusicEditor {
         }
         // Snapshot before, commit after: each key edit is one undo step, and the
         // compare drops keys that change no pattern (navigation, Tab, play).
-        self.history.begin(&assets.music);
+        self.history.begin_with(|| Self::snapshot(assets));
         match key {
             Key::Up => self.channel = (self.channel + CHANNELS - 1) % CHANNELS,
             Key::Down => self.channel = (self.channel + 1) % CHANNELS,
@@ -158,7 +183,7 @@ impl MusicEditor {
             Key::Tab => self.grid = !self.grid,
             _ => {}
         }
-        self.history.commit(&assets.music);
+        self.history.commit_with(|| Self::snapshot(assets));
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets, audio: &AudioHandle) {
@@ -174,9 +199,9 @@ impl MusicEditor {
         // and committed once it comes up is one undo step. The commit compares,
         // so view/navigation clicks record nothing.
         if m.left || m.right {
-            self.history.begin(&assets.music);
+            self.history.begin_with(|| Self::snapshot(assets));
         } else {
-            self.history.commit(&assets.music);
+            self.history.commit_with(|| Self::snapshot(assets));
         }
         // Top-bar buttons: notes|grid view toggle, and (in grid view) the Pat/Sfx toggle.
         if m.left_pressed && m.y < 8 {
@@ -441,6 +466,7 @@ impl MusicEditor {
     /// copied pattern is) rebuilds a pattern at the selected slot, appending its
     /// SFX after the last used slot.
     pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
+        self.history.begin_with(|| Self::snapshot(assets));
         match pasted {
             Pasted::Sfx(clip) => {
                 let report = clipboard::paste_pattern(assets, clip, self.pattern);
@@ -449,6 +475,7 @@ impl MusicEditor {
             Pasted::Sprites { .. } => self.status.set("sprites - use sprite editor".into()),
             Pasted::Map { .. } => self.status.set("map - use map editor".into()),
         }
+        self.history.commit_with(|| Self::snapshot(assets));
     }
 }
 
@@ -725,6 +752,63 @@ mod paste_tests {
         assert_eq!(assets.sfx[0].notes[0].pitch, 1); // appended at slot 0.
         assert_eq!(assets.music[0].channels, [Some(0), Some(1), None, None]);
         assert!(ed.status.current().unwrap().contains("pat 0"));
+    }
+
+    #[test]
+    fn undo_and_redo_a_paste_restores_patterns_and_sfx() {
+        let mut ed = MusicEditor::new(); // pattern 0.
+        let mut assets = Assets::default();
+        let before_music = assets.music.clone();
+        let before_sfx = assets.sfx.clone();
+        let clip = SfxClip {
+            records: vec![
+                Slotted {
+                    src: 8,
+                    value: one_sfx(1),
+                },
+                Slotted {
+                    src: 9,
+                    value: one_sfx(2),
+                },
+            ],
+            patterns: vec![MusicPattern {
+                channels: [Some(8), Some(9), None, None],
+                loop_back: false,
+                loop_start: false,
+                stop_at_end: false,
+            }],
+        };
+        ed.paste(&Pasted::Sfx(clip), &mut assets);
+        // Paste appends the SFX at slots 0,1 and rewires the pattern to them.
+        assert_eq!(assets.sfx[0].notes[0].pitch, 1);
+        assert_eq!(assets.music[0].channels, [Some(0), Some(1), None, None]);
+
+        let ctrl = Mods {
+            ctrl: true,
+            shift: false,
+            ..Default::default()
+        };
+        let ctrl_shift = Mods {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+        ed.key(Key::Char('z'), ctrl, &mut assets, &AudioHandle::dummy());
+        assert_eq!(assets.music, before_music, "undo restores the patterns");
+        assert_eq!(assets.sfx, before_sfx, "undo also removes the appended SFX");
+
+        ed.key(
+            Key::Char('z'),
+            ctrl_shift,
+            &mut assets,
+            &AudioHandle::dummy(),
+        );
+        assert_eq!(assets.sfx[0].notes[0].pitch, 1, "redo re-appends the SFX");
+        assert_eq!(
+            assets.music[0].channels,
+            [Some(0), Some(1), None, None],
+            "redo re-applies the pattern"
+        );
     }
 
     #[test]

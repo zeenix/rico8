@@ -628,6 +628,7 @@ impl SfxEditor {
     /// Paste a decoded PICO-8 clipboard blob. Only `[sfx]` applies here: its
     /// records overwrite consecutive slots from the selected one.
     pub fn paste(&mut self, pasted: &Pasted, assets: &mut Assets) {
+        self.history.begin(&assets.sfx);
         match pasted {
             Pasted::Sfx(clip) => {
                 let report = clipboard::paste_sfx(&mut assets.sfx, &clip.records, self.sfx);
@@ -636,6 +637,7 @@ impl SfxEditor {
             Pasted::Sprites { .. } => self.status.set("sprites - use sprite editor".into()),
             Pasted::Map { .. } => self.status.set("map - use map editor".into()),
         }
+        self.history.commit(&assets.sfx);
     }
 
     /// Copy the selected SFX slot (full fidelity, incl. custom wave) as a native blob.
@@ -851,5 +853,44 @@ mod paste_tests {
         };
         assert_eq!(clip.records[0].src, 7);
         assert_eq!(clip.records[0].value.notes[0].pitch, 40);
+    }
+
+    #[test]
+    fn undo_and_redo_a_paste() {
+        let mut ed = SfxEditor::new();
+        ed.select(7);
+        let mut assets = Assets::default();
+        let clip = SfxClip {
+            records: vec![Slotted {
+                src: 0,
+                value: one_sfx(33),
+            }],
+            patterns: vec![],
+        };
+        ed.paste(&Pasted::Sfx(clip), &mut assets);
+        assert_eq!(assets.sfx[7].notes[0].pitch, 33);
+
+        let ctrl = Mods {
+            ctrl: true,
+            shift: false,
+            ..Default::default()
+        };
+        let ctrl_shift = Mods {
+            ctrl: true,
+            shift: true,
+            ..Default::default()
+        };
+        ed.key(Key::Char('z'), ctrl, &mut assets, &AudioHandle::dummy());
+        assert_eq!(assets.sfx[7].notes[0].pitch, 0, "undo restores the slot");
+        ed.key(
+            Key::Char('z'),
+            ctrl_shift,
+            &mut assets,
+            &AudioHandle::dummy(),
+        );
+        assert_eq!(
+            assets.sfx[7].notes[0].pitch, 33,
+            "redo re-applies the paste"
+        );
     }
 }
