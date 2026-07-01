@@ -10,6 +10,7 @@
 
 mod badie;
 mod constants;
+mod game_mode;
 mod hero;
 
 use heapless::Vec;
@@ -17,6 +18,7 @@ use rico8::*;
 
 use badie::*;
 use constants::*;
+use game_mode::*;
 use hero::*;
 
 game!(Platformer {
@@ -178,32 +180,6 @@ impl Game for Platformer {
                 time_left
             );
         }
-    }
-}
-
-#[derive(Debug)]
-enum GameMode {
-    Init,
-    InGame {
-        start_time: f32,
-        time_left: u8,
-    },
-    Ended {
-        time: f32,
-        flash: bool,
-        _music: PlayingMusic,
-        won: bool,
-    },
-}
-
-impl GameMode {
-    fn start(&mut self, ctx: &mut Context) {
-        assert!(matches!(self, Self::Init | Self::Ended { .. }));
-
-        *self = Self::InGame {
-            start_time: ctx.time(),
-            time_left: GAME_TIMEOUT,
-        };
     }
 }
 
