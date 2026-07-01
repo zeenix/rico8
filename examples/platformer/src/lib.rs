@@ -269,7 +269,7 @@ impl Game for Platformer {
         }
 
         // Camera follows the player across the 32-tile-wide level.
-        let cam = (self.hero.body.x() - 60.0).clamp(0.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
+        let cam = (self.hero.body.x() - 60.0).clamp(8.0, (32 * 8 - SCREEN_WIDTH as i16) as f32);
         gfx.camera(cam as i16, 0);
         gfx.map(0, 0, 0, 0, 32, 16, BitFlags::empty()).unwrap();
 
@@ -395,7 +395,7 @@ const HERO_HEIGHT: i16 = 7;
 
 const BADIE_SPRITE: SpriteId = SpriteId(6);
 const BADIE_ALT_SPRITE: SpriteId = SpriteId(7);
-const BADIE_START_X: f32 = (SCREEN_WIDTH * 2 - 8) as f32;
+const BADIE_START_X: f32 = (SCREEN_WIDTH * 2 - 16) as f32;
 const BADIE_END_X: f32 = (SCREEN_WIDTH * 2 - 8 * 8) as f32;
 const BADIE_Y: f32 = (SCREEN_HEIGHT - 3 * 8) as f32;
 const BADIE_WIDTH: i16 = 8;
