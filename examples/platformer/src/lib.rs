@@ -12,6 +12,7 @@ mod badie;
 mod constants;
 mod game_mode;
 mod hero;
+mod taken;
 
 use heapless::Vec;
 use rico8::*;
@@ -20,6 +21,7 @@ use badie::*;
 use constants::*;
 use game_mode::*;
 use hero::*;
+use taken::*;
 
 game!(Platformer {
     hero: Hero::new(),
@@ -58,7 +60,7 @@ impl Platformer {
         *time_left = GAME_TIMEOUT - elapsed;
 
         if let Some(taken) = self.hero.update(ctx) {
-            let took_trophy = taken.sprite == TROPHY_SPRITE;
+            let took_trophy = taken.is_trophy();
             self.taken.push(taken).unwrap();
             if took_trophy {
                 // Another music can't be playing becase `PlayingMusic` instace has had to have been
@@ -108,11 +110,9 @@ impl Platformer {
         self.badie = Some(Badie::new());
         self.frame = 0;
         self.mode.start(ctx);
-        // Put all the rewards back on the map.
-        for Taken { x, y, sprite, .. } in &self.taken {
-            ctx.set_map_tile(*x, *y, *sprite).unwrap();
+        for taken in self.taken.drain(..) {
+            taken.put_back(ctx);
         }
-        self.taken.clear();
     }
 
     fn game_over(&mut self, ctx: &mut Context) {
@@ -161,7 +161,7 @@ impl Game for Platformer {
 
         gfx.camera(0, 0);
 
-        let score = self.taken.iter().fold(0, |acc, r| acc + r.points)
+        let score = self.taken.iter().fold(0, |acc, r| acc + r.points())
             + self.badies_killed * BADIE_KILL_POINTS;
         printf!(gfx, 2, 2, Color::YELLOW, "Score {}", score);
 
@@ -179,33 +179,6 @@ impl Game for Platformer {
                 "{:>2}s",
                 time_left
             );
-        }
-    }
-}
-
-#[derive(Debug)]
-struct Taken {
-    x: i16,
-    y: i16,
-    sprite: SpriteId,
-    points: u8,
-}
-
-impl Taken {
-    fn new_coin(x: i16, y: i16) -> Self {
-        Self {
-            x,
-            y,
-            sprite: COIN_SPRITE,
-            points: COIN_POINTS,
-        }
-    }
-    fn new_trophy(x: i16, y: i16) -> Self {
-        Self {
-            x,
-            y,
-            sprite: TROPHY_SPRITE,
-            points: TROPHY_POINTS,
         }
     }
 }
