@@ -8,8 +8,12 @@
 
 #![no_std]
 
+mod constants;
+
 use heapless::Vec;
 use rico8::*;
+
+use constants::*;
 
 game!(Platformer {
     hero: Hero::new(),
@@ -384,40 +388,3 @@ impl Taken {
         }
     }
 }
-
-const MAX_TAKEN: usize = 8;
-
-const SOLID: SpriteFlag = SpriteFlag::Flag0;
-// Sub-pixel run speed, so a running jump is a sub-pixel diagonal — the motion
-// Body keeps coherent. At a whole pixel per frame there would be no zigzag.
-const HERO_SPEED: f32 = 0.7;
-// Our badie moves slower.
-const BADIE_SPEED: f32 = 0.5;
-
-const HERO_SPRITE: SpriteId = SpriteId(1);
-const HERO_LEGS_EXTEND_SPRITE: SpriteId = SpriteId(2);
-const HERO_HAPPY_SPRITE: SpriteId = SpriteId(5);
-const HERO_WIDTH: i16 = 8;
-const HERO_HEIGHT: i16 = 7;
-
-const BADIE_SPRITE: SpriteId = SpriteId(6);
-const BADIE_ALT_SPRITE: SpriteId = SpriteId(7);
-const BADIE_START_X: f32 = (SCREEN_WIDTH * 2 - 16) as f32;
-const BADIE_END_X: f32 = (SCREEN_WIDTH * 2 - 8 * 8) as f32;
-const BADIE_Y: f32 = (SCREEN_HEIGHT - 3 * 8) as f32;
-const BADIE_WIDTH: i16 = 8;
-const BADIE_HEIGHT: i16 = 7;
-
-const COIN_SPRITE: SpriteId = SpriteId(3);
-const TROPHY_SPRITE: SpriteId = SpriteId(4);
-const COIN_POINTS: u8 = 1;
-const TROPHY_POINTS: u8 = 4;
-const BADIE_KILL_POINTS: u8 = 4;
-const GAME_TIMEOUT: u8 = 30;
-const GAME_OVER_TIMEOUT: f32 = 5.0;
-
-const JUMP_SFX: SfxId = SfxId::new(0).unwrap();
-const COIN_SFX: SfxId = SfxId::new(1).unwrap();
-const BADIE_DEAD_SFX: SfxId = SfxId::new(4).unwrap();
-const COMPLETION_MUSIC: MusicId = MusicId::new(0).unwrap();
-const GAME_OVER_MUSIC: MusicId = MusicId::new(1).unwrap();
