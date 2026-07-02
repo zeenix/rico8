@@ -1,5 +1,6 @@
-//! The sprite editor: zoomed 8x8 canvas, palette grid, tools, flags, and
-//! a sheet strip for picking sprites — the classic layout.
+//! The sprite editor: a zoomed canvas (editing 1x1 up to 8x8 sprite blocks),
+//! palette grid, tools, flags, and a sheet strip for picking sprites — the
+//! classic layout.
 
 use super::history::History;
 use crate::{
@@ -14,15 +15,21 @@ use rico8_runtime::{
 };
 
 // Layout.
-const CANVAS: (i32, i32) = (3, 20); // 64x64, 8x zoom
+const CANVAS: (i32, i32) = (3, 20); // always 64x64 on screen, zoom set by size
 const PAL: (i32, i32) = (74, 20); // 4x4 grid of 12px swatches
 const FLAGS: (i32, i32) = (76, 72); // 8 toggle dots
 const SHEET_Y: i32 = 88; // 4 rows of sprites (one page)
 const PAGE_BTNS: (i32, i32) = (104, 81); // 4 page dots
+const SIZE_BTNS: (i32, i32) = (45, 9); // four "1/2/4/8" block-size buttons
 
-// Fullscreen canvas: the 8x8 sprite at 14x zoom (112x112), filling rows 8..119.
+// Fullscreen canvas: anchored at (8, 8), zoom chosen to fit the ~112px area.
 const FS_CANVAS: (i32, i32) = (8, 8);
-const FS_ZOOM: i32 = 14;
+const FS_MAX: i32 = 112;
+
+/// Selectable block sizes, in sprites per side: 1x1, 2x2, 4x4 or 8x8 sprites
+/// (8, 16, 32 or 64 pixels). Larger blocks edit several adjacent sheet cells
+/// at once, PICO-8 style.
+const SIZES: [i32; 4] = [1, 2, 4, 8];
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tool {
@@ -37,6 +44,8 @@ pub struct SpriteEditor {
     color: u8,
     tool: Tool,
     page: u32,
+    /// Edited block size in sprites per side (one of [`SIZES`]).
+    size: i32,
     fullscreen: bool,
     /// Last-known cursor position in screen pixels (for hover / status bar).
     mx: i32,
@@ -54,6 +63,7 @@ impl SpriteEditor {
             color: 7,
             tool: Tool::Pencil,
             page: 0,
+            size: 1,
             fullscreen: false,
             mx: -16,
             my: -16,
@@ -67,20 +77,42 @@ impl SpriteEditor {
         self.fullscreen
     }
 
-    /// Canvas origin and per-pixel zoom for the active view.
+    /// Edited block size in pixels (8, 16, 32 or 64).
+    fn block_px(&self) -> i32 {
+        self.size * 8
+    }
+
+    /// Top-left cell (column, row) of the edited block, clamped so an N-sprite
+    /// block always fits inside the 16x16 sheet even when the cursor sprite sits
+    /// near the right or bottom edge.
+    fn origin_cell(&self) -> (i32, i32) {
+        let per_row = SPRITES_PER_ROW as i32;
+        let col = (self.sprite as i32 % per_row).min(per_row - self.size);
+        let row = (self.sprite as i32 / per_row).min(per_row - self.size);
+        (col, row)
+    }
+
+    /// The sprite number of the block's top-left cell (what the header shows).
+    fn top_left_sprite(&self) -> u32 {
+        let (col, row) = self.origin_cell();
+        (row * SPRITES_PER_ROW as i32 + col) as u32
+    }
+
+    /// Canvas origin and per-pixel zoom for the active view. The block is
+    /// magnified into a fixed 64px canvas (normal) or the ~112px fullscreen area,
+    /// so larger blocks simply zoom out.
     fn canvas(&self) -> (i32, i32, i32) {
+        let bpx = self.block_px();
         if self.fullscreen {
-            (FS_CANVAS.0, FS_CANVAS.1, FS_ZOOM)
+            (FS_CANVAS.0, FS_CANVAS.1, (FS_MAX / bpx).max(1))
         } else {
-            (CANVAS.0, CANVAS.1, 8)
+            (CANVAS.0, CANVAS.1, 64 / bpx)
         }
     }
 
     fn sheet_origin(&self) -> (i32, i32) {
-        (
-            (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8,
-            (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8,
-        )
+        let (col, row) = self.origin_cell();
+        (col * 8, row * 8)
     }
 
     pub fn key(&mut self, key: Key, mods: Mods, assets: &mut Assets) {
@@ -156,10 +188,11 @@ impl SpriteEditor {
                 if target == self.color {
                     return;
                 }
-                // Flood fill within the 8x8 sprite.
+                // Flood fill within the edited block (which may span several cells).
+                let bpx = self.block_px();
                 let mut stack = vec![(px, py)];
                 while let Some((x, y)) = stack.pop() {
-                    if !(0..8).contains(&x) || !(0..8).contains(&y) {
+                    if !(0..bpx).contains(&x) || !(0..bpx).contains(&y) {
                         continue;
                     }
                     if assets.sprites.get(ox + x, oy + y) != target {
@@ -199,7 +232,7 @@ impl SpriteEditor {
         }
         // Canvas painting (drag-friendly), through the active view's origin/zoom.
         let (cx, cy, z) = self.canvas();
-        let size = z * 8;
+        let size = z * self.block_px();
         if (m.left || m.right) && m.over(cx, cy, cx + size - 1, cy + size - 1) {
             let px = (m.x - cx) / z;
             let py = (m.y - cy) / z;
@@ -229,14 +262,22 @@ impl SpriteEditor {
                 self.tool = *tool;
             }
         }
-        // Flags.
+        // Block-size buttons.
+        for (i, &n) in SIZES.iter().enumerate() {
+            let x = SIZE_BTNS.0 + i as i32 * 8;
+            if m.over(x, SIZE_BTNS.1, x + 6, SIZE_BTNS.1 + 7) {
+                self.size = n;
+            }
+        }
+        // Flags (of the block's top-left sprite).
+        let flag_sprite = self.top_left_sprite();
         for f in 0..8 {
             let x = FLAGS.0 + f * 6;
             if m.over(x, FLAGS.1, x + 4, FLAGS.1 + 4) {
-                let cur = assets.sprites.flags(self.sprite);
+                let cur = assets.sprites.flags(flag_sprite);
                 assets
                     .sprites
-                    .set_flag(self.sprite, f as u8, cur & (1 << f) == 0);
+                    .set_flag(flag_sprite, f as u8, cur & (1 << f) == 0);
             }
         }
         // Page dots.
@@ -278,7 +319,25 @@ impl SpriteEditor {
             }
             draw_icon8(fb, icon, x, 9, color);
         }
-        fb.print(&format!("#{:03}", self.sprite), 106, 11, col::WHITE);
+        fb.print(
+            &format!("#{:03}", self.top_left_sprite()),
+            106,
+            11,
+            col::WHITE,
+        );
+
+        // Block-size buttons ("1/2/4/8", one per entry in SIZES).
+        for (i, &n) in SIZES.iter().enumerate() {
+            let x = SIZE_BTNS.0 + i as i32 * 8;
+            let sel = n == self.size;
+            let color = if sel {
+                fb.rectfill(x - 1, SIZE_BTNS.1, x + 7, SIZE_BTNS.1 + 8, col::BLACK);
+                col::WHITE
+            } else {
+                col::LAVENDER
+            };
+            fb.print(&n.to_string(), x + 1, SIZE_BTNS.1 + 1, color);
+        }
 
         // Canvas.
         fb.rect(
@@ -289,7 +348,8 @@ impl SpriteEditor {
             col::BLACK,
         );
         let (ox, oy) = self.sheet_origin();
-        // Magnify the 8x8 sprite onto the 64x64 canvas. The artist edits every
+        let bpx = self.block_px();
+        // Magnify the edited block onto the 64x64 canvas. The artist edits every
         // pixel, so color 0 must show as black here rather than being treated as
         // transparent for this blit.
         fb.set_transparent_color(0, false);
@@ -297,8 +357,8 @@ impl SpriteEditor {
             &assets.sprites,
             ox,
             oy,
-            8,
-            8,
+            bpx,
+            bpx,
             CANVAS.0,
             CANVAS.1,
             64,
@@ -321,7 +381,7 @@ impl SpriteEditor {
         fb.rect(sx - 1, sy - 1, sx + 12, sy + 12, col::BLACK);
 
         // Flags.
-        let flags = assets.sprites.flags(self.sprite);
+        let flags = assets.sprites.flags(self.top_left_sprite());
         for f in 0..8 {
             let x = FLAGS.0 + f * 6;
             let on = flags & (1 << f) != 0;
@@ -363,12 +423,22 @@ impl SpriteEditor {
                 }
             }
         }
-        // Selection box on the strip.
-        if self.sprite / 64 == self.page {
-            let i = self.sprite % 64;
-            let x = (i as i32 % 16) * 8;
-            let y = SHEET_Y + (i as i32 / 16) * 8;
-            fb.rect(x, y, x + 7, y + 7, col::WHITE);
+        // Selection box on the strip: the N-sprite block, clipped to the four
+        // rows this page shows (an 8-tall block spans two pages).
+        let (col, row) = self.origin_cell();
+        let page_row0 = self.page as i32 * 4;
+        let y0 = (row - page_row0).max(0);
+        let y1 = (row + self.size - page_row0).min(4);
+        if y1 > y0 {
+            let x = col * 8;
+            let y = SHEET_Y + y0 * 8;
+            fb.rect(
+                x,
+                y,
+                x + self.size * 8 - 1,
+                y + (y1 - y0) * 8 - 1,
+                col::WHITE,
+            );
         }
 
         self.draw_status(fb, assets);
@@ -380,17 +450,18 @@ impl SpriteEditor {
     fn draw_fullscreen(&self, fb: &mut Framebuffer, assets: &Assets) {
         let (ox, oy) = self.sheet_origin();
         let (cx, cy, z) = self.canvas();
+        let bpx = self.block_px();
         fb.set_transparent_color(0, false);
         fb.sspr(
             &assets.sprites,
             ox,
             oy,
-            8,
-            8,
+            bpx,
+            bpx,
             cx,
             cy,
-            z * 8,
-            z * 8,
+            z * bpx,
+            z * bpx,
             false,
             false,
         );
@@ -426,10 +497,10 @@ impl SpriteEditor {
             })
     }
 
-    /// The sprite-local pixel (0..8, 0..8) under the cursor, if any.
+    /// The block-local pixel (0..block, 0..block) under the cursor, if any.
     fn canvas_pixel_under_cursor(&self) -> Option<(i32, i32)> {
         let (cx, cy, z) = self.canvas();
-        let size = z * 8;
+        let size = z * self.block_px();
         if self.mx >= cx && self.mx < cx + size && self.my >= cy && self.my < cy + size {
             Some(((self.mx - cx) / z, (self.my - cy) / z))
         } else {
@@ -445,10 +516,10 @@ impl SpriteEditor {
         } else if let Some((px, py)) = self.canvas_pixel_under_cursor() {
             let (ox, oy) = self.sheet_origin();
             let c = assets.sprites.get(ox + px, oy + py);
-            format!("#{:03} x{} y{} c{:02}", self.sprite, px, py, c)
+            format!("#{:03} x{} y{} c{:02}", self.top_left_sprite(), px, py, c)
         } else {
-            let flags = assets.sprites.flags(self.sprite);
-            format!("Spr {:03} flags {:08b}", self.sprite, flags)
+            let flags = assets.sprites.flags(self.top_left_sprite());
+            format!("Spr {:03} flags {:08b}", self.top_left_sprite(), flags)
         };
         self.status.show(fb, &text);
     }
@@ -464,8 +535,7 @@ impl SpriteEditor {
         self.history.begin(&assets.sprites);
         match pasted {
             Pasted::Sprites { rect, flags } => {
-                let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
-                let y0 = (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8;
+                let (x0, y0) = self.sheet_origin();
                 let report =
                     clipboard::paste_sprites(&mut assets.sprites, rect, x0, y0, flags.as_deref());
                 self.status.set(report.summary);
@@ -476,22 +546,36 @@ impl SpriteEditor {
         self.history.commit(&assets.sprites);
     }
 
-    /// Copy the selected sprite's 8x8 block (pixels + flags) as a native blob.
+    /// Copy the edited block (pixels + one flag byte per covered sprite,
+    /// row-major) as a native blob.
     pub fn copy(&mut self, assets: &Assets) -> String {
-        let x0 = (self.sprite as i32 % SPRITES_PER_ROW as i32) * 8;
-        let y0 = (self.sprite as i32 / SPRITES_PER_ROW as i32) * 8;
-        let mut pixels = Vec::with_capacity(64);
-        for dy in 0..8 {
-            for dx in 0..8 {
+        let (x0, y0) = self.sheet_origin();
+        let (col, row) = self.origin_cell();
+        let bpx = self.block_px();
+        let mut pixels = Vec::with_capacity((bpx * bpx) as usize);
+        for dy in 0..bpx {
+            for dx in 0..bpx {
                 pixels.push(assets.sprites.get(x0 + dx, y0 + dy));
             }
         }
-        self.status.set(format!("copied sprite {}", self.sprite));
+        let mut flags = Vec::with_capacity((self.size * self.size) as usize);
+        for ry in 0..self.size {
+            for rx in 0..self.size {
+                let n = (row + ry) * SPRITES_PER_ROW as i32 + (col + rx);
+                flags.push(assets.sprites.flags(n as u32));
+            }
+        }
+        let top = self.top_left_sprite();
+        self.status.set(if self.size == 1 {
+            format!("copied sprite {top}")
+        } else {
+            format!("copied {bpx}x{bpx} spr {top}")
+        });
         clipboard::encode(&ClipboardPayload::Sprite {
-            w: 8,
-            h: 8,
+            w: bpx as u8,
+            h: bpx as u8,
             pixels,
-            flags: vec![assets.sprites.flags(self.sprite)],
+            flags,
         })
     }
 }
@@ -821,6 +905,69 @@ mod tests {
         };
         ed.tick(&on_palette, &mut a);
         assert_eq!(ed.canvas_pixel_under_cursor(), None);
+    }
+
+    #[test]
+    fn clicking_a_size_button_sets_the_block_size() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        assert_eq!(ed.size, 1);
+        // Button index 1 -> size 2, at x = SIZE_BTNS.0 + 1*8.
+        ed.tick(&press(SIZE_BTNS.0 + 8 + 1, SIZE_BTNS.1 + 1), &mut a);
+        assert_eq!(ed.size, 2);
+        // Button index 3 -> size 8.
+        ed.tick(&press(SIZE_BTNS.0 + 3 * 8 + 1, SIZE_BTNS.1 + 1), &mut a);
+        assert_eq!(ed.size, 8);
+    }
+
+    #[test]
+    fn painting_a_2x2_block_reaches_the_adjacent_sprite() {
+        // With a 2x2 block the canvas spans sprites 1,2,17,18. Painting the
+        // right half must land in the neighbour (sprite 2 at sheet (16, 0))
+        // rather than being clipped away.
+        let mut ed = SpriteEditor::new(); // sprite 1 -> block origin (8, 0).
+        let mut a = Assets::default();
+        ed.size = 2; // zoom becomes 64 / 16 = 4.
+                     // Block pixel (8, 0) -> screen (CANVAS.0 + 8*4, CANVAS.1) = (35, 20).
+        ed.tick(&press(CANVAS.0 + 8 * 4, CANVAS.1), &mut a);
+        assert_eq!(a.sprites.get(16, 0), 7, "painted into the adjacent sprite");
+    }
+
+    #[test]
+    fn a_block_near_the_edge_clamps_onto_the_sheet() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.size = 2;
+        ed.sprite = 15; // last column, row 0.
+        assert_eq!(
+            ed.origin_cell(),
+            (14, 0),
+            "clamped so the 2-wide block fits"
+        );
+        assert_eq!(ed.top_left_sprite(), 14);
+        // Painting the top-left of the canvas writes to sprite 14 at sheet (112, 0).
+        ed.tick(&press(CANVAS.0, CANVAS.1), &mut a);
+        assert_eq!(a.sprites.get(112, 0), 7);
+    }
+
+    #[test]
+    fn copy_covers_the_whole_block() {
+        use rico8_runtime::clipboard::{parse, Pasted};
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.size = 2; // 16x16 block of sprites 1,2,17,18.
+        a.sprites.set(8, 0, 5); // top-left pixel of the block.
+        a.sprites.set(23, 15, 9); // bottom-right pixel (sheet (8+15, 15)).
+        let blob = ed.copy(&a);
+        assert_eq!(ed.status.current(), Some("copied 16x16 spr 1"));
+        let Pasted::Sprites { rect, flags } = parse(&blob).unwrap() else {
+            panic!("not sprites")
+        };
+        assert_eq!((rect.w, rect.h), (16, 16));
+        assert_eq!(rect.pixels[0], 5);
+        assert_eq!(rect.pixels[16 * 16 - 1], 9);
+        // One flag byte per covered sprite (2x2 = 4).
+        assert_eq!(flags.map(|f| f.len()), Some(4));
     }
 
     #[test]
