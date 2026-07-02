@@ -20,7 +20,7 @@ const PAL: (i32, i32) = (74, 20); // 4x4 grid of 12px swatches
 const FLAGS: (i32, i32) = (76, 72); // 8 toggle dots
 const SHEET_Y: i32 = 88; // 4 rows of sprites (one page)
 const PAGE_BTNS: (i32, i32) = (104, 81); // 4 page dots
-const SIZE_BTNS: (i32, i32) = (45, 9); // four "1/2/4/8" block-size buttons
+const SIZE_BTNS: (i32, i32) = (53, 9); // four "1/2/4/8" block-size buttons
 
 // Fullscreen canvas: anchored at (8, 8), zoom chosen to fit the ~112px area.
 const FS_CANVAS: (i32, i32) = (8, 8);
@@ -37,6 +37,36 @@ enum Tool {
     Eraser,
     Fill,
     Picker,
+    /// Drag to slide the canvas window across the sheet (PICO-8's hand).
+    Pan,
+}
+
+/// The toolbar, left to right. Icons are stored by value (`Icon8` is `Copy`);
+/// each slot sits at `x = 3 + i * 10`, matching the click/hover hit tests.
+const TOOLS: [(Tool, Icon8); 5] = [
+    (Tool::Pencil, ICON_PENCIL),
+    (Tool::Eraser, ICON_ERASER),
+    (Tool::Fill, ICON_FILL),
+    (Tool::Picker, ICON_PICKER),
+    (Tool::Pan, ICON_HAND),
+];
+
+/// The x of toolbar slot `i`.
+fn tool_x(i: usize) -> i32 {
+    3 + i as i32 * 10
+}
+
+/// An in-progress pan (hand tool): the screen point grabbed on press and the
+/// window's top-left cell then, so each frame re-derives the scroll from the
+/// original anchor rather than accumulating.
+#[derive(Clone, Copy)]
+struct PanDrag {
+    /// Screen pixel grabbed on press.
+    amx: i32,
+    amy: i32,
+    /// Window top-left cell (column, row) at press time.
+    acol: i32,
+    arow: i32,
 }
 
 pub struct SpriteEditor {
@@ -52,6 +82,8 @@ pub struct SpriteEditor {
     my: i32,
     /// Transient bottom-bar message (e.g. a paste result).
     status: ui::StatusMsg,
+    /// In-progress hand-tool pan, if any.
+    pan: Option<PanDrag>,
     /// Undo/redo of the sprite sheet (last 10 edits).
     history: History<SpriteSheet>,
 }
@@ -68,6 +100,7 @@ impl SpriteEditor {
             mx: -16,
             my: -16,
             status: ui::StatusMsg::default(),
+            pan: None,
             history: History::new(),
         }
     }
@@ -159,6 +192,7 @@ impl SpriteEditor {
             Key::Char('e') => self.tool = Tool::Eraser,
             Key::Char('f') => self.tool = Tool::Fill,
             Key::Char('i') => self.tool = Tool::Picker,
+            Key::Char('h') => self.tool = Tool::Pan,
             Key::Tab => self.fullscreen = !self.fullscreen,
             _ => {}
         }
@@ -202,7 +236,39 @@ impl SpriteEditor {
                     stack.extend([(x + 1, y), (x - 1, y), (x, y + 1), (x, y - 1)]);
                 }
             }
+            // Pan is a drag gesture handled in `handle_pan`, not a per-pixel op.
+            Tool::Pan => {}
         }
+    }
+
+    /// Hand-tool drag: slide the canvas window across the sheet, grabbing a
+    /// point and dragging it so adjacent cells scroll into view (PICO-8's pan,
+    /// like the map editor's). The window is a block of cells, so panning moves
+    /// the top-left cell (`self.sprite`), clamped to keep the block on the sheet.
+    /// It never touches pixels, so it records no undo step.
+    fn handle_pan(&mut self, m: &Mouse, z: i32, over: bool) {
+        if m.left_pressed && over {
+            let (col, row) = self.origin_cell();
+            self.pan = Some(PanDrag {
+                amx: m.x,
+                amy: m.y,
+                acol: col,
+                arow: row,
+            });
+        }
+        let Some(p) = self.pan else { return };
+        if !m.left {
+            self.pan = None;
+            return;
+        }
+        // One sheet cell spans `z * 8` screen pixels; dividing the drag by that
+        // scrolls a cell each time the cursor crosses a cell-worth of distance.
+        let cell = z * 8;
+        let per_row = SPRITES_PER_ROW as i32;
+        let col = (p.acol + (p.amx - m.x).div_euclid(cell)).clamp(0, per_row - self.size);
+        let row = (p.arow + (p.amy - m.y).div_euclid(cell)).clamp(0, per_row - self.size);
+        self.sprite = (row * per_row + col) as u32;
+        self.page = self.sprite / 64;
     }
 
     pub fn tick(&mut self, mouse: &Mouse, assets: &mut Assets) {
@@ -233,7 +299,10 @@ impl SpriteEditor {
         // Canvas painting (drag-friendly), through the active view's origin/zoom.
         let (cx, cy, z) = self.canvas();
         let size = z * self.block_px();
-        if (m.left || m.right) && m.over(cx, cy, cx + size - 1, cy + size - 1) {
+        let over_canvas = m.over(cx, cy, cx + size - 1, cy + size - 1);
+        if matches!(self.tool, Tool::Pan) {
+            self.handle_pan(&m, z, over_canvas);
+        } else if (m.left || m.right) && over_canvas {
             let px = (m.x - cx) / z;
             let py = (m.y - cy) / z;
             // Fill and picker should fire once per click, not per frame.
@@ -253,11 +322,8 @@ impl SpriteEditor {
             self.color = c as u8;
         }
         // Tool icons.
-        for (i, tool) in [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Picker]
-            .iter()
-            .enumerate()
-        {
-            let x = 3 + i as i32 * 10;
+        for (i, (tool, _)) in TOOLS.iter().enumerate() {
+            let x = tool_x(i);
             if m.over(x, 9, x + 7, 17) {
                 self.tool = *tool;
             }
@@ -301,22 +367,14 @@ impl SpriteEditor {
             return;
         }
         // Tool icons.
-        let tools = [
-            (Tool::Pencil, ICON_PENCIL),
-            (Tool::Eraser, ICON_ERASER),
-            (Tool::Fill, ICON_FILL),
-            (Tool::Picker, ICON_PICKER),
-        ];
-        for (i, (tool, icon)) in tools.iter().enumerate() {
-            let x = 3 + i as i32 * 10;
+        for (i, (tool, icon)) in TOOLS.iter().enumerate() {
+            let x = tool_x(i);
             let color = if *tool == self.tool {
+                fb.rectfill(x - 1, 9, x + 8, 17, col::BLACK);
                 col::WHITE
             } else {
                 col::LAVENDER
             };
-            if *tool == self.tool {
-                fb.rectfill(x - 1, 9, x + 8, 17, col::BLACK);
-            }
             draw_icon8(fb, icon, x, 9, color);
         }
         fb.print(
@@ -488,13 +546,10 @@ impl SpriteEditor {
         if self.fullscreen {
             return None;
         }
-        [Tool::Pencil, Tool::Eraser, Tool::Fill, Tool::Picker]
-            .iter()
-            .enumerate()
-            .find_map(|(i, &tool)| {
-                let x = 3 + i as i32 * 10;
-                (self.mx >= x && self.mx <= x + 7 && self.my >= 9 && self.my <= 17).then_some(tool)
-            })
+        TOOLS.iter().enumerate().find_map(|(i, &(tool, _))| {
+            let x = tool_x(i);
+            (self.mx >= x && self.mx <= x + 7 && self.my >= 9 && self.my <= 17).then_some(tool)
+        })
     }
 
     /// The block-local pixel (0..block, 0..block) under the cursor, if any.
@@ -587,6 +642,7 @@ fn tool_label(tool: Tool) -> &'static str {
         Tool::Eraser => "Eraser (e)",
         Tool::Fill => "Fill (f)",
         Tool::Picker => "Picker (i)",
+        Tool::Pan => "Pan (h)",
     }
 }
 
@@ -599,6 +655,8 @@ const ICON_FILL: Icon8 = [
 const ICON_PICKER: Icon8 = [
     0b00000111, 0b00000111, 0b00001110, 0b00011100, 0b00111000, 0b01110000, 0b01100000, 0b00000000,
 ];
+// A grabbing hand, matching the map editor's pan tool.
+const ICON_HAND: Icon8 = [0x28, 0x2A, 0x2A, 0x3E, 0xBE, 0x7E, 0x1C, 0x00];
 
 #[cfg(test)]
 mod paste_tests {
@@ -968,6 +1026,65 @@ mod tests {
         assert_eq!(rect.pixels[16 * 16 - 1], 9);
         // One flag byte per covered sprite (2x2 = 4).
         assert_eq!(flags.map(|f| f.len()), Some(4));
+    }
+
+    // A held drag frame: button down, no fresh press edge.
+    fn held(x: i32, y: i32) -> Mouse {
+        Mouse {
+            x,
+            y,
+            left: true,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn hand_tool_is_selectable_by_key_and_icon() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.key(Key::Char('h'), Mods::default(), &mut a);
+        assert_eq!(ed.tool, Tool::Pan);
+        ed.tool = Tool::Pencil;
+        // The hand is toolbar slot 4.
+        ed.tick(&press(tool_x(4) + 1, 12), &mut a);
+        assert_eq!(ed.tool, Tool::Pan);
+    }
+
+    #[test]
+    fn pan_slides_the_window_across_the_sheet() {
+        // Size 2 -> zoom 4, so one sheet cell spans z*8 = 32 screen px.
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.size = 2;
+        ed.sprite = 34; // col 2, row 2.
+        ed.tool = Tool::Pan;
+        ed.tick(&press(CANVAS.0, CANVAS.1), &mut a); // grab the window.
+                                                     // Drag the grabbed point right one cell (32 px): the window follows the
+                                                     // hand, so the top-left cell scrolls left by one column.
+        ed.tick(&held(CANVAS.0 + 32, CANVAS.1), &mut a);
+        assert_eq!(ed.origin_cell(), (1, 2));
+        // Drag down one cell too.
+        ed.tick(&held(CANVAS.0 + 32, CANVAS.1 + 32), &mut a);
+        assert_eq!(ed.origin_cell(), (1, 1));
+    }
+
+    #[test]
+    fn pan_clamps_at_the_sheet_edge_and_touches_no_pixels() {
+        let mut ed = SpriteEditor::new();
+        let mut a = Assets::default();
+        ed.size = 2; // cell = z*8 = 32 px.
+        ed.sprite = 0; // window already at the top-left corner.
+        a.sprites.set(8, 8, 9); // a pixel that must survive the pan.
+        ed.tool = Tool::Pan;
+        ed.tick(&press(CANVAS.0, CANVAS.1), &mut a);
+        // Drag far right/down: the window can't scroll past the corner.
+        ed.tick(&held(CANVAS.0 + 96, CANVAS.1 + 96), &mut a);
+        assert_eq!(ed.origin_cell(), (0, 0), "clamped at the corner");
+        ed.tick(&release(), &mut a);
+        assert_eq!(a.sprites.get(8, 8), 9, "pan left pixels untouched");
+        // A pan records no undo step (nothing to revert).
+        ed.key(Key::Char('z'), ctrl(false), &mut a);
+        assert_eq!(a.sprites.get(8, 8), 9);
     }
 
     #[test]
